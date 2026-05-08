@@ -86,7 +86,7 @@ uv run trainite init my-experiment --model transformer --dataset string-reverse
 ### 2. Run Training
 ```bash
 cd my-experiment
-python main.py config.yaml
+uv run python main.py config.yaml
 ```
 
 ---

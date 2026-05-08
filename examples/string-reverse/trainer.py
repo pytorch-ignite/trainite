@@ -10,14 +10,14 @@ from ignite.metrics import Accuracy, Loss, RunningAverage
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
 
-from trainite.config import ProjectConfig, dump_config
-from trainite.datasets import build_string_reverse_dataloaders
-from trainite.models import build_transformer_model
+from config import ProjectConfig, dump_config
+from dataset import build_dataloaders
+from model import build_model
 
 logger = logging.getLogger(__name__)
 
 
-class PreTrainer:
+class Trainer:
     def __init__(
         self,
         config: ProjectConfig,
@@ -29,7 +29,7 @@ class PreTrainer:
         self.device = torch.device(config.trainer.device)
         torch.manual_seed(config.seed)
 
-        self.model = model or build_transformer_model(config.model)
+        self.model = model or build_model(config.model)
         self.model.to(self.device)
         self.loss_fn = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.AdamW(
@@ -37,7 +37,7 @@ class PreTrainer:
         )
 
         if train_loader is None or val_loader is None:
-            train_loader, val_loader = build_string_reverse_dataloaders(config)
+            train_loader, val_loader = build_dataloaders(config.dataset)
         self.train_loader = train_loader
         self.val_loader = val_loader
 

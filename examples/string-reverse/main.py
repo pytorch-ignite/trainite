@@ -4,8 +4,8 @@ import argparse
 import logging
 from pathlib import Path
 
-from trainite.config import default_config, load_config
-from trainite.trainers import PreTrainer
+from config import default_config, load_config
+from trainer import Trainer
 
 
 def parse_args() -> argparse.Namespace:
@@ -26,7 +26,7 @@ def main() -> None:
     args = parse_args()
     config_path = Path(args.config)
     config = load_config(config_path) if config_path.exists() else default_config()
-    trainer = PreTrainer(config)
+    trainer = Trainer(config)
     trainer.run()
 
 

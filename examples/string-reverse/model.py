@@ -5,7 +5,7 @@ import math
 import torch
 from torch import nn
 
-from trainite.config.model import TransformerModelConfig
+from config import TransformerModelConfig
 
 
 class PositionalEncoding(nn.Module):
@@ -93,5 +93,5 @@ class TransformerModel(nn.Module):
         return self.proj(x)
 
 
-def build_transformer_model(config: TransformerModelConfig) -> TransformerModel:
+def build_model(config: TransformerModelConfig) -> TransformerModel:
     return TransformerModel(config)
