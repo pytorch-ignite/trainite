@@ -10,6 +10,7 @@ dependencies = [
     "pydantic>=2",
     "PyYAML",
     "tensorboard",
+    "omegaconf>=2.3.0",
 ]
 [project.scripts]
 trainite = "trainite.cli:main"

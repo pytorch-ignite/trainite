@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel, Field
 
 from trainite.config.dataset import StringReverseDatasetConfig
@@ -17,6 +18,9 @@ class OutputConfig(BaseModel):
 
 
 class ProjectConfig(BaseModel):
+    model_name: str = "transformer"
+    dataset_name: str = "string-reverse"
+    trainer_name: str = "pretrainer"
     model: Any = Field(default_factory=TransformerModelConfig)
     dataset: Any = Field(default_factory=StringReverseDatasetConfig)
     trainer: Any = Field(default_factory=PreTrainerConfig)
@@ -32,16 +36,20 @@ def load_yaml(path: str | Path) -> dict:
     return data
 
 
-def dump_yaml(data: dict, path: str | Path) -> None:
+def dump_yaml(data: Any, path: str | Path) -> None:
     Path(path).write_text(yaml.safe_dump(data, sort_keys=False))
 
 
-def dump_config(config: ProjectConfig, path: str | Path) -> None:
-    dump_yaml(config.model_dump(by_alias=True), path)
+def dump_config(config: ProjectConfig | DictConfig, path: str | Path) -> None:
+    if hasattr(config, "model_dump"):
+        data = config.model_dump(by_alias=True)
+    else:
+        data = OmegaConf.to_container(config, resolve=True)
+    dump_yaml(data, path)
 
 
-def load_config(path: str | Path) -> ProjectConfig:
-    return ProjectConfig.model_validate(load_yaml(path))
+def load_config(path: str | Path) -> Any:
+    return OmegaConf.load(path)
 
 
 def default_config() -> ProjectConfig:

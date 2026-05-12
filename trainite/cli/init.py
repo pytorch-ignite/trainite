@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import argparse
 import inspect
 import textwrap
@@ -38,44 +36,14 @@ def _render_class_source(cls: type) -> str:
     return textwrap.dedent(inspect.getsource(cls)).strip()
 
 
-def _build_config_template(
-    model_name: str, dataset_name: str, trainer_name: str
-) -> str:
-    model_spec = get_model_spec(model_name)
-    dataset_spec = get_dataset_spec(dataset_name)
-    trainer_spec = get_trainer_spec(trainer_name)
-    model_source = textwrap.indent(_render_class_source(model_spec.config_cls), "")
-    dataset_source = textwrap.indent(_render_class_source(dataset_spec.config_cls), "")
-    trainer_source = textwrap.indent(_render_class_source(trainer_spec.config_cls), "")
+def _build_config_template() -> str:
     lines = [
-        "from __future__ import annotations",
-        "",
         "from pathlib import Path",
+        "from typing import Any",
         "",
         "import yaml",
+        "from omegaconf import OmegaConf, DictConfig",
         "from pydantic import BaseModel, Field",
-        "",
-        model_source,
-        "",
-        dataset_source,
-        "",
-        trainer_source,
-        "",
-        "",
-        "class OutputConfig(BaseModel):",
-        '    root: str = "output"',
-        f'    run_name: str = "{model_name}__{dataset_name}"',
-        "",
-        "",
-        "class ProjectConfig(BaseModel):",
-        f'    model_name: str = "{model_name}"',
-        f'    dataset_name: str = "{dataset_name}"',
-        f'    trainer_name: str = "{trainer_name}"',
-        f"    model: {model_spec.config_cls.__name__} = Field(default_factory={model_spec.config_cls.__name__})",
-        f"    dataset: {dataset_spec.config_cls.__name__} = Field(default_factory={dataset_spec.config_cls.__name__})",
-        f"    trainer: {trainer_spec.config_cls.__name__} = Field(default_factory={trainer_spec.config_cls.__name__})",
-        "    output: OutputConfig = Field(default_factory=OutputConfig)",
-        "    seed: int = 42",
         "",
         "",
         "def load_yaml(path: str | Path) -> dict:",
@@ -90,16 +58,15 @@ def _build_config_template(
         "    Path(path).write_text(yaml.safe_dump(data, sort_keys=False))",
         "",
         "",
-        "def load_config(path: str | Path) -> ProjectConfig:",
-        "    return ProjectConfig.model_validate(load_yaml(path))",
+        "def load_config(path: str | Path) -> Any:",
+        "    return OmegaConf.load(path)",
         "",
         "",
-        "def dump_config(config: ProjectConfig, path: str | Path) -> None:",
-        "    dump_yaml(config.model_dump(), path)",
+        "def dump_config(config: DictConfig, path: str | Path) -> None:",
+        "    data = OmegaConf.to_container(config, resolve=True)",
+        "    Path(path).write_text(yaml.safe_dump(data, sort_keys=False))",
         "",
         "",
-        "def default_config() -> ProjectConfig:",
-        "    return ProjectConfig()",
     ]
     return "\n".join(lines).strip() + "\n"
 
@@ -144,7 +111,7 @@ def _build_templates(
     dataset_spec = get_dataset_spec(dataset_name)
     trainer_spec = get_trainer_spec(trainer_name)
     return {
-        "config.py": _build_config_template(model_name, dataset_name, trainer_name),
+        "config.py": _build_config_template(),
         f"models/{model_spec.name}.py": _render_template(
             model_spec.implementation_path,
             [
@@ -204,7 +171,7 @@ def _build_templates(
             [],
         ),
         "main.py": _render_template(
-            PROJECT_ROOT / "main.py",
+            PROJECT_ROOT / "trainite/main.py",
             [
                 (
                     "from trainite.config import default_config, load_config",
@@ -289,7 +256,9 @@ def init_project(args: argparse.Namespace) -> None:
 
     project_name = project_dir.name
 
-    templates = _build_templates(project_name, model_name, dataset_name, defaults.trainer_name)
+    templates = _build_templates(
+        project_name, model_name, dataset_name, defaults.trainer_name
+    )
     dump_config(starter_config, project_dir / "config.yaml")
     for filename, content in templates.items():
         _write_file(project_dir / filename, content, args.force)

@@ -5,10 +5,11 @@ from pathlib import Path
 import torch
 from ignite.engine import Engine, Events
 from ignite.metrics import Accuracy, Loss, RunningAverage
+from omegaconf import OmegaConf
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
 
-from trainite.config import ProjectConfig, dump_config
+from trainite.config import dump_config
 from trainite.utils import instantiate
 
 logger = logging.getLogger(__name__)
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 class PreTrainer:
     def __init__(
         self,
-        config: ProjectConfig,
+        config,
         device: str | torch.device = "cpu",
         learning_rate: float = 1e-3,
         epochs: int = 3,
@@ -188,11 +189,14 @@ class PreTrainer:
         )
 
     def _save_state(self, path: Path, epoch: int, score: float | None = None) -> None:
+
+        config_data = OmegaConf.to_container(self.config, resolve=True)
+
         payload = {
             "epoch": epoch,
             "model_state": self.model.state_dict(),
             "optimizer_state": self.optimizer.state_dict(),
-            "config": self.config.model_dump(),
+            "config": config_data,
             "best_score": self.best_score,
         }
         if score is not None:
@@ -211,7 +215,8 @@ class PreTrainer:
 
     def run(self) -> None:
         logger.info("starting run in %s", self.run_dir)
-        self.writer.add_text("config", str(self.config.model_dump()))
+        config_data = OmegaConf.to_container(self.config, resolve=True)
+        self.writer.add_text("config", str(config_data))
         self.engine.run(self.train_loader, max_epochs=self.epochs)
         self.writer.flush()
         self.writer.close()
