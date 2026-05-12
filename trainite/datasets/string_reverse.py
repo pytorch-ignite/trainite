@@ -28,30 +28,37 @@ class StringReverseDataset(Dataset):
 
 
 def build_string_reverse_dataloaders(
-    config: StringReverseDatasetConfig,
+    vocab_size: int = 32,
+    train_size: int = 256,
+    val_size: int = 64,
+    batch_size: int = 32,
+    seq_len: int = 16,
+    num_workers: int = 0,
+    seed: int = 7,
+    **kwargs,
 ) -> tuple[DataLoader, DataLoader]:
     train_dataset = StringReverseDataset(
-        size=config.train_size,
-        seq_len=config.seq_len,
-        vocab_size=config.vocab_size,
-        seed=config.seed,
+        size=train_size,
+        seq_len=seq_len,
+        vocab_size=vocab_size,
+        seed=seed,
     )
     val_dataset = StringReverseDataset(
-        size=config.val_size,
-        seq_len=config.seq_len,
-        vocab_size=config.vocab_size,
-        seed=config.seed + 1,
+        size=val_size,
+        seq_len=seq_len,
+        vocab_size=vocab_size,
+        seed=seed + 1,
     )
     train_loader = DataLoader(
         train_dataset,
-        batch_size=config.batch_size,
+        batch_size=batch_size,
         shuffle=True,
-        num_workers=config.num_workers,
+        num_workers=num_workers,
     )
     val_loader = DataLoader(
         val_dataset,
-        batch_size=config.batch_size,
+        batch_size=batch_size,
         shuffle=False,
-        num_workers=config.num_workers,
+        num_workers=num_workers,
     )
     return train_loader, val_loader

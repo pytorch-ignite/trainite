@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class TransformerModelConfig(BaseModel):
+    target: str = Field(
+        default="trainite.models.transformer.build_transformer_model", alias="_target_"
+    )
     vocab_size: int = 32
     hidden_size: int = 64
     num_layers: int = 2

@@ -132,18 +132,20 @@ def _project_directory(raw_project_dir: str, force: bool) -> Path:
 def _write_file(path: Path, content: str, force: bool) -> None:
     if path.exists() and not force:
         raise FileExistsError(f"{path} already exists; pass --force to overwrite it")
+    if path.parent:
+        path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
 
 
 def _build_templates(
-    model_name: str, dataset_name: str, trainer_name: str
+    project_name: str, model_name: str, dataset_name: str, trainer_name: str
 ) -> dict[str, str]:
     model_spec = get_model_spec(model_name)
     dataset_spec = get_dataset_spec(dataset_name)
     trainer_spec = get_trainer_spec(trainer_name)
     return {
         "config.py": _build_config_template(model_name, dataset_name, trainer_name),
-        "model.py": _render_template(
+        f"models/{model_spec.name}.py": _render_template(
             model_spec.implementation_path,
             [
                 (
@@ -156,12 +158,12 @@ def _build_templates(
                 ),
             ],
         ),
-        "dataset.py": _render_template(
+        f"dataset/{dataset_spec.name}.py": _render_template(
             dataset_spec.implementation_path,
             [
                 (
                     f"from trainite.config.dataset import {dataset_spec.config_cls.__name__}",
-                    f"from config import {dataset_spec.config_cls.__name__}",
+                    f"from {project_name}.config import {dataset_spec.config_cls.__name__}",
                 ),
                 (
                     dataset_spec.builder_symbol,
@@ -178,20 +180,28 @@ def _build_templates(
                 ),
                 (
                     f"from trainite.datasets import {dataset_spec.builder_symbol}",
-                    "from dataset import build_dataloaders",
+                    f"from dataset.{dataset_spec.name} import build_dataloaders",
                 ),
                 (
                     f"from trainite.models import {model_spec.builder_symbol}",
-                    "from model import build_model",
+                    f"from models.{model_spec.name} import build_model",
                 ),
                 ("class PreTrainer:", "class Trainer:"),
-                (f"{model_spec.builder_symbol}(config.model)", "build_model(config.model)"),
+                (
+                    f"{model_spec.builder_symbol}(config.model)",
+                    "build_model(config.model)",
+                ),
                 (
                     f"{dataset_spec.builder_symbol}(config)",
                     "build_dataloaders(config.dataset)",
                 ),
                 ("PreTrainer", "Trainer"),
+                ("trainite.utils", "utils"),
             ],
+        ),
+        "utils.py": _render_template(
+            PROJECT_ROOT / "trainite/utils.py",
+            [],
         ),
         "main.py": _render_template(
             PROJECT_ROOT / "main.py",
@@ -274,12 +284,12 @@ def init_project(args: argparse.Namespace) -> None:
         )
 
     starter_config = default_config()
-    starter_config.model_name = model_name
-    starter_config.dataset_name = dataset_name
     starter_config.output.root = output_root
     starter_config.output.run_name = run_name
 
-    templates = _build_templates(model_name, dataset_name, defaults.trainer_name)
+    project_name = project_dir.name
+
+    templates = _build_templates(project_name, model_name, dataset_name, defaults.trainer_name)
     dump_config(starter_config, project_dir / "config.yaml")
     for filename, content in templates.items():
         _write_file(project_dir / filename, content, args.force)

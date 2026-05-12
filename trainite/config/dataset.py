@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class StringReverseDatasetConfig(BaseModel):
+    target: str = Field(
+        default="trainite.datasets.string_reverse.build_string_reverse_dataloaders",
+        alias="_target_",
+    )
     vocab_size: int = 32
     train_size: int = 256
     val_size: int = 64

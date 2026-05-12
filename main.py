@@ -22,7 +22,7 @@ def main() -> None:
     )
     # Silence Ignite internal logs
     logging.getLogger("ignite.engine").setLevel(logging.WARNING)
-    
+
     args = parse_args()
     config_path = Path(args.config)
     config = load_config(config_path) if config_path.exists() else default_config()

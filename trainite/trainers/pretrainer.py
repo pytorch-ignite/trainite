@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -11,8 +9,7 @@ from torch import nn
 from torch.utils.tensorboard import SummaryWriter
 
 from trainite.config import ProjectConfig, dump_config
-from trainite.datasets import build_string_reverse_dataloaders
-from trainite.models import build_transformer_model
+from trainite.utils import instantiate
 
 logger = logging.getLogger(__name__)
 
@@ -21,23 +18,31 @@ class PreTrainer:
     def __init__(
         self,
         config: ProjectConfig,
+        device: str | torch.device = "cpu",
+        learning_rate: float = 1e-3,
+        epochs: int = 3,
+        log_every_steps: int = 10,
+        grad_clip_norm: float | None = None,
         model: nn.Module | None = None,
         train_loader=None,
         val_loader=None,
+        **kwargs,
     ) -> None:
         self.config = config
-        self.device = torch.device(config.trainer.device)
+        self.device = device
+        self.epochs = epochs
+        self.log_every_steps = log_every_steps
+        self.grad_clip_norm = grad_clip_norm
+
         torch.manual_seed(config.seed)
 
-        self.model = model or build_transformer_model(config.model)
+        self.model = model or instantiate(config.model)
         self.model.to(self.device)
         self.loss_fn = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.AdamW(
-            self.model.parameters(), lr=config.trainer.learning_rate
-        )
+        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=learning_rate)
 
         if train_loader is None or val_loader is None:
-            train_loader, val_loader = build_string_reverse_dataloaders(config)
+            train_loader, val_loader = instantiate(config.dataset)
         self.train_loader = train_loader
         self.val_loader = val_loader
 
@@ -90,10 +95,8 @@ class PreTrainer:
         loss = self.loss_fn(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
         loss.backward()
 
-        if self.config.trainer.grad_clip_norm is not None:
-            torch.nn.utils.clip_grad_norm_(
-                self.model.parameters(), self.config.trainer.grad_clip_norm
-            )
+        if self.grad_clip_norm is not None:
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
 
         self.optimizer.step()
         return {
@@ -136,7 +139,7 @@ class PreTrainer:
 
     def _attach_handlers(self) -> None:
         self.engine.add_event_handler(
-            Events.ITERATION_COMPLETED(every=self.config.trainer.log_every_steps),
+            Events.ITERATION_COMPLETED(every=self.log_every_steps),
             self._log_training,
         )
         self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
@@ -158,7 +161,7 @@ class PreTrainer:
     def _run_evaluations(self, engine: Engine) -> None:
         logger.info("Evaluating on training set...")
         self.train_evaluator.run(self.train_loader)
-        
+
         logger.info("Evaluating on validation set...")
         self.val_evaluator.run(self.val_loader)
 
@@ -209,6 +212,6 @@ class PreTrainer:
     def run(self) -> None:
         logger.info("starting run in %s", self.run_dir)
         self.writer.add_text("config", str(self.config.model_dump()))
-        self.engine.run(self.train_loader, max_epochs=self.config.trainer.epochs)
+        self.engine.run(self.train_loader, max_epochs=self.epochs)
         self.writer.flush()
         self.writer.close()

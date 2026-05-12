@@ -1,7 +1,7 @@
 from __future__ import annotations
-from typing import Any
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field
@@ -17,9 +17,6 @@ class OutputConfig(BaseModel):
 
 
 class ProjectConfig(BaseModel):
-    model_name: str = "transformer"
-    dataset_name: str = "string-reverse"
-    trainer_name: str = "pretrainer"
     model: Any = Field(default_factory=TransformerModelConfig)
     dataset: Any = Field(default_factory=StringReverseDatasetConfig)
     trainer: Any = Field(default_factory=PreTrainerConfig)
@@ -40,7 +37,7 @@ def dump_yaml(data: dict, path: str | Path) -> None:
 
 
 def dump_config(config: ProjectConfig, path: str | Path) -> None:
-    dump_yaml(config.model_dump(), path)
+    dump_yaml(config.model_dump(by_alias=True), path)
 
 
 def load_config(path: str | Path) -> ProjectConfig:
