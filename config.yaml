@@ -27,7 +27,7 @@ trainer:
   epochs: 5
   device: cpu
   learning_rate: 0.001
-  log_every_steps: 10
+  log_every_steps: 8
   grad_clip_norm: 1.0
 
 output:

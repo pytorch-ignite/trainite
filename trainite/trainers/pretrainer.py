@@ -7,15 +7,14 @@ from pathlib import Path
 import torch
 from ignite.engine import Engine, Events
 from ignite.metrics import Accuracy, Loss, RunningAverage
+from ignite.handlers.fbresearch_logger import FBResearchLogger
+from ignite.utils import setup_logger
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
 
 from trainite.config import ProjectConfig, dump_config
 from trainite.datasets import build_string_reverse_dataloaders
 from trainite.models import build_transformer_model
-
-logger = logging.getLogger(__name__)
-
 
 class PreTrainer:
     def __init__(
@@ -56,6 +55,12 @@ class PreTrainer:
 
         self._attach_metrics()
         self._attach_handlers()
+
+        self.logger = setup_logger("trainer", level=logging.INFO)
+        self._setup_file_logging()
+        self.train_fb_logger = FBResearchLogger(logger=self.logger, show_output=True)
+        self.train_fb_logger.attach(self.engine, name="Train", every=self.config.trainer.log_every_steps, optimizer=self.optimizer, output_transform=lambda output: {"loss": output["loss"].item()})
+
 
     def _make_run_dir(self) -> Path:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -154,14 +159,13 @@ class PreTrainer:
         epoch = engine.state.epoch
         iteration = engine.state.iteration
         loss = float(metrics["loss"])
-        logger.info("epoch=%s iteration=%s train_loss=%.4f", epoch, iteration, loss)
         self.writer.add_scalar("train/loss", loss, iteration)
 
     def _run_evaluations(self, engine: Engine) -> None:
-        logger.info("Evaluating on training set...")
+        self.logger.info("Evaluating on training set...")
         self.train_evaluator.run(self.train_loader)
         
-        logger.info("Evaluating on validation set...")
+        self.logger.info("Evaluating on validation set...")
         self.val_evaluator.run(self.val_loader)
 
         train_metrics = self.train_evaluator.state.metrics
@@ -177,7 +181,7 @@ class PreTrainer:
             "eval/val_token_accuracy", val_metrics["token_accuracy"], epoch
         )
 
-        logger.info(
+        self.logger.info(
             "epoch=%s train_loss=%.4f train_acc=%.4f val_loss=%.4f val_acc=%.4f",
             epoch,
             train_metrics["loss"],
@@ -206,10 +210,20 @@ class PreTrainer:
         if score > self.best_score:
             self.best_score = score
             self._save_state(self.best_path, engine.state.epoch, score)
-            logger.info("saved best checkpoint score=%.4f", score)
+            self.logger.info("saved best checkpoint score=%.4f", score)
+
+    def _setup_file_logging(self) -> None:
+        handler = logging.FileHandler(self.run_dir / "output.log")
+
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+        )
+
+        self.logger.addHandler(handler)
+
 
     def run(self) -> None:
-        logger.info("starting run in %s", self.run_dir)
+        self.logger.info("starting run in %s", self.run_dir)
         self.writer.add_text("config", str(self.config.model_dump()))
         self.engine.run(self.train_loader, max_epochs=self.config.trainer.epochs)
         self.writer.flush()
