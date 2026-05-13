@@ -1,5 +1,6 @@
 from trainite.datasets.string_reverse import (
-    StringReverseDataset, build_string_reverse_dataloaders
+    StringReverseDataset,
+    build_string_reverse_dataloaders,
 )
 
 __all__ = [

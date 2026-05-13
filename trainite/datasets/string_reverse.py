@@ -1,8 +1,6 @@
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from trainite.config.dataset import StringReverseDatasetConfig
-
 
 class StringReverseDataset(Dataset):
     def __init__(self, size: int, seq_len: int, vocab_size: int, seed: int) -> None:

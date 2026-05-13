@@ -12,8 +12,3 @@ class TransformerModelConfig(BaseModel):
     feedforward_dim: int = 128
     dropout: float = 0.1
     max_seq_len: int = 128
-
-
-MODEL_CONFIGS: dict[str, type[BaseModel]] = {
-    "transformer": TransformerModelConfig,
-}

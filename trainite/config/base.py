@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, ListConfig, OmegaConf
 from pydantic import BaseModel, Field
 
 from trainite.config.dataset import StringReverseDatasetConfig
@@ -46,7 +46,7 @@ def dump_config(config: ProjectConfig | DictConfig, path: str | Path) -> None:
     dump_yaml(data, path)
 
 
-def load_config(path: str | Path) -> Any:
+def load_config(path: str | Path) -> DictConfig | ListConfig:
     return OmegaConf.load(path)
 
 

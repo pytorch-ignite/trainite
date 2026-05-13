@@ -3,8 +3,6 @@ import math
 import torch
 from torch import nn
 
-from trainite.config.model import TransformerModelConfig
-
 
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model: int, max_len: int, dropout: float = 0.1) -> None:

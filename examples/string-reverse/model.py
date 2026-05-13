@@ -9,7 +9,6 @@ from config import TransformerModelConfig
 
 
 class PositionalEncoding(nn.Module):
-
     def __init__(self, d_model: int, max_len: int, dropout: float = 0.1) -> None:
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
@@ -22,7 +21,7 @@ class PositionalEncoding(nn.Module):
         )
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
-        self.register_buffer("pe", pe.unsqueeze(0)) 
+        self.register_buffer("pe", pe.unsqueeze(0))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.pe[:, : x.size(1)]
@@ -30,7 +29,6 @@ class PositionalEncoding(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-
     def __init__(
         self,
         d_model: int,
@@ -63,7 +61,6 @@ class TransformerBlock(nn.Module):
 
 
 class TransformerModel(nn.Module):
-
     def __init__(self, config: TransformerModelConfig) -> None:
         super().__init__()
         self.embedding = nn.Embedding(config.vocab_size, config.hidden_size)

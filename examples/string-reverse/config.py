@@ -5,6 +5,7 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field
 
+
 class TransformerModelConfig(BaseModel):
     vocab_size: int = 32
     hidden_size: int = 64
@@ -14,6 +15,7 @@ class TransformerModelConfig(BaseModel):
     dropout: float = 0.1
     max_seq_len: int = 128
 
+
 class StringReverseDatasetConfig(BaseModel):
     vocab_size: int = 32
     train_size: int = 256
@@ -22,6 +24,7 @@ class StringReverseDatasetConfig(BaseModel):
     seq_len: int = 16
     num_workers: int = 0
     seed: int = 7
+
 
 class PreTrainerConfig(BaseModel):
     device: str = "cpu"
@@ -42,7 +45,9 @@ class ProjectConfig(BaseModel):
     dataset_name: str = "string-reverse"
     trainer_name: str = "pretrainer"
     model: TransformerModelConfig = Field(default_factory=TransformerModelConfig)
-    dataset: StringReverseDatasetConfig = Field(default_factory=StringReverseDatasetConfig)
+    dataset: StringReverseDatasetConfig = Field(
+        default_factory=StringReverseDatasetConfig
+    )
     trainer: PreTrainerConfig = Field(default_factory=PreTrainerConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
     seed: int = 42

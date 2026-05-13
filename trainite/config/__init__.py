@@ -7,15 +7,18 @@ from trainite.config.base import (
     load_config,
     load_yaml,
 )
-from trainite.config.dataset import DATASET_CONFIGS, StringReverseDatasetConfig
-from trainite.config.model import MODEL_CONFIGS, TransformerModelConfig
+from trainite.config.dataset import StringReverseDatasetConfig
+from trainite.config.model import TransformerModelConfig
 from trainite.config.registry import (
+    DATASET_CONFIGS,
+    MODEL_CONFIGS,
     REGISTRY,
+    TRAINER_CONFIGS,
     get_dataset_spec,
     get_model_spec,
     get_trainer_spec,
 )
-from trainite.config.trainer import TRAINER_CONFIGS, PreTrainerConfig
+from trainite.config.trainer import PreTrainerConfig
 
 __all__ = [
     "ProjectConfig",

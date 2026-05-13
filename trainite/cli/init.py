@@ -42,7 +42,7 @@ def _build_config_template() -> str:
         "from typing import Any",
         "",
         "import yaml",
-        "from omegaconf import OmegaConf, DictConfig",
+        "from omegaconf import OmegaConf, DictConfig, ListConfig",
         "from pydantic import BaseModel, Field",
         "",
         "",
@@ -58,7 +58,7 @@ def _build_config_template() -> str:
         "    Path(path).write_text(yaml.safe_dump(data, sort_keys=False))",
         "",
         "",
-        "def load_config(path: str | Path) -> Any:",
+        "def load_config(path: str | Path) -> DictConfig | ListConfig:",
         "    return OmegaConf.load(path)",
         "",
         "",
@@ -114,57 +114,15 @@ def _build_templates(
         "config.py": _build_config_template(),
         f"models/{model_spec.name}.py": _render_template(
             model_spec.implementation_path,
-            [
-                (
-                    f"from trainite.config.model import {model_spec.config_cls.__name__}",
-                    f"from config import {model_spec.config_cls.__name__}",
-                ),
-                (
-                    model_spec.builder_symbol,
-                    "build_model",
-                ),
-            ],
+            model_spec.template_replacements,
         ),
         f"dataset/{dataset_spec.name}.py": _render_template(
             dataset_spec.implementation_path,
-            [
-                (
-                    f"from trainite.config.dataset import {dataset_spec.config_cls.__name__}",
-                    f"from {project_name}.config import {dataset_spec.config_cls.__name__}",
-                ),
-                (
-                    dataset_spec.builder_symbol,
-                    "build_dataloaders",
-                ),
-            ],
+            dataset_spec.template_replacements,
         ),
         "trainer.py": _render_template(
             trainer_spec.implementation_path,
-            [
-                (
-                    "from trainite.config import ProjectConfig, dump_config",
-                    "from config import ProjectConfig, dump_config",
-                ),
-                (
-                    f"from trainite.datasets import {dataset_spec.builder_symbol}",
-                    f"from dataset.{dataset_spec.name} import build_dataloaders",
-                ),
-                (
-                    f"from trainite.models import {model_spec.builder_symbol}",
-                    f"from models.{model_spec.name} import build_model",
-                ),
-                ("class PreTrainer:", "class Trainer:"),
-                (
-                    f"{model_spec.builder_symbol}(config.model)",
-                    "build_model(config.model)",
-                ),
-                (
-                    f"{dataset_spec.builder_symbol}(config)",
-                    "build_dataloaders(config.dataset)",
-                ),
-                ("PreTrainer", "Trainer"),
-                ("trainite.utils", "utils"),
-            ],
+            trainer_spec.template_replacements,
         ),
         "utils.py": _render_template(
             PROJECT_ROOT / "trainite/utils.py",
@@ -179,9 +137,12 @@ def _build_templates(
                 ),
                 (
                     "from trainite.trainers import PreTrainer",
-                    "from trainer import Trainer",
+                    f"from trainer import {trainer_spec.implementation_symbol}",
                 ),
-                ("trainer = PreTrainer(config)", "trainer = Trainer(config)"),
+                (
+                    "trainer = PreTrainer(config)",
+                    f"trainer = {trainer_spec.implementation_symbol}(config)",
+                ),
             ],
         ),
     }
@@ -256,9 +217,22 @@ def init_project(args: argparse.Namespace) -> None:
 
     project_name = project_dir.name
 
+    # Build templates for the starter project
     templates = _build_templates(
         project_name, model_name, dataset_name, defaults.trainer_name
     )
+
+    model_spec = get_model_spec(model_name)
+    dataset_spec = get_dataset_spec(dataset_name)
+
+    # Update config to point to the correct builder functions for the model and dataset
+    starter_config.model.target = (
+        f"models.{model_spec.name}.{model_spec.builder_symbol}"
+    )
+    starter_config.dataset.target = (
+        f"dataset.{dataset_spec.name}.{dataset_spec.builder_symbol}"
+    )
+
     dump_config(starter_config, project_dir / "config.yaml")
     for filename, content in templates.items():
         _write_file(project_dir / filename, content, args.force)

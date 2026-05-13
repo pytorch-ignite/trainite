@@ -158,7 +158,7 @@ class Trainer:
     def _run_evaluations(self, engine: Engine) -> None:
         logger.info("Evaluating on training set...")
         self.train_evaluator.run(self.train_loader)
-        
+
         logger.info("Evaluating on validation set...")
         self.val_evaluator.run(self.val_loader)
 

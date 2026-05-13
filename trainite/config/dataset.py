@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from pydantic import BaseModel, Field
 
 
@@ -15,8 +13,3 @@ class StringReverseDatasetConfig(BaseModel):
     seq_len: int = 16
     num_workers: int = 0
     seed: int = 7
-
-
-DATASET_CONFIGS: dict[str, type[BaseModel]] = {
-    "string-reverse": StringReverseDatasetConfig,
-}
