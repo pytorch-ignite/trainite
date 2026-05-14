@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Any
 
+import torch
 import yaml
 from omegaconf import OmegaConf
 from pydantic import BaseModel, ConfigDict, Field
@@ -18,6 +19,8 @@ class ComponentConfig(BaseModel):
 
 class TrainerConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
+    learning_rate: float = 1e-3
+    log_every_steps: int = 10
 
 
 class ProjectConfig(BaseModel):
@@ -26,7 +29,7 @@ class ProjectConfig(BaseModel):
     trainer: TrainerConfig
     output: OutputConfig
     seed: int = 42
-    lr: float = 1e-3
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def load_yaml(path: str | Path) -> dict:

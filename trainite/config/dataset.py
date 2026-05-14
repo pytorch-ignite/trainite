@@ -14,4 +14,3 @@ class StringReverseDatasetConfig(ComponentConfig):
     batch_size: int = 32
     seq_len: int = 16
     num_workers: int = 0
-    seed: int = 7

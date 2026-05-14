@@ -20,10 +20,10 @@ class PreTrainer:
     def __init__(
         self,
         config: ProjectConfig,
-        device: str | torch.device = "cpu",
-        learning_rate: float = 1e-3,
-        epochs: int = 3,
-        log_every_steps: int = 10,
+        device: str | torch.device | None = None,
+        learning_rate: float | None = None,
+        epochs: int | None = None,
+        log_every_steps: None = None,
         grad_clip_norm: float | None = None,
         model: nn.Module | None = None,
         train_loader=None,
@@ -31,10 +31,10 @@ class PreTrainer:
         **kwargs,
     ) -> None:
         self.config = config
-        self.device = device
-        self.epochs = epochs
-        self.log_every_steps = log_every_steps
-        self.grad_clip_norm = grad_clip_norm
+        self.device = device or config.device
+        self.epochs = epochs or config.trainer.epochs
+        self.log_every_steps = log_every_steps or config.trainer.log_every_steps
+        self.grad_clip_norm = grad_clip_norm or config.trainer.grad_clip_norm
 
         torch.manual_seed(config.seed)
 
@@ -42,7 +42,7 @@ class PreTrainer:
         self.model.to(self.device)
         self.loss_fn = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.AdamW(
-            self.model.parameters(), lr=learning_rate or config.lr
+            self.model.parameters(), lr=learning_rate or config.trainer.learning_rate
         )
 
         if train_loader is None or val_loader is None:
