@@ -1,7 +1,7 @@
-from pydantic import BaseModel
+from trainite.config.base import TrainerConfig
 
 
-class PreTrainerConfig(BaseModel):
+class PreTrainerConfig(TrainerConfig):
     device: str = "cpu"
     type: str = "pre"
     epochs: int = 3

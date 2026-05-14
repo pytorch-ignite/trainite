@@ -8,10 +8,9 @@ from ignite.engine import Engine, Events
 from ignite.handlers import EarlyStopping, ModelCheckpoint
 from ignite.handlers.tensorboard_logger import OptimizerParamsHandler, TensorboardLogger
 from ignite.metrics import Accuracy, Loss, RunningAverage
-from omegaconf import DictConfig, OmegaConf
 from torch import nn
 
-from trainite.config import dump_config
+from trainite.config import ProjectConfig, dump_config
 from trainite.utils import instantiate
 
 logger = logging.getLogger(__name__)
@@ -20,7 +19,7 @@ logger = logging.getLogger(__name__)
 class PreTrainer:
     def __init__(
         self,
-        config: DictConfig,
+        config: ProjectConfig,
         device: str | torch.device = "cpu",
         learning_rate: float = 1e-3,
         epochs: int = 3,
@@ -42,7 +41,9 @@ class PreTrainer:
         self.model = model or instantiate(config.model)
         self.model.to(self.device)
         self.loss_fn = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=learning_rate)
+        self.optimizer = torch.optim.AdamW(
+            self.model.parameters(), lr=learning_rate or config.lr
+        )
 
         if train_loader is None or val_loader is None:
             train_loader, val_loader = instantiate(config.dataset)
@@ -251,7 +252,9 @@ class PreTrainer:
             self._attach_handlers()
 
         logger.info("starting run in %s", self.run_dir)
-        config_data = OmegaConf.to_container(self.config, resolve=True)
+        config_data = self.config.model_dump(
+            by_alias=True, polymorphic_serialization=True
+        )
         if "tensorboard" in self.handlers:
             self.handlers["tensorboard"].writer.add_text("config", str(config_data))
 

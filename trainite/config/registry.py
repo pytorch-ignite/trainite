@@ -62,8 +62,8 @@ TRAINER_SPECS = {
         builder_symbol="PreTrainer",
         template_replacements=[
             (
-                "from trainite.config import ProjectConfig, dump_config",
-                "from config import ProjectConfig, dump_config",
+                "trainite.config",
+                "config",
             ),
             ("trainite.utils", "utils"),
         ],

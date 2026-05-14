@@ -1,7 +1,9 @@
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from trainite.config.base import ComponentConfig
 
 
-class TransformerModelConfig(BaseModel):
+class TransformerModelConfig(ComponentConfig):
     target: str = Field(
         default="trainite.models.transformer.build_transformer_model", alias="_target_"
     )

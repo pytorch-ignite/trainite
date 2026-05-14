@@ -1,7 +1,9 @@
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from trainite.config.base import ComponentConfig
 
 
-class StringReverseDatasetConfig(BaseModel):
+class StringReverseDatasetConfig(ComponentConfig):
     target: str = Field(
         default="trainite.datasets.string_reverse.build_string_reverse_dataloaders",
         alias="_target_",

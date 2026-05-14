@@ -1,20 +1,18 @@
-from __future__ import annotations
-
 import importlib
 from typing import Any
 
-from omegaconf import DictConfig, OmegaConf
+from trainite.config import ComponentConfig
 
 
-def instantiate(config: DictConfig, **kwargs) -> Any:
+def instantiate(config: ComponentConfig, **kwargs) -> Any:
     """
     Instantiates a class or calls a function defined by a `_target_` key
     using an OmegaConf DictConfig.
     """
-    if isinstance(config, DictConfig):
-        config_dict = OmegaConf.to_container(config, resolve=True)
+    if isinstance(config, ComponentConfig):
+        config_dict = config.model_dump(by_alias=True, polymorphic_serialization=True)
     else:
-        config_dict = config
+        raise ValueError("Config must be an instance of ComponentConfig")
 
     if not isinstance(config_dict, dict) or "_target_" not in config_dict:
         raise ValueError("Config must be a dict containing a '_target_' key")

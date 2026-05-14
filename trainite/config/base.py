@@ -2,28 +2,31 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from omegaconf import DictConfig, ListConfig, OmegaConf
-from pydantic import BaseModel, Field
-
-from trainite.config.dataset import StringReverseDatasetConfig
-from trainite.config.model import TransformerModelConfig
-from trainite.config.trainer import PreTrainerConfig
+from omegaconf import OmegaConf
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class OutputConfig(BaseModel):
-    root: str = "output"
-    run_name: str = "dummy-pretrain"
+    root: str
+    run_name: str
+
+
+class ComponentConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    target: str = Field(alias="_target_")
+
+
+class TrainerConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
 
 
 class ProjectConfig(BaseModel):
-    model_name: str = "transformer"
-    dataset_name: str = "string-reverse"
-    trainer_name: str = "pretrainer"
-    model: Any = Field(default_factory=TransformerModelConfig)
-    dataset: Any = Field(default_factory=StringReverseDatasetConfig)
-    trainer: Any = Field(default_factory=PreTrainerConfig)
-    output: OutputConfig = Field(default_factory=OutputConfig)
+    model: ComponentConfig
+    dataset: ComponentConfig
+    trainer: TrainerConfig
+    output: OutputConfig
     seed: int = 42
+    lr: float = 1e-3
 
 
 def load_yaml(path: str | Path) -> dict:
@@ -38,17 +41,11 @@ def dump_yaml(data: Any, path: str | Path) -> None:
     Path(path).write_text(yaml.safe_dump(data, sort_keys=False))
 
 
-def dump_config(config: ProjectConfig | DictConfig, path: str | Path) -> None:
-    if hasattr(config, "model_dump"):
-        data = config.model_dump(by_alias=True)
-    else:
-        data = OmegaConf.to_container(config, resolve=True)
+def dump_config(config: ProjectConfig, path: str | Path) -> None:
+    data = config.model_dump(by_alias=True, polymorphic_serialization=True)
     dump_yaml(data, path)
 
 
-def load_config(path: str | Path) -> DictConfig | ListConfig:
-    return OmegaConf.load(path)
-
-
-def default_config() -> ProjectConfig:
-    return ProjectConfig()
+def load_config(path: str | Path) -> ProjectConfig:
+    raw_conf = OmegaConf.load(path)
+    return ProjectConfig.model_validate(raw_conf)

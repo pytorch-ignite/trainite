@@ -1,7 +1,7 @@
 from trainite.config.base import (
+    ComponentConfig,
     OutputConfig,
     ProjectConfig,
-    default_config,
     dump_config,
     dump_yaml,
     load_config,
@@ -26,7 +26,7 @@ __all__ = [
     "PreTrainerConfig",
     "StringReverseDatasetConfig",
     "TransformerModelConfig",
-    "default_config",
+    "ComponentConfig",
     "dump_config",
     "dump_yaml",
     "get_dataset_spec",
