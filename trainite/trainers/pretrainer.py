@@ -23,7 +23,7 @@ class PreTrainer:
         device: str | torch.device | None = None,
         learning_rate: float | None = None,
         epochs: int | None = None,
-        log_every_steps: None = None,
+        log_every_steps: int | None = None,
         grad_clip_norm: float | None = None,
         model: nn.Module | None = None,
         train_loader=None,
