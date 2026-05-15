@@ -1,7 +1,6 @@
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import torch
 from ignite.engine import Engine, Events
@@ -50,7 +49,7 @@ class PreTrainer:
         self.train_loader = train_loader
         self.val_loader = val_loader
 
-        self.run_dir: Optional[Path] = None
+        self.run_dir: Path | None = None
         self.handlers: dict = {}
 
         self.engine = Engine(self._train_step)

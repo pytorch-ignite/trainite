@@ -40,7 +40,7 @@ def load_yaml(path: str | Path) -> dict:
     return data
 
 
-def dump_yaml(data: Any, path: str | Path) -> None:
+def dump_yaml(data: dict["str", Any], path: str | Path) -> None:
     Path(path).write_text(yaml.safe_dump(data, sort_keys=False))
 
 

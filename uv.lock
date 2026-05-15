@@ -699,6 +699,15 @@ wheels = [
 ]
 
 [[package]]
+name = "tomlkit"
+version = "0.15.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/51/db/03eaf4331631ef6b27d6e3c9b68c54dc6f0d63d87201fed600cc409307fd/tomlkit-0.15.0.tar.gz", hash = "sha256:7d1a9ecba3086638211b13814ea79c90dd54dd11993564376f3aa92271f5c7a3", size = 161875, upload-time = "2026-05-10T07:38:22.245Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6a/43/8bd850ee71a191bf072e31302c73a66be413fecdd98fdcd111ecbcce13ca/tomlkit-0.15.0-py3-none-any.whl", hash = "sha256:4dbc8f0fc024412b57ced8757ac7461305126a648ff8c2c807fcb8e133a78738", size = 41328, upload-time = "2026-05-10T07:38:23.517Z" },
+]
+
+[[package]]
 name = "torch"
 version = "2.11.0"
 source = { registry = "https://pypi.org/simple" }
@@ -743,21 +752,43 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "omegaconf" },
+    { name = "packaging" },
     { name = "pydantic" },
-    { name = "pytorch-ignite" },
     { name = "pyyaml" },
+    { name = "tomlkit" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytorch-ignite" },
     { name = "tensorboard" },
     { name = "torch" },
+]
+required = [
+    { name = "omegaconf" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "omegaconf", specifier = ">=2.3.0" },
+    { name = "packaging", specifier = ">=26.2" },
     { name = "pydantic", specifier = ">=2" },
-    { name = "pytorch-ignite" },
     { name = "pyyaml" },
+    { name = "tomlkit", specifier = ">=0.15.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytorch-ignite" },
     { name = "tensorboard" },
     { name = "torch" },
+]
+required = [
+    { name = "omegaconf", specifier = ">=2.3.0" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "pyyaml" },
 ]
 
 [[package]]
