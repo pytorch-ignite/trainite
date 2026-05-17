@@ -24,7 +24,7 @@ Trainite is a toolbox for training language models with PyTorch-Ignite. This pro
 
 2. **Run Training**:
    ```bash
-   uv run main.py config.yaml
+   uv run python main.py config.yaml
    ```
 
 3. **Monitor Progress**:
