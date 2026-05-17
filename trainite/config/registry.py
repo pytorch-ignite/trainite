@@ -1,8 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from sympy.stats import dependent
-
 from trainite.config.dataset import StringReverseDatasetConfig
 from trainite.config.model import TransformerModelConfig
 from trainite.config.trainer import PreTrainerConfig

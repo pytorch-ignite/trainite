@@ -20,7 +20,7 @@ trainite = "trainite.cli:main"
 package = true
 
 [dependency-groups]
-required = [
+generated = [
     "pydantic>=2",
     "PyYAML",
     "omegaconf>=2.3.0",

@@ -1,5 +1,6 @@
 import argparse
 import inspect
+import re
 import textwrap
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -52,7 +53,30 @@ def _prompt_choice(prompt: str, choices: Sequence[str], default: str) -> str:
 
 
 def _project_directory(raw_project_dir: str, force: bool) -> Path:
-    project_dir = Path(raw_project_dir).expanduser().resolve()
+
+    raw_path = Path(raw_project_dir).expanduser()
+
+    parent = raw_path.parent
+    name = raw_path.name
+
+    def _normalize_name(n: str) -> str:
+        n = n.strip().lower()
+        # Replace any character that is not alnum, dot, underscore or hyphen with a hyphen
+        n = re.sub(r"[^a-z0-9._-]+", "-", n)
+        # Collapse consecutive hyphens
+        n = re.sub(r"-+", "-", n)
+        # Strip leading/trailing separators
+        n = n.strip("-_.")
+        if not n:
+            n = "project"
+        if n[0].isdigit():
+            n = f"proj-{n}"
+        return n
+
+    normalized_name = _normalize_name(name)
+
+    project_dir = (parent / normalized_name).resolve()
+
     if project_dir.exists():
         if not project_dir.is_dir():
             raise SystemExit(f"{project_dir} is not a directory")
@@ -96,7 +120,7 @@ def parse_dependencies(
         data = tomlkit.parse(f.read())
 
     # 1. Main dependencies
-    required_deps = data["dependency-groups"]["required"]
+    required_deps = data["dependency-groups"]["generated"]
 
     # 2. Optional dependencies
     other_deps = []
@@ -107,7 +131,7 @@ def parse_dependencies(
     # 3. Dependency groups (PEP 735)
     dependency_groups = data["dependency-groups"]
     for group, group_deps in dependency_groups.items():
-        if group != "required":
+        if group != "generated":
             other_deps.extend(group_deps)
 
     dep_map = {}
