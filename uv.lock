@@ -764,7 +764,7 @@ dev = [
     { name = "tensorboard" },
     { name = "torch" },
 ]
-required = [
+generated = [
     { name = "omegaconf" },
     { name = "pydantic" },
     { name = "pyyaml" },
@@ -785,7 +785,7 @@ dev = [
     { name = "tensorboard" },
     { name = "torch" },
 ]
-required = [
+generated = [
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pyyaml" },
