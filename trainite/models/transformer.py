@@ -69,7 +69,7 @@ class TransformerModel(nn.Module):
         **kwargs,
     ) -> None:
         super().__init__()
-        self.embedding = nn.Embedding(vocab_size, hidden_size)
+        self.embedding = nn.Embedding(vocab_size + 1, hidden_size, padding_idx=0)
         self.pos_encoding = PositionalEncoding(hidden_size, max_seq_len, dropout)
         self.blocks = nn.ModuleList(
             [
@@ -82,8 +82,8 @@ class TransformerModel(nn.Module):
                 for _ in range(num_layers)
             ]
         )
+        self.proj = nn.Linear(hidden_size, vocab_size + 1)
         self.norm = nn.LayerNorm(hidden_size)
-        self.proj = nn.Linear(hidden_size, vocab_size)
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
         x = self.embedding(input_ids) * math.sqrt(self.embedding.embedding_dim)

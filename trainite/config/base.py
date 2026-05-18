@@ -3,7 +3,25 @@ from typing import Any
 
 import yaml
 from omegaconf import OmegaConf
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+ALPHABET_PRESETS = {
+    "@alpha": "abcdefghijklmnopqrstuvwxyz",
+    "@digits": "0123456789",
+    "@alphanumeric": "abcdefghijklmnopqrstuvwxyz0123456789",
+}
+
+
+def resolve_alphabet(alphabet: str) -> str:
+    return ALPHABET_PRESETS.get(alphabet, alphabet)
+
+
+def _component_value(component: BaseModel, name: str) -> Any:
+    value = getattr(component, name, None)
+    if value is not None:
+        return value
+    return component.model_extra.get(name) if component.model_extra else None
 
 
 class OutputConfig(BaseModel):
@@ -18,6 +36,7 @@ class ComponentConfig(BaseModel):
 
 class TrainerConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
     learning_rate: float = 1e-3
     log_every_steps: int = 10
 
@@ -29,6 +48,29 @@ class ProjectConfig(BaseModel):
     output: OutputConfig
     seed: int = 42
     device: str = "cuda"
+
+    @model_validator(mode="after")
+    def validate_vocab_size(self) -> "ProjectConfig":
+        dataset_vocab_size = _component_value(self.dataset, "vocab_size")
+        alphabet = _component_value(self.dataset, "alphabet")
+
+        if dataset_vocab_size is not None and alphabet is not None:
+            expected_vocab_size = len(resolve_alphabet(str(alphabet)))
+            if int(dataset_vocab_size) != expected_vocab_size:
+                raise ValueError(
+                    "dataset.vocab_size is derived from dataset.alphabet; "
+                    f"expected {expected_vocab_size}, got {dataset_vocab_size}"
+                )
+
+        model_vocab_size = _component_value(self.model, "vocab_size")
+        if model_vocab_size is not None and dataset_vocab_size is not None:
+            if int(model_vocab_size) < int(dataset_vocab_size):
+                raise ValueError(
+                    "model.vocab_size must be greater than or equal to "
+                    "dataset.vocab_size"
+                )
+
+        return self
 
 
 def load_yaml(path: str | Path) -> dict:
@@ -50,4 +92,5 @@ def dump_config(config: ProjectConfig, path: str | Path) -> None:
 
 def load_config(path: str | Path) -> ProjectConfig:
     raw_conf = OmegaConf.load(path)
-    return ProjectConfig.model_validate(raw_conf)
+    data = OmegaConf.to_container(raw_conf, resolve=True)
+    return ProjectConfig.model_validate(data)

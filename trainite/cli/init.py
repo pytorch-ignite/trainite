@@ -5,10 +5,7 @@ import textwrap
 from pathlib import Path
 from typing import Iterable, Sequence
 
-import tomlkit
-from packaging.requirements import Requirement
-
-from trainite.config import OutputConfig, ProjectConfig, dump_config
+from trainite.config import OutputConfig, ProjectConfig, dump_yaml
 from trainite.config.registry import (
     REGISTRY,
     get_dataset_spec,
@@ -212,6 +209,15 @@ def _build_templates(
     }
 
 
+def _starter_config_data(config: ProjectConfig) -> dict:
+    data = config.model_dump(by_alias=True, polymorphic_serialization=True)
+    model_config = data.get("model", {})
+    dataset_config = data.get("dataset", {})
+    if "vocab_size" in model_config and "vocab_size" in dataset_config:
+        model_config["vocab_size"] = "${dataset.vocab_size}"
+    return data
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="trainite")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -305,7 +311,7 @@ def init_project(args: argparse.Namespace) -> None:
         output=output_config,
     )
 
-    dump_config(starter_config, project_dir / "config.yaml")
+    dump_yaml(_starter_config_data(starter_config), project_dir / "config.yaml")
     for filename, content in templates.items():
         _write_file(project_dir / filename, content, args.force)
 

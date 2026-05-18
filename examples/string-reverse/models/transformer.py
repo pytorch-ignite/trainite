@@ -1,11 +1,7 @@
-from __future__ import annotations
-
 import math
 
 import torch
 from torch import nn
-
-from config import TransformerModelConfig
 
 
 class PositionalEncoding(nn.Module):
@@ -61,25 +57,33 @@ class TransformerBlock(nn.Module):
 
 
 class TransformerModel(nn.Module):
-    def __init__(self, config: TransformerModelConfig) -> None:
+    def __init__(
+        self,
+        vocab_size: int = 32,
+        hidden_size: int = 64,
+        num_layers: int = 2,
+        num_heads: int = 2,
+        feedforward_dim: int = 128,
+        dropout: float = 0.1,
+        max_seq_len: int = 128,
+        **kwargs,
+    ) -> None:
         super().__init__()
-        self.embedding = nn.Embedding(config.vocab_size, config.hidden_size)
-        self.pos_encoding = PositionalEncoding(
-            config.hidden_size, config.max_seq_len, config.dropout
-        )
+        self.embedding = nn.Embedding(vocab_size + 1, hidden_size, padding_idx=0)
+        self.pos_encoding = PositionalEncoding(hidden_size, max_seq_len, dropout)
         self.blocks = nn.ModuleList(
             [
                 TransformerBlock(
-                    config.hidden_size,
-                    config.num_heads,
-                    config.feedforward_dim,
-                    config.dropout,
+                    hidden_size,
+                    num_heads,
+                    feedforward_dim,
+                    dropout,
                 )
-                for _ in range(config.num_layers)
+                for _ in range(num_layers)
             ]
         )
-        self.norm = nn.LayerNorm(config.hidden_size)
-        self.proj = nn.Linear(config.hidden_size, config.vocab_size)
+        self.proj = nn.Linear(hidden_size, vocab_size + 1)
+        self.norm = nn.LayerNorm(hidden_size)
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
         x = self.embedding(input_ids) * math.sqrt(self.embedding.embedding_dim)
@@ -90,5 +94,22 @@ class TransformerModel(nn.Module):
         return self.proj(x)
 
 
-def build_model(config: TransformerModelConfig) -> TransformerModel:
-    return TransformerModel(config)
+def build_transformer_model(
+    vocab_size: int = 32,
+    hidden_size: int = 64,
+    num_layers: int = 2,
+    num_heads: int = 2,
+    feedforward_dim: int = 128,
+    dropout: float = 0.1,
+    max_seq_len: int = 128,
+    **kwargs,
+) -> TransformerModel:
+    return TransformerModel(
+        vocab_size=vocab_size,
+        hidden_size=hidden_size,
+        num_layers=num_layers,
+        num_heads=num_heads,
+        feedforward_dim=feedforward_dim,
+        dropout=dropout,
+        max_seq_len=max_seq_len,
+    )

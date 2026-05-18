@@ -1,11 +1,9 @@
-from __future__ import annotations
-
 import argparse
 import logging
 from pathlib import Path
 
-from config import default_config, load_config
-from trainer import Trainer
+from config import load_config
+from trainer import PreTrainer
 
 
 def parse_args() -> argparse.Namespace:
@@ -25,8 +23,8 @@ def main() -> None:
 
     args = parse_args()
     config_path = Path(args.config)
-    config = load_config(config_path) if config_path.exists() else default_config()
-    trainer = Trainer(config)
+    config = load_config(config_path)
+    trainer = PreTrainer(config)
     trainer.run()
 
 

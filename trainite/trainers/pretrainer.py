@@ -30,7 +30,7 @@ class PreTrainer:
         **kwargs,
     ) -> None:
         self.config = config
-        self.device = device or config.device
+        self.device = device or config.trainer.device
         self.epochs = epochs or config.trainer.epochs
         self.log_every_steps = log_every_steps or config.trainer.log_every_steps
         self.grad_clip_norm = grad_clip_norm or config.trainer.grad_clip_norm
@@ -71,14 +71,16 @@ class PreTrainer:
     ) -> tuple[torch.Tensor, torch.Tensor]:
         logits = output["logits"].reshape(-1, output["logits"].size(-1))
         targets = output["targets"].reshape(-1)
-        return logits, targets
+        mask = targets != self.loss_fn.ignore_index
+        return logits[mask], targets[mask]
 
     def _flatten_loss(
         self, output: dict[str, torch.Tensor]
     ) -> tuple[torch.Tensor, torch.Tensor]:
         logits = output["logits"].reshape(-1, output["logits"].size(-1))
         targets = output["targets"].reshape(-1)
-        return logits, targets
+        mask = targets != self.loss_fn.ignore_index
+        return logits[mask], targets[mask]
 
     def _train_step(
         self, engine: Engine, batch: dict[str, torch.Tensor]
