@@ -3,28 +3,16 @@ from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence
 
 
-ALPHABET_PRESETS = {
-    "@alpha": "abcdefghijklmnopqrstuvwxyz",
-    "@digits": "0123456789",
-    "@alphanumeric": "abcdefghijklmnopqrstuvwxyz0123456789",
-}
-
-
 class StringReverseDataset(Dataset):
     def __init__(
         self,
+        vocab_size: int,
         size: int,
         min_seq_len: int,
         max_seq_len: int,
         seed: int,
         fixed_length: bool = True,
-        alphabet: str = "abcdefghijklmnopqrstuvwxyz",
     ) -> None:
-        self.alphabet = ALPHABET_PRESETS.get(alphabet, alphabet)
-        vocab_size = len(self.alphabet)
-        self.char_to_id = {c: i + 1 for i, c in enumerate(self.alphabet)}
-        self.id_to_char = {i + 1: c for i, c in enumerate(self.alphabet)}
-
         generator = torch.Generator().manual_seed(seed)
 
         if fixed_length:
@@ -64,9 +52,6 @@ class StringReverseDataset(Dataset):
             "labels": self.labels[index],
         }
 
-    def decode(self, ids: torch.Tensor) -> str:
-        return "".join([self.id_to_char[idx.item()] for idx in ids if idx.item() != 0])
-
 
 def collate_fn(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     input_ids = [item["input_ids"] for item in batch]
@@ -82,32 +67,32 @@ def collate_fn(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
 
 
 def build_string_reverse_dataloaders(
+    tokenizer,
     train_size: int = 256,
     val_size: int = 64,
     batch_size: int = 32,
     min_seq_len: int = 1,
     max_seq_len: int = 16,
     fixed_length: bool = True,
-    alphabet: str = "abcdefghijklmnopqrstuvwxyz",
     num_workers: int = 0,
     seed: int = 7,
     **kwargs,
 ) -> tuple[DataLoader, DataLoader]:
     train_dataset = StringReverseDataset(
+        vocab_size=tokenizer.vocab_size,
         size=train_size,
         min_seq_len=min_seq_len,
         max_seq_len=max_seq_len,
         seed=seed,
         fixed_length=fixed_length,
-        alphabet=alphabet,
     )
     val_dataset = StringReverseDataset(
+        vocab_size=tokenizer.vocab_size,
         size=val_size,
         min_seq_len=min_seq_len,
         max_seq_len=max_seq_len,
         seed=seed + 1,
         fixed_length=fixed_length,
-        alphabet=alphabet,
     )
     train_loader = DataLoader(
         train_dataset,

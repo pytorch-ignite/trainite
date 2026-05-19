@@ -30,6 +30,7 @@ class PreTrainer:
         log_every_steps: int | None = None,
         grad_clip_norm: float | None = None,
         model: nn.Module | None = None,
+        tokenizer=None,
         train_loader=None,
         val_loader=None,
         **kwargs,
@@ -37,17 +38,25 @@ class PreTrainer:
         torch.manual_seed(config.seed)
 
         self.config = config
-        self.device = device or config.device
+        resolved_device = config.device
+        if resolved_device == "auto":
+            resolved_device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = device or resolved_device
         self.epochs = epochs or config.trainer.epochs
         self.log_every_steps = log_every_steps or config.trainer.log_every_steps
         self.grad_clip_norm = grad_clip_norm or config.trainer.grad_clip_norm
-        self.model = model or instantiate(config.model)
+        self.tokenizer = tokenizer or instantiate(config.tokenizer)
+        self.model = model or instantiate(
+            config.model, vocab_size=self.tokenizer.vocab_size
+        )
         self.model.to(self.device)
         self.loss_fn = nn.CrossEntropyLoss()
         self.optimizer = instantiate(config.optimizer, params=self.model.parameters())
         self.lr = lr or config.optimizer.lr
         if train_loader is None or val_loader is None:
-            train_loader, val_loader = instantiate(config.dataset)
+            train_loader, val_loader = instantiate(
+                config.dataset, tokenizer=self.tokenizer
+            )
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.total_iters = len(self.train_loader) * self.epochs

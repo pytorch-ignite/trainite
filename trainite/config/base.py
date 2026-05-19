@@ -28,13 +28,14 @@ class OptimizerConfig(ComponentConfig):
 
 
 class ProjectConfig(BaseModel):
+    tokenizer: ComponentConfig
     model: ComponentConfig
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
     dataset: ComponentConfig
     trainer: TrainerConfig
     output: OutputConfig
     seed: int = 42
-    device: str = "cuda"
+    device: str = "auto"
 
 
 def load_yaml(path: str | Path) -> dict:

@@ -1,14 +1,18 @@
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import torch
 from ignite.engine import Engine, Events
-from ignite.handlers import EarlyStopping, ModelCheckpoint
+from ignite.handlers import (
+    EarlyStopping,
+    ModelCheckpoint,
+    create_lr_scheduler_with_warmup,
+)
 from ignite.handlers.tensorboard_logger import OptimizerParamsHandler, TensorboardLogger
 from ignite.metrics import Accuracy, Loss, RunningAverage
 from torch import nn
+from torch.optim.lr_scheduler import LinearLR
 
 from config import ProjectConfig, dump_config
 from utils import instantiate
@@ -21,43 +25,47 @@ class PreTrainer:
         self,
         config: ProjectConfig,
         device: str | torch.device | None = None,
-        learning_rate: float | None = None,
+        lr: float | None = None,
         epochs: int | None = None,
         log_every_steps: int | None = None,
         grad_clip_norm: float | None = None,
         model: nn.Module | None = None,
+        tokenizer=None,
         train_loader=None,
         val_loader=None,
         **kwargs,
     ) -> None:
+        torch.manual_seed(config.seed)
+
         self.config = config
-        self.device = device or config.device
+        resolved_device = config.device
+        if resolved_device == "auto":
+            resolved_device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = device or resolved_device
         self.epochs = epochs or config.trainer.epochs
         self.log_every_steps = log_every_steps or config.trainer.log_every_steps
         self.grad_clip_norm = grad_clip_norm or config.trainer.grad_clip_norm
-
-        torch.manual_seed(config.seed)
-
-        self.model = model or instantiate(config.model)
+        self.tokenizer = tokenizer or instantiate(config.tokenizer)
+        self.model = model or instantiate(
+            config.model, vocab_size=self.tokenizer.vocab_size
+        )
         self.model.to(self.device)
         self.loss_fn = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.AdamW(
-            self.model.parameters(), lr=learning_rate or config.trainer.learning_rate
-        )
-
+        self.optimizer = instantiate(config.optimizer, params=self.model.parameters())
+        self.lr = lr or config.optimizer.lr
         if train_loader is None or val_loader is None:
-            train_loader, val_loader = instantiate(config.dataset)
+            train_loader, val_loader = instantiate(
+                config.dataset, tokenizer=self.tokenizer
+            )
         self.train_loader = train_loader
         self.val_loader = val_loader
-
-        self.run_dir: Optional[Path] = None
+        self.total_iters = len(self.train_loader) * self.epochs
+        self.run_dir: Path | None = None
         self.handlers: dict = {}
-
         self.engine = Engine(self._train_step)
         self.train_evaluator = Engine(self._eval_step)
         self.val_evaluator = Engine(self._eval_step)
         self.metrics = {}
-
         self._attach_metrics()
 
     def _make_run_dir(self) -> Path:
@@ -150,10 +158,27 @@ class PreTrainer:
             _log_loss,
         )
 
-        # 2. Run evaluations
+        # 2. Step LR scheduler every iteration
+        warmup_iters = max(2, int(0.1 * self.total_iters))
+        linear_decay = LinearLR(
+            self.optimizer,
+            start_factor=1.0,
+            end_factor=0.0,
+            total_iters=self.total_iters - warmup_iters,
+        )
+        self.scheduler = create_lr_scheduler_with_warmup(
+            linear_decay,
+            warmup_start_value=0.0,
+            warmup_end_value=self.lr,
+            warmup_duration=warmup_iters,
+        )
+
+        self.engine.add_event_handler(Events.ITERATION_COMPLETED, self.scheduler)
+
+        # 3. Run evaluations
         self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
 
-        # 3. ModelCheckpoint
+        # 4. ModelCheckpoint
         to_save = {"model": self.model, "optimizer": self.optimizer}
 
         def score_function(engine):

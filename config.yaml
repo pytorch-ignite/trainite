@@ -1,20 +1,22 @@
-model_name: "transformer"
-dataset_name: "string-reverse"
-trainer_name: "pretrainer"
+tokenizer:
+  _target_: "trainite.tokenizers.char_tokenizer.build_tokenizer"
+  alphabet: "@alpha"
 
 model:
   _target_: "trainite.models.transformer.build_transformer_model"
-  vocab_size: 26
   hidden_size: 64
   num_layers: 2
   num_heads: 2
   feedforward_dim: 128
   dropout: 0.1
   max_seq_len: 128
-  
+
+optimizer:
+  _target_: "torch.optim.AdamW"
+  lr: 0.001
+
 dataset:
   _target_: "trainite.datasets.string_reverse.build_string_reverse_dataloaders"
-  alphabet: "@alpha"
   train_size: 256
   val_size: 64
   batch_size: 32
@@ -24,9 +26,8 @@ dataset:
   num_workers: 2
   seed: 7
 
-trainer:  
+trainer:
   epochs: 5
-  device: cpu
   learning_rate: 0.001
   log_every_steps: 10
   grad_clip_norm: 1.0
@@ -34,5 +35,6 @@ trainer:
 output:
   root: output
   run_name: string-reverse-experiment
-  
+
 seed: 42
+device: cpu

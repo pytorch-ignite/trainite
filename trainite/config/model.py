@@ -7,7 +7,6 @@ class TransformerModelConfig(ComponentConfig):
     target: str = Field(
         default="trainite.models.transformer.build_transformer_model", alias="_target_"
     )
-    vocab_size: int = 32
     hidden_size: int = 64
     num_layers: int = 2
     num_heads: int = 2

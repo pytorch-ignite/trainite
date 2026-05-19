@@ -7,7 +7,7 @@ A simple sequence-to-sequence task where a Transformer learns to reverse strings
 This example was generated using the Trainite CLI:
 
 ```bash
-uv run trainite init examples/string-reverse --model transformer --dataset string-reverse -y
+uv run trainite init examples/string-reverse --model transformer --dataset string-reverse --tokenizer char -y
 ```
 
 All files in this directory are self-contained and do not depend on the `trainite` library. You can modify them freely for your own experiments.
@@ -16,12 +16,14 @@ All files in this directory are self-contained and do not depend on the `trainit
 
 | File | Description |
 |---|---|
-| `config.yaml` | Hyperparameters including model dimensions, variable sequence lengths, and alphabet shortcuts |
+| `config.yaml` | Hyperparameters including model dimensions, sequence lengths, and tokenizer settings |
 | `config.py` | Pydantic classes for type-safe configuration loading |
-| `model.py` | Transformer architecture with positional encoding and multi-head attention |
-| `dataset.py` | Dataset logic for generating character sequences and their reversals |
+| `tokenizers/char.py` | Character-level tokenizer with encode/decode and alphabet presets |
+| `models/transformer.py` | Transformer architecture with positional encoding and multi-head attention |
+| `dataset/string-reverse.py` | Dataset logic for generating token sequences and their reversals |
 | `trainer.py` | Full training loop with automated metric logging and checkpointing |
-| `main.py` | Main entry point to load config and start training |
+| `main.py` | Main entry point to load config, build tokenizer, and start training |
+| `utils.py` | Shared utilities including the `instantiate()` factory |
 
 ## Running Training
 
@@ -48,24 +50,28 @@ The model is trained to reverse a sequence of characters from a defined alphabet
 
 - **Input**: A character sequence, e.g. `['a', 'b', 'c', 'd']`
 - **Output**: The reversed sequence, e.g. `['d', 'c', 'b', 'a']`
-- **Vocabulary**: Characters defined in the `alphabet` config string (supports shortcuts like `@alpha`, `@digits`).
-- **Variable Length**: The dataset supports sequences of varying lengths, using a padding token (Index 0) to align batches.
+- **Vocabulary**: Characters defined in the tokenizer's `alphabet` config (supports presets like `@alpha`, `@digits`, `@alphanumeric`).
+- **Variable Length**: The dataset supports sequences of varying lengths, using a padding token (ID 0) to align batches.
 
 ## Configuration
 
-The task is highly customizable via `config.yaml`. The new modular architecture uses `_target_` paths to allow you to swap your own models or dataset builders without changing the trainer code.
+The task is highly customizable via `config.yaml`. The modular architecture uses `_target_` paths to allow you to swap your own models, datasets, or tokenizers without changing the trainer code.
+
+The tokenizer is the single source of truth for vocabulary — the model's embedding size and the dataset's token range are both derived from it at runtime.
 
 Example for a variable-length alphanumeric task:
 
 ```yaml
+tokenizer:
+  _target_: "tokenizers.char.build_tokenizer"
+  alphabet: "@alphanumeric"
+
 model:
-  _target_: "model.build_model"
-  vocab_size: 36 # 26 letters + 10 digits
+  _target_: "models.transformer.build_transformer_model"
   hidden_size: 64
 
 dataset:
-  _target_: "dataset.build_dataloaders"
-  alphabet: "@alphanumeric"
+  _target_: "dataset.string-reverse.build_string_reverse_dataloaders"
   min_seq_len: 4
   max_seq_len: 32
   fixed_length: false

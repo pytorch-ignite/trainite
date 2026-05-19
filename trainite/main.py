@@ -4,6 +4,7 @@ from pathlib import Path
 
 from trainite.config import load_config
 from trainite.trainers import PreTrainer
+from trainite.utils import instantiate
 
 
 def parse_args() -> argparse.Namespace:
@@ -24,9 +25,11 @@ def main() -> None:
     args = parse_args()
     config_path = Path(args.config)
     config = load_config(config_path)
-    trainer = PreTrainer(config)
+    tokenizer = instantiate(config.tokenizer)
+    trainer = PreTrainer(config, tokenizer=tokenizer)
     trainer.run()
 
 
 if __name__ == "__main__":
     main()
+

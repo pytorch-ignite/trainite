@@ -1,4 +1,4 @@
-# Trainite Project: {{project_name}}
+# Trainite Project: string-reverse
 
 Welcome to your new Trainite-generated training project! 
 

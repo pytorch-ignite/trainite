@@ -8,7 +8,6 @@ class StringReverseDatasetConfig(ComponentConfig):
         default="trainite.datasets.string_reverse.build_string_reverse_dataloaders",
         alias="_target_",
     )
-    alphabet: str = "abcdefghijklmnopqrstuvwxyz"
     train_size: int = 256
     val_size: int = 64
     batch_size: int = 32
