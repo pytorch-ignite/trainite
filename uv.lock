@@ -1094,7 +1094,10 @@ dev = [
 generated = [
     { name = "omegaconf" },
     { name = "pydantic" },
+    { name = "pytorch-ignite" },
     { name = "pyyaml" },
+    { name = "tensorboard" },
+    { name = "torch" },
 ]
 
 [package.metadata]
@@ -1115,7 +1118,10 @@ dev = [
 generated = [
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "pydantic", specifier = ">=2" },
+    { name = "pytorch-ignite" },
     { name = "pyyaml" },
+    { name = "tensorboard" },
+    { name = "torch" },
 ]
 
 [[package]]

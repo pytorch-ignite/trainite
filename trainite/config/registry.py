@@ -40,7 +40,7 @@ MODEL_SPECS = {
         implementation_symbol="TransformerModel",
         builder_symbol="build_transformer_model",
         template_replacements=[],
-        dependencies=["torch"],
+        dependencies=[],
     ),
 }
 
@@ -52,7 +52,7 @@ DATASET_SPECS = {
         implementation_symbol="StringReverseDataset",
         builder_symbol="build_string_reverse_dataloaders",
         template_replacements=[],
-        dependencies=["torch"],
+        dependencies=[],
     ),
 }
 
@@ -70,7 +70,7 @@ TRAINER_SPECS = {
             ),
             ("trainite.utils", "utils"),
         ],
-        dependencies=["torch", "pytorch-ignite", "tensorboard"],
+        dependencies=[],
     ),
 }
 

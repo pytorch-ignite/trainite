@@ -24,6 +24,9 @@ generated = [
     "pydantic>=2",
     "PyYAML",
     "omegaconf>=2.3.0",
+    "torch",
+    "pytorch-ignite",
+    "tensorboard",
 ]
 dev = [
     "torch",
