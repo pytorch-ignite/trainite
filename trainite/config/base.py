@@ -18,12 +18,18 @@ class ComponentConfig(BaseModel):
 
 class TrainerConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
-    learning_rate: float = 1e-3
     log_every_steps: int = 10
+
+
+class OptimizerConfig(ComponentConfig):
+    model_config = ConfigDict(extra="allow")
+    target: str = Field(alias="_target_", default="torch.optim.AdamW")
+    lr: float = 1e-3
 
 
 class ProjectConfig(BaseModel):
     model: ComponentConfig
+    optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
     dataset: ComponentConfig
     trainer: TrainerConfig
     output: OutputConfig

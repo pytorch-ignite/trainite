@@ -8,6 +8,7 @@ from ignite.handlers import EarlyStopping, ModelCheckpoint
 from ignite.handlers.tensorboard_logger import OptimizerParamsHandler, TensorboardLogger
 from ignite.metrics import Accuracy, Loss, RunningAverage
 from torch import nn
+from torch.optim.lr_scheduler import LinearLR, SequentialLR
 
 from trainite.config import ProjectConfig, dump_config
 from trainite.utils import instantiate
@@ -40,14 +41,31 @@ class PreTrainer:
         self.model = model or instantiate(config.model)
         self.model.to(self.device)
         self.loss_fn = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.AdamW(
-            self.model.parameters(), lr=learning_rate or config.trainer.learning_rate
-        )
-
+        self.optimizer = instantiate(config.optimizer, params=self.model.parameters())
         if train_loader is None or val_loader is None:
             train_loader, val_loader = instantiate(config.dataset)
         self.train_loader = train_loader
         self.val_loader = val_loader
+
+        total_iters = len(self.train_loader) * self.epochs
+        self.scheduler = SequentialLR(
+            self.optimizer,
+            schedulers=[
+                LinearLR(
+                    self.optimizer,
+                    start_factor=0.1,
+                    end_factor=1.0,
+                    total_iters=int(total_iters * 0.1),
+                ),
+                LinearLR(
+                    self.optimizer,
+                    start_factor=1.0,
+                    end_factor=0.1,
+                    total_iters=int(total_iters * 0.9),
+                ),
+            ],
+            milestones=[int(total_iters * 0.1)],
+        )
 
         self.run_dir: Path | None = None
         self.handlers: dict = {}
@@ -149,10 +167,15 @@ class PreTrainer:
             _log_loss,
         )
 
-        # 2. Run evaluations
+        # 2. Step LR scheduler every iteration
+        self.engine.add_event_handler(
+            Events.ITERATION_STARTED, lambda _: self.scheduler.step()
+        )
+
+        # 3. Run evaluations
         self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
 
-        # 3. ModelCheckpoint
+        # 4. ModelCheckpoint
         to_save = {"model": self.model, "optimizer": self.optimizer}
 
         def score_function(engine):
