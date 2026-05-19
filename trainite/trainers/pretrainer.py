@@ -150,7 +150,7 @@ class PreTrainer:
         )
 
         # 2. Step LR scheduler every iteration
-        warmup_iters = int(0.1 * self.total_iters)
+        warmup_iters = max(2, int(0.1 * self.total_iters))
         linear_decay = LinearLR(
             self.optimizer,
             start_factor=1.0,
@@ -164,7 +164,7 @@ class PreTrainer:
             warmup_duration=warmup_iters,
         )
 
-        self.engine.add_event_handler(Events.ITERATION_STARTED, self.scheduler)
+        self.engine.add_event_handler(Events.ITERATION_COMPLETED, self.scheduler)
 
         # 3. Run evaluations
         self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
