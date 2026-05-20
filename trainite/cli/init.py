@@ -8,7 +8,15 @@ from typing import Iterable, Sequence
 import tomlkit
 from packaging.requirements import Requirement
 
-from trainite.config import OutputConfig, ProjectConfig, dump_config
+from trainite.config import (
+    ComponentConfig,
+    DataConfig,
+    DataLoaderConfig,
+    OutputConfig,
+    ProjectConfig,
+    SplitConfig,
+    dump_config,
+)
 from trainite.config.registry import (
     REGISTRY,
     get_dataset_spec,
@@ -290,17 +298,44 @@ def init_project(args: argparse.Namespace) -> None:
 
     # Update config to point to the correct builder functions for the model and dataset
     model_component = model_spec.config_cls()
-    dataset_component = dataset_spec.config_cls()
     trainer_component = trainer_spec.config_cls()
 
     model_component.target = f"models.{model_spec.name}.{model_spec.builder_symbol}"
-    dataset_component.target = (
-        f"dataset.{dataset_spec.name}.{dataset_spec.builder_symbol}"
-    )
+
+    # Build train split
+    train_dataset = dataset_spec.config_cls()
+    train_dataset.target = f"dataset.{dataset_spec.name}.{dataset_spec.builder_symbol}"
+
+    # Build val split
+    val_dataset = dataset_spec.config_cls()
+    val_dataset.target = f"dataset.{dataset_spec.name}.{dataset_spec.builder_symbol}"
+
+    collate_fn_config = None
+    if dataset_spec.collate_fn_symbol:
+        collate_fn_config = ComponentConfig(
+            _target_=f"dataset.{dataset_spec.name}.{dataset_spec.collate_fn_symbol}"
+        )
 
     starter_config = ProjectConfig(
         model=model_component,
-        dataset=dataset_component,
+        data=DataConfig(
+            train=SplitConfig(
+                dataset=train_dataset,
+                dataloader=DataLoaderConfig(
+                    batch_size=32,
+                    shuffle=True,
+                    collate_fn=collate_fn_config,
+                ),
+            ),
+            val=SplitConfig(
+                dataset=val_dataset,
+                dataloader=DataLoaderConfig(
+                    batch_size=32,
+                    shuffle=False,
+                    collate_fn=collate_fn_config,
+                ),
+            ),
+        ),
         trainer=trainer_component,
         output=output_config,
     )

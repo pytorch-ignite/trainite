@@ -2,7 +2,6 @@ from trainite.config.base import TrainerConfig
 
 
 class PreTrainerConfig(TrainerConfig):
-    type: str = "pre"
     epochs: int = 3
     learning_rate: float = 1e-3
     log_every_steps: int = 10

@@ -14,13 +14,24 @@ from ignite.metrics import Accuracy, Loss, RunningAverage
 from torch import nn
 from torch.optim.lr_scheduler import LinearLR
 
-from trainite.config import ProjectConfig, dump_config
-from trainite.utils import instantiate
+from torch.utils.data import DataLoader
+
+from trainite.config import ProjectConfig, SplitConfig, dump_config
+from trainite.utils import instantiate, get_target
 
 logger = logging.getLogger(__name__)
 
 
 class PreTrainer:
+    def _build_dataloader(self, split_config: SplitConfig) -> DataLoader:
+        dataset = instantiate(split_config.dataset)
+        dl_kwargs = split_config.dataloader.model_dump(exclude={"collate_fn"})
+        collate_fn = None
+        if split_config.dataloader.collate_fn:
+            collate_fn = get_target(split_config.dataloader.collate_fn.target)
+
+        return DataLoader(dataset, collate_fn=collate_fn, **dl_kwargs)
+
     def __init__(
         self,
         config: ProjectConfig,
@@ -46,8 +57,20 @@ class PreTrainer:
         self.loss_fn = nn.CrossEntropyLoss()
         self.optimizer = instantiate(config.optimizer, params=self.model.parameters())
         self.lr = lr or config.optimizer.lr
-        if train_loader is None or val_loader is None:
-            train_loader, val_loader = instantiate(config.dataset)
+
+        if train_loader is None:
+            train_loader = self._build_dataloader(config.data.train)
+
+        if val_loader is None:
+            if config.data.val:
+                val_loader = self._build_dataloader(config.data.val)
+            else:
+                logger.warning(
+                    "Validation config not provided. Falling back to training config for validation. "
+                    "This is not recommended for actual training as it may lead to overfitting."
+                )
+                val_loader = self._build_dataloader(config.data.train)
+
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.total_iters = len(self.train_loader) * self.epochs

@@ -1,35 +1,32 @@
-from dataclasses import dataclass, field
 from pathlib import Path
+
+from pydantic import BaseModel
 
 from trainite.config.dataset import StringReverseDatasetConfig
 from trainite.config.model import TransformerModelConfig
 from trainite.config.trainer import PreTrainerConfig
 
 
-@dataclass(frozen=True)
-class ComponentSpec:
+class ComponentSpec(BaseModel):
     name: str
     implementation_path: Path
     config_cls: type
     implementation_symbol: str
-    builder_symbol: str
-    template_replacements: list[tuple[str, str]] = field(default_factory=list)
-    dependencies: list[str] = field(default_factory=list)
+    template_replacements: list[tuple[str, str]] = []
+    dependencies: list[str] = []
 
 
-@dataclass(frozen=True)
 class TrainerSpec(ComponentSpec):
     pass
 
 
-@dataclass(frozen=True)
 class ModelSpec(ComponentSpec):
-    pass
+    builder_symbol: str
 
 
-@dataclass(frozen=True)
 class DatasetSpec(ComponentSpec):
-    pass
+    builder_symbol: str
+    collate_fn_symbol: str | None = None
 
 
 MODEL_SPECS = {
@@ -39,8 +36,6 @@ MODEL_SPECS = {
         config_cls=TransformerModelConfig,
         implementation_symbol="TransformerModel",
         builder_symbol="build_transformer_model",
-        template_replacements=[],
-        dependencies=[],
     ),
 }
 
@@ -50,9 +45,8 @@ DATASET_SPECS = {
         implementation_path=Path("trainite/datasets/string_reverse.py"),
         config_cls=StringReverseDatasetConfig,
         implementation_symbol="StringReverseDataset",
-        builder_symbol="build_string_reverse_dataloaders",
-        template_replacements=[],
-        dependencies=[],
+        builder_symbol="build_string_reverse_dataset",
+        collate_fn_symbol="collate_fn",
     ),
 }
 
@@ -62,7 +56,6 @@ TRAINER_SPECS = {
         implementation_path=Path("trainite/trainers/pretrainer.py"),
         config_cls=PreTrainerConfig,
         implementation_symbol="PreTrainer",
-        builder_symbol="PreTrainer",
         template_replacements=[
             (
                 "trainite.config",
@@ -70,7 +63,6 @@ TRAINER_SPECS = {
             ),
             ("trainite.utils", "utils"),
         ],
-        dependencies=[],
     ),
 }
 

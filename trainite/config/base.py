@@ -22,15 +22,32 @@ class TrainerConfig(BaseModel):
 
 
 class OptimizerConfig(ComponentConfig):
-    model_config = ConfigDict(extra="allow")
     target: str = Field(alias="_target_", default="torch.optim.AdamW")
     lr: float = 1e-3
+
+
+class DataLoaderConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    batch_size: int = 32
+    shuffle: bool = False
+    num_workers: int = 2
+    collate_fn: ComponentConfig | None = None
+
+
+class SplitConfig(BaseModel):
+    dataset: ComponentConfig
+    dataloader: DataLoaderConfig = Field(default_factory=DataLoaderConfig)
+
+
+class DataConfig(BaseModel):
+    train: SplitConfig
+    val: SplitConfig | None = None
 
 
 class ProjectConfig(BaseModel):
     model: ComponentConfig
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
-    dataset: ComponentConfig
+    data: DataConfig
     trainer: TrainerConfig
     output: OutputConfig
     seed: int = 42
