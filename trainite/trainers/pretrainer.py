@@ -13,25 +13,15 @@ from ignite.handlers.tensorboard_logger import OptimizerParamsHandler, Tensorboa
 from ignite.metrics import Accuracy, Loss, RunningAverage
 from torch import nn
 from torch.optim.lr_scheduler import LinearLR
-
 from torch.utils.data import DataLoader
 
 from trainite.config import ProjectConfig, SplitConfig, dump_config
-from trainite.utils import instantiate, get_target
+from trainite.utils import get_target, instantiate
 
 logger = logging.getLogger(__name__)
 
 
 class PreTrainer:
-    def _build_dataloader(self, split_config: SplitConfig) -> DataLoader:
-        dataset = instantiate(split_config.dataset)
-        dl_kwargs = split_config.dataloader.model_dump(exclude={"collate_fn"})
-        collate_fn = None
-        if split_config.dataloader.collate_fn:
-            collate_fn = get_target(split_config.dataloader.collate_fn.target)
-
-        return DataLoader(dataset, collate_fn=collate_fn, **dl_kwargs)
-
     def __init__(
         self,
         config: ProjectConfig,
@@ -81,6 +71,15 @@ class PreTrainer:
         self.val_evaluator = Engine(self._eval_step)
         self.metrics = {}
         self._attach_metrics()
+
+    def _build_dataloader(self, split_config: SplitConfig) -> DataLoader:
+        dataset = instantiate(split_config.dataset)
+        dl_kwargs = split_config.dataloader.model_dump(exclude={"collate_fn"})
+        collate_fn = None
+        if split_config.dataloader.collate_fn:
+            collate_fn = get_target(split_config.dataloader.collate_fn.target)
+
+        return DataLoader(dataset, collate_fn=collate_fn, **dl_kwargs)
 
     def _make_run_dir(self) -> Path:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
