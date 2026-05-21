@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from trainite.config.dataset import StringReverseDatasetConfig
 from trainite.config.model import TransformerModelConfig
@@ -8,6 +8,7 @@ from trainite.config.trainer import PreTrainerConfig
 
 
 class ComponentSpec(BaseModel):
+    model_config = ConfigDict(frozen=True)
     name: str
     implementation_path: Path
     config_cls: type
