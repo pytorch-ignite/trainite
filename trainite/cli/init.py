@@ -13,7 +13,6 @@ from trainite.config.registry import (
     REGISTRY,
     get_dataset_spec,
     get_model_spec,
-    get_tokenizer_spec,
     get_trainer_spec,
 )
 
@@ -23,7 +22,6 @@ PROJECT_ROOT = PACKAGE_ROOT.parent
 MODEL_CHOICES = tuple(REGISTRY["models"].keys())
 DATASET_CHOICES = tuple(REGISTRY["datasets"].keys())
 TRAINER_CHOICES = tuple(REGISTRY["trainers"].keys())
-TOKENIZER_CHOICES = tuple(REGISTRY["tokenizers"].keys())
 
 
 def _replace_many(text: str, replacements: Iterable[tuple[str, str]]) -> str:
@@ -153,15 +151,13 @@ def _build_templates(
     model_name: str,
     dataset_name: str,
     trainer_name: str,
-    tokenizer_name: str,
     project_name: str,
 ) -> dict[str, str]:
     model_spec = get_model_spec(model_name)
     dataset_spec = get_dataset_spec(dataset_name)
     trainer_spec = get_trainer_spec(trainer_name)
-    tokenizer_spec = get_tokenizer_spec(tokenizer_name)
     spec_deps = set()
-    for spec in [model_spec, dataset_spec, trainer_spec, tokenizer_spec]:
+    for spec in [model_spec, dataset_spec, trainer_spec]:
         spec_deps.update(spec.dependencies)
     required_deps, other_deps = parse_dependencies(PROJECT_ROOT / "pyproject.toml")
     final_deps = set(required_deps.values())
@@ -173,10 +169,6 @@ def _build_templates(
         val = required_deps[dep] if dep in required_deps else other_deps[dep]
         final_deps.add(val)
     return {
-        f"tokenizers/{tokenizer_spec.name}.py": _render_template(
-            tokenizer_spec.implementation_path,
-            tokenizer_spec.template_replacements,
-        ),
         f"models/{model_spec.name}.py": _render_template(
             model_spec.implementation_path,
             model_spec.template_replacements,
@@ -210,8 +202,8 @@ def _build_templates(
                     f"from trainer import {trainer_spec.implementation_symbol}",
                 ),
                 (
-                    "trainer = PreTrainer(config, tokenizer=tokenizer)",
-                    f"trainer = {trainer_spec.implementation_symbol}(config, tokenizer=tokenizer)",
+                    "    trainer = PreTrainer(",
+                    f"    trainer = {trainer_spec.implementation_symbol}(",
                 ),
             ],
         ),
@@ -249,11 +241,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--trainer", choices=TRAINER_CHOICES, help="Starter trainer template to use"
     )
     init_parser.add_argument(
-        "--tokenizer",
-        choices=TOKENIZER_CHOICES,
-        help="Starter tokenizer template to use",
-    )
-    init_parser.add_argument(
         "--force",
         action="store_true",
         help="Overwrite existing starter files",
@@ -275,7 +262,6 @@ def init_project(args: argparse.Namespace) -> None:
         model_name = args.model or MODEL_CHOICES[0]
         dataset_name = args.dataset or DATASET_CHOICES[0]
         trainer_name = args.trainer or TRAINER_CHOICES[0]
-        tokenizer_name = args.tokenizer or TOKENIZER_CHOICES[0]
         output_root = args.output_root or "outputs"
         run_name = args.run_name or f"{model_name}__{dataset_name}"
     else:
@@ -291,9 +277,6 @@ def init_project(args: argparse.Namespace) -> None:
         trainer_name = args.trainer or _prompt_choice(
             "Trainer", TRAINER_CHOICES, TRAINER_CHOICES[0]
         )
-        tokenizer_name = args.tokenizer or _prompt_choice(
-            "Tokenizer", TOKENIZER_CHOICES, TOKENIZER_CHOICES[0]
-        )
         output_root = args.output_root or _prompt_text("Output directory", "outputs")
         run_name = args.run_name or _prompt_text(
             "Run name", f"{model_name}__{dataset_name}"
@@ -305,30 +288,24 @@ def init_project(args: argparse.Namespace) -> None:
 
     # Build templates for the starter project
     templates = _build_templates(
-        model_name, dataset_name, trainer_name, tokenizer_name, project_dir.name
+        model_name, dataset_name, trainer_name, project_dir.name
     )
 
     model_spec = get_model_spec(model_name)
     dataset_spec = get_dataset_spec(dataset_name)
     trainer_spec = get_trainer_spec(trainer_name)
-    tokenizer_spec = get_tokenizer_spec(tokenizer_name)
 
     # Update config to point to the correct builder functions
-    tokenizer_component = tokenizer_spec.config_cls()
     model_component = model_spec.config_cls()
     dataset_component = dataset_spec.config_cls()
     trainer_component = trainer_spec.config_cls()
 
-    tokenizer_component.target = (
-        f"tokenizers.{tokenizer_spec.name}.{tokenizer_spec.builder_symbol}"
-    )
     model_component.target = f"models.{model_spec.name}.{model_spec.builder_symbol}"
     dataset_component.target = (
         f"dataset.{dataset_spec.name}.{dataset_spec.builder_symbol}"
     )
 
     starter_config = ProjectConfig(
-        tokenizer=tokenizer_component,
         model=model_component,
         dataset=dataset_component,
         trainer=trainer_component,

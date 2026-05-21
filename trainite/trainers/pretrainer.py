@@ -45,20 +45,19 @@ class PreTrainer:
         self.epochs = epochs or config.trainer.epochs
         self.log_every_steps = log_every_steps or config.trainer.log_every_steps
         self.grad_clip_norm = grad_clip_norm or config.trainer.grad_clip_norm
-        self.tokenizer = tokenizer or instantiate(config.tokenizer)
-        self.model = model or instantiate(
-            config.model, vocab_size=self.tokenizer.vocab_size
-        )
+        if train_loader is None or val_loader is None:
+            train_loader, val_loader = instantiate(config.dataset)
+        self.train_loader = train_loader
+        self.val_loader = val_loader
+
+        self.tokenizer = tokenizer or getattr(train_loader, "tokenizer", None)
+        self.vocab_size = getattr(train_loader, "vocab_size", None)
+
+        self.model = model or instantiate(config.model, vocab_size=self.vocab_size)
         self.model.to(self.device)
         self.loss_fn = nn.CrossEntropyLoss()
         self.optimizer = instantiate(config.optimizer, params=self.model.parameters())
         self.lr = lr or config.optimizer.lr
-        if train_loader is None or val_loader is None:
-            train_loader, val_loader = instantiate(
-                config.dataset, tokenizer=self.tokenizer
-            )
-        self.train_loader = train_loader
-        self.val_loader = val_loader
         self.total_iters = len(self.train_loader) * self.epochs
         self.run_dir: Path | None = None
         self.handlers: dict = {}

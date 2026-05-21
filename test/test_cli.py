@@ -20,7 +20,6 @@ def test_init_generates_parseable_starter_project() -> None:
             "utils.py",
         ]
         expected_dirs = [
-            "tokenizers",
             "models",
             "dataset",
         ]
@@ -36,29 +35,6 @@ def test_init_generates_parseable_starter_project() -> None:
         # Check all Python files are parseable
         for py_file in project_dir.rglob("*.py"):
             py_compile.compile(str(py_file), doraise=True)
-
-
-def test_init_generated_config_has_tokenizer_section() -> None:
-    with tempfile.TemporaryDirectory() as temp_dir:
-        project_dir = Path(temp_dir) / "test-tokenizer"
-        main(["init", str(project_dir), "-y"])
-
-        config_text = (project_dir / "config.yaml").read_text()
-        assert "tokenizer:" in config_text
-        assert "_target_:" in config_text
-
-
-def test_init_generated_main_uses_tokenizer() -> None:
-    with tempfile.TemporaryDirectory() as temp_dir:
-        project_dir = Path(temp_dir) / "test-main"
-        main(["init", str(project_dir), "-y"])
-
-        main_text = (project_dir / "main.py").read_text()
-        assert "tokenizer" in main_text
-        assert "instantiate" in main_text
-        # No trainite imports in generated code
-        assert "trainite." not in main_text
-
 
 def test_init_generated_trainer_has_no_trainite_imports() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:

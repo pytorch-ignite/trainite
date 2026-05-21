@@ -3,7 +3,6 @@ from pathlib import Path
 
 from trainite.config.dataset import StringReverseDatasetConfig
 from trainite.config.model import TransformerModelConfig
-from trainite.config.tokenizer import CharTokenizerConfig
 from trainite.config.trainer import PreTrainerConfig
 
 
@@ -30,11 +29,6 @@ class ModelSpec(ComponentSpec):
 
 @dataclass(frozen=True)
 class DatasetSpec(ComponentSpec):
-    pass
-
-
-@dataclass(frozen=True)
-class TokenizerSpec(ComponentSpec):
     pass
 
 
@@ -80,31 +74,17 @@ TRAINER_SPECS = {
     ),
 }
 
-TOKENIZER_SPECS = {
-    "char": TokenizerSpec(
-        name="char",
-        implementation_path=Path("trainite/tokenizers/char_tokenizer.py"),
-        config_cls=CharTokenizerConfig,
-        implementation_symbol="CharTokenizer",
-        builder_symbol="build_tokenizer",
-        template_replacements=[],
-        dependencies=[],
-    ),
-}
-
 
 REGISTRY = {
     "models": MODEL_SPECS,
     "datasets": DATASET_SPECS,
     "trainers": TRAINER_SPECS,
-    "tokenizers": TOKENIZER_SPECS,
 }
 
 
 MODEL_CONFIGS = {name: spec.config_cls for name, spec in MODEL_SPECS.items()}
 DATASET_CONFIGS = {name: spec.config_cls for name, spec in DATASET_SPECS.items()}
 TRAINER_CONFIGS = {name: spec.config_cls for name, spec in TRAINER_SPECS.items()}
-TOKENIZER_CONFIGS = {name: spec.config_cls for name, spec in TOKENIZER_SPECS.items()}
 
 
 def get_model_config_cls(name: str):
@@ -119,10 +99,6 @@ def get_trainer_config_cls(name: str):
     return TRAINER_CONFIGS[name]
 
 
-def get_tokenizer_config_cls(name: str):
-    return TOKENIZER_CONFIGS[name]
-
-
 def get_model_spec(name: str) -> ModelSpec:
     return MODEL_SPECS[name]
 
@@ -133,7 +109,3 @@ def get_dataset_spec(name: str) -> DatasetSpec:
 
 def get_trainer_spec(name: str) -> TrainerSpec:
     return TRAINER_SPECS[name]
-
-
-def get_tokenizer_spec(name: str) -> TokenizerSpec:
-    return TOKENIZER_SPECS[name]

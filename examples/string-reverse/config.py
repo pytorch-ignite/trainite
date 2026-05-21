@@ -28,7 +28,6 @@ class OptimizerConfig(ComponentConfig):
 
 
 class ProjectConfig(BaseModel):
-    tokenizer: ComponentConfig
     model: ComponentConfig
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
     dataset: ComponentConfig

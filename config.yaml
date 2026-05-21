@@ -1,7 +1,3 @@
-tokenizer:
-  _target_: "trainite.tokenizers.char_tokenizer.build_tokenizer"
-  alphabet: "@alpha"
-
 model:
   _target_: "trainite.models.transformer.build_transformer_model"
   hidden_size: 64

@@ -1,6 +1,3 @@
-tokenizer:
-  _target_: tokenizers.char.build_tokenizer
-  alphabet: abcdefghijklmnopqrstuvwxyz
 model:
   _target_: models.transformer.build_transformer_model
   hidden_size: 64
