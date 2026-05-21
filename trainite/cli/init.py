@@ -202,8 +202,8 @@ def _build_templates(
                     f"from trainer import {trainer_spec.implementation_symbol}",
                 ),
                 (
-                    "    trainer = PreTrainer(",
-                    f"    trainer = {trainer_spec.implementation_symbol}(",
+                    "trainer = PreTrainer(",
+                    f"trainer = {trainer_spec.implementation_symbol}(",
                 ),
             ],
         ),
