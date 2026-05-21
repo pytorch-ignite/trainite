@@ -10,6 +10,37 @@ ALPHABET_PRESETS = {
 }
 
 
+class CharTokenizer:
+    """A simple character-level tokenizer.
+
+    Maps each character in the alphabet to a unique integer ID (1-indexed).
+    ID 0 is reserved as the padding token.
+    """
+
+    def __init__(self, alphabet: str = "abcdefghijklmnopqrstuvwxyz") -> None:
+        self.alphabet = ALPHABET_PRESETS.get(alphabet, alphabet)
+        self.pad_token_id = 0
+        self.char_to_id = {c: i + 1 for i, c in enumerate(self.alphabet)}
+        self.id_to_char = {i + 1: c for i, c in enumerate(self.alphabet)}
+
+    @property
+    def vocab_size(self) -> int:
+        """Number of unique tokens in the vocabulary (excludes padding token)."""
+        return len(self.alphabet)
+
+    def encode(self, text: str) -> list[int]:
+        """Convert a string to a list of token IDs."""
+        return [self.char_to_id[c] for c in text]
+
+    def decode(self, ids: list[int] | torch.Tensor) -> str:
+        """Convert a list of token IDs back to a string, skipping padding tokens."""
+        if isinstance(ids, torch.Tensor):
+            ids = ids.tolist()
+        return "".join(
+            self.id_to_char[i] for i in ids if i != self.pad_token_id
+        )
+
+
 class StringReverseDataset(Dataset):
     def __init__(
         self,
@@ -20,17 +51,15 @@ class StringReverseDataset(Dataset):
         fixed_length: bool = True,
         alphabet: str = "abcdefghijklmnopqrstuvwxyz",
     ) -> None:
-        self.alphabet = ALPHABET_PRESETS.get(alphabet, alphabet)
-        vocab_size = len(self.alphabet)
-        self.char_to_id = {c: i + 1 for i, c in enumerate(self.alphabet)}
-        self.id_to_char = {i + 1: c for i, c in enumerate(self.alphabet)}
+        self.tokenizer = CharTokenizer(alphabet)
+        self.vocab_size = self.tokenizer.vocab_size
 
         generator = torch.Generator().manual_seed(seed)
 
         if fixed_length:
             self.inputs = torch.randint(
                 low=1,
-                high=vocab_size + 1,
+                high=self.vocab_size + 1,
                 size=(size, max_seq_len),
                 generator=generator,
             )
@@ -47,7 +76,7 @@ class StringReverseDataset(Dataset):
 
                 seq = torch.randint(
                     low=1,
-                    high=vocab_size + 1,
+                    high=self.vocab_size + 1,
                     size=(length,),
                     generator=generator,
                 )
@@ -65,7 +94,7 @@ class StringReverseDataset(Dataset):
         }
 
     def decode(self, ids: torch.Tensor) -> str:
-        return "".join([self.id_to_char[idx.item()] for idx in ids if idx.item() != 0])
+        return self.tokenizer.decode(ids)
 
 
 def collate_fn(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:

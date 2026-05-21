@@ -51,7 +51,7 @@ class ProjectConfig(BaseModel):
     trainer: TrainerConfig
     output: OutputConfig
     seed: int = 42
-    device: str = "cuda"
+    device: str = "auto"
 
 
 def load_yaml(path: str | Path) -> dict:
