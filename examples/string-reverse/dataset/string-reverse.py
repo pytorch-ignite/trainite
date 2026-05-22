@@ -1,10 +1,13 @@
-from __future__ import annotations
-
 import torch
 from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence
 
-from config import StringReverseDatasetConfig
+
+ALPHABET_PRESETS = {
+    "@alpha": "abcdefghijklmnopqrstuvwxyz",
+    "@digits": "0123456789",
+    "@alphanumeric": "abcdefghijklmnopqrstuvwxyz0123456789",
+}
 
 
 class StringReverseDataset(Dataset):
@@ -13,17 +16,17 @@ class StringReverseDataset(Dataset):
         size: int,
         min_seq_len: int,
         max_seq_len: int,
-        vocab_size: int,
         seed: int,
         fixed_length: bool = True,
         alphabet: str = "abcdefghijklmnopqrstuvwxyz",
     ) -> None:
-        self.alphabet = alphabet
-        self.char_to_id = {c: i + 1 for i, c in enumerate(alphabet)}
-        self.id_to_char = {i + 1: c for i, c in enumerate(alphabet)}
-        
+        self.alphabet = ALPHABET_PRESETS.get(alphabet, alphabet)
+        vocab_size = len(self.alphabet)
+        self.char_to_id = {c: i + 1 for i, c in enumerate(self.alphabet)}
+        self.id_to_char = {i + 1: c for i, c in enumerate(self.alphabet)}
+
         generator = torch.Generator().manual_seed(seed)
-        
+
         if fixed_length:
             self.inputs = torch.randint(
                 low=1,
@@ -49,7 +52,7 @@ class StringReverseDataset(Dataset):
                     generator=generator,
                 )
                 self.inputs.append(seq)
-            
+
             self.labels = [torch.flip(seq, dims=[0]) for seq in self.inputs]
 
     def __len__(self) -> int:
@@ -68,49 +71,56 @@ class StringReverseDataset(Dataset):
 def collate_fn(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     input_ids = [item["input_ids"] for item in batch]
     labels = [item["labels"] for item in batch]
-    
+
     padded_input_ids = pad_sequence(input_ids, batch_first=True, padding_value=0)
-    padded_labels = pad_sequence(labels, batch_first=True, padding_value=0)
-    
+    padded_labels = pad_sequence(labels, batch_first=True, padding_value=-100)
+
     return {
         "input_ids": padded_input_ids,
         "labels": padded_labels,
     }
 
 
-def build_dataloaders(
-    config: StringReverseDatasetConfig,
+def build_string_reverse_dataloaders(
+    train_size: int = 256,
+    val_size: int = 64,
+    batch_size: int = 32,
+    min_seq_len: int = 1,
+    max_seq_len: int = 16,
+    fixed_length: bool = True,
+    alphabet: str = "abcdefghijklmnopqrstuvwxyz",
+    num_workers: int = 0,
+    seed: int = 7,
+    **kwargs,
 ) -> tuple[DataLoader, DataLoader]:
     train_dataset = StringReverseDataset(
-        size=config.train_size,
-        min_seq_len=config.min_seq_len,
-        max_seq_len=config.max_seq_len,
-        vocab_size=config.vocab_size,
-        seed=config.seed,
-        fixed_length=config.fixed_length,
-        alphabet=config.alphabet,
+        size=train_size,
+        min_seq_len=min_seq_len,
+        max_seq_len=max_seq_len,
+        seed=seed,
+        fixed_length=fixed_length,
+        alphabet=alphabet,
     )
     val_dataset = StringReverseDataset(
-        size=config.val_size,
-        min_seq_len=config.min_seq_len,
-        max_seq_len=config.max_seq_len,
-        vocab_size=config.vocab_size,
-        seed=config.seed + 1,
-        fixed_length=config.fixed_length,
-        alphabet=config.alphabet,
+        size=val_size,
+        min_seq_len=min_seq_len,
+        max_seq_len=max_seq_len,
+        seed=seed + 1,
+        fixed_length=fixed_length,
+        alphabet=alphabet,
     )
     train_loader = DataLoader(
         train_dataset,
-        batch_size=config.batch_size,
+        batch_size=batch_size,
         shuffle=True,
-        num_workers=config.num_workers,
         collate_fn=collate_fn,
+        num_workers=num_workers,
     )
     val_loader = DataLoader(
         val_dataset,
-        batch_size=config.batch_size,
+        batch_size=batch_size,
         shuffle=False,
-        num_workers=config.num_workers,
         collate_fn=collate_fn,
+        num_workers=num_workers,
     )
     return train_loader, val_loader

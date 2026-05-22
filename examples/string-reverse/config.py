@@ -1,54 +1,35 @@
-from __future__ import annotations
-
 from pathlib import Path
+from typing import Any
 
+import torch
 import yaml
-from pydantic import BaseModel, Field
-
-class TransformerModelConfig(BaseModel):
-    vocab_size: int = 32
-    hidden_size: int = 64
-    num_layers: int = 2
-    num_heads: int = 2
-    feedforward_dim: int = 128
-    dropout: float = 0.1
-    max_seq_len: int = 128
-
-class StringReverseDatasetConfig(BaseModel):
-    alphabet: str = "abcdefghijklmnopqrstuvwxyz"
-    vocab_size: int = 26
-    train_size: int = 256
-    val_size: int = 64
-    batch_size: int = 32
-    min_seq_len: int = 1
-    max_seq_len: int = 16
-    fixed_length: bool = True
-    num_workers: int = 2
-    seed: int = 7
-
-class PreTrainerConfig(BaseModel):
-    device: str = "cpu"
-    type: str = "pre"
-    epochs: int = 3
-    learning_rate: float = 1e-3
-    log_every_steps: int = 10
-    grad_clip_norm: float | None = None
+from omegaconf import OmegaConf
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class OutputConfig(BaseModel):
-    root: str = "output"
-    run_name: str = "transformer__string-reverse"
+    root: str
+    run_name: str
+
+
+class ComponentConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    target: str = Field(alias="_target_")
+
+
+class TrainerConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    learning_rate: float = 1e-3
+    log_every_steps: int = 10
 
 
 class ProjectConfig(BaseModel):
-    model_name: str = "transformer"
-    dataset_name: str = "string-reverse"
-    trainer_name: str = "pretrainer"
-    model: TransformerModelConfig = Field(default_factory=TransformerModelConfig)
-    dataset: StringReverseDatasetConfig = Field(default_factory=StringReverseDatasetConfig)
-    trainer: PreTrainerConfig = Field(default_factory=PreTrainerConfig)
-    output: OutputConfig = Field(default_factory=OutputConfig)
+    model: ComponentConfig
+    dataset: ComponentConfig
+    trainer: TrainerConfig
+    output: OutputConfig
     seed: int = 42
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def load_yaml(path: str | Path) -> dict:
@@ -59,17 +40,15 @@ def load_yaml(path: str | Path) -> dict:
     return data
 
 
-def dump_yaml(data: dict, path: str | Path) -> None:
+def dump_yaml(data: Any, path: str | Path) -> None:
     Path(path).write_text(yaml.safe_dump(data, sort_keys=False))
 
 
-def load_config(path: str | Path) -> ProjectConfig:
-    return ProjectConfig.model_validate(load_yaml(path))
-
-
 def dump_config(config: ProjectConfig, path: str | Path) -> None:
-    dump_yaml(config.model_dump(), path)
+    data = config.model_dump(by_alias=True, polymorphic_serialization=True)
+    dump_yaml(data, path)
 
 
-def default_config() -> ProjectConfig:
-    return ProjectConfig()
+def load_config(path: str | Path) -> ProjectConfig:
+    raw_conf = OmegaConf.load(path)
+    return ProjectConfig.model_validate(raw_conf)

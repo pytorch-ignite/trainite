@@ -16,7 +16,7 @@ All files in this directory are self-contained and do not depend on the `trainit
 
 | File | Description |
 |---|---|
-| `config.yaml` | Hyperparameters including model dimensions, sequence lengths, and alphabet |
+| `config.yaml` | Hyperparameters including model dimensions, variable sequence lengths, and alphabet shortcuts |
 | `config.py` | Pydantic classes for type-safe configuration loading |
 | `model.py` | Transformer architecture with positional encoding and multi-head attention |
 | `dataset.py` | Dataset logic for generating character sequences and their reversals |
@@ -35,10 +35,10 @@ uv run python main.py config.yaml
 ### Expected Output
 
 ```text
-2026-05-12 16:21:43 [INFO] trainer: starting run in output/transformer__string-reverse/...
-2026-05-12 16:21:44 [INFO] trainer: Evaluating on training set...
-2026-05-12 16:21:44 [INFO] trainer: Evaluating on validation set...
-2026-05-12 16:21:44 [INFO] trainer: epoch=1 train_loss=3.3850 train_acc=0.0461 val_loss=3.3971 val_acc=0.0500
+2026-05-15 16:21:43 [INFO] trainer: starting run in output/transformer__string-reverse/...
+2026-05-15 16:21:44 [INFO] trainer: Evaluating on training set...
+2026-05-15 16:21:44 [INFO] trainer: Evaluating on validation set...
+2026-05-15 16:21:44 [INFO] trainer: epoch=1 train_loss=3.3850 train_acc=0.0461 val_loss=3.3971 val_acc=0.0500
 ...
 ```
 
@@ -48,16 +48,24 @@ The model is trained to reverse a sequence of characters from a defined alphabet
 
 - **Input**: A character sequence, e.g. `['a', 'b', 'c', 'd']`
 - **Output**: The reversed sequence, e.g. `['d', 'c', 'b', 'a']`
-- **Vocabulary**: Characters defined in the `alphabet` config string.
+- **Vocabulary**: Characters defined in the `alphabet` config string (supports shortcuts like `@alpha`, `@digits`).
 - **Variable Length**: The dataset supports sequences of varying lengths, using a padding token (Index 0) to align batches.
 
 ## Configuration
 
-You can customize the task by editing `config.yaml`. For example, to change the sequence complexity:
+The task is highly customizable via `config.yaml`. The new modular architecture uses `_target_` paths to allow you to swap your own models or dataset builders without changing the trainer code.
+
+Example for a variable-length alphanumeric task:
 
 ```yaml
+model:
+  _target_: "model.build_model"
+  vocab_size: 36 # 26 letters + 10 digits
+  hidden_size: 64
+
 dataset:
-  alphabet: "abcdefghijklmnopqrstuvwxyz"
+  _target_: "dataset.build_dataloaders"
+  alphabet: "@alphanumeric"
   min_seq_len: 4
   max_seq_len: 32
   fixed_length: false

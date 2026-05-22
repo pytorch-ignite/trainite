@@ -1,53 +1,57 @@
-from __future__ import annotations
-
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 import torch
 from ignite.engine import Engine, Events
+from ignite.handlers import EarlyStopping, ModelCheckpoint
+from ignite.handlers.tensorboard_logger import OptimizerParamsHandler, TensorboardLogger
 from ignite.metrics import Accuracy, Loss, RunningAverage
 from torch import nn
-from torch.utils.tensorboard import SummaryWriter
 
 from config import ProjectConfig, dump_config
-from dataset import build_dataloaders
-from model import build_model
+from utils import instantiate
 
 logger = logging.getLogger(__name__)
 
 
-class Trainer:
+class PreTrainer:
     def __init__(
         self,
         config: ProjectConfig,
+        device: str | torch.device | None = None,
+        learning_rate: float | None = None,
+        epochs: int | None = None,
+        log_every_steps: int | None = None,
+        grad_clip_norm: float | None = None,
         model: nn.Module | None = None,
         train_loader=None,
         val_loader=None,
+        **kwargs,
     ) -> None:
         self.config = config
-        self.device = torch.device(config.trainer.device)
+        self.device = device or config.device
+        self.epochs = epochs or config.trainer.epochs
+        self.log_every_steps = log_every_steps or config.trainer.log_every_steps
+        self.grad_clip_norm = grad_clip_norm or config.trainer.grad_clip_norm
+
         torch.manual_seed(config.seed)
 
-        self.model = model or build_model(config.model)
+        self.model = model or instantiate(config.model)
         self.model.to(self.device)
-        self.loss_fn = nn.CrossEntropyLoss(ignore_index=0)
+        self.loss_fn = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.AdamW(
-            self.model.parameters(), lr=config.trainer.learning_rate
+            self.model.parameters(), lr=learning_rate or config.trainer.learning_rate
         )
 
         if train_loader is None or val_loader is None:
-            train_loader, val_loader = build_dataloaders(config.dataset)
+            train_loader, val_loader = instantiate(config.dataset)
         self.train_loader = train_loader
         self.val_loader = val_loader
 
-        self.run_dir = self._make_run_dir()
-        self.writer = SummaryWriter(log_dir=str(self.run_dir / "tensorboard"))
-        dump_config(config, self.run_dir / "config.yaml")
-
-        self.best_score = float("-inf")
-        self.best_path = self.run_dir / "best.pt"
-        self.last_path = self.run_dir / "last.pt"
+        self.run_dir: Optional[Path] = None
+        self.handlers: dict = {}
 
         self.engine = Engine(self._train_step)
         self.train_evaluator = Engine(self._eval_step)
@@ -55,7 +59,6 @@ class Trainer:
         self.metrics = {}
 
         self._attach_metrics()
-        self._attach_handlers()
 
     def _make_run_dir(self) -> Path:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -69,7 +72,7 @@ class Trainer:
     ) -> tuple[torch.Tensor, torch.Tensor]:
         logits = output["logits"].reshape(-1, output["logits"].size(-1))
         targets = output["targets"].reshape(-1)
-        mask = targets != 0
+        mask = targets != self.loss_fn.ignore_index
         return logits[mask], targets[mask]
 
     def _flatten_loss(
@@ -77,7 +80,7 @@ class Trainer:
     ) -> tuple[torch.Tensor, torch.Tensor]:
         logits = output["logits"].reshape(-1, output["logits"].size(-1))
         targets = output["targets"].reshape(-1)
-        mask = targets != 0
+        mask = targets != self.loss_fn.ignore_index
         return logits[mask], targets[mask]
 
     def _train_step(
@@ -92,10 +95,8 @@ class Trainer:
         loss = self.loss_fn(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
         loss.backward()
 
-        if self.config.trainer.grad_clip_norm is not None:
-            torch.nn.utils.clip_grad_norm_(
-                self.model.parameters(), self.config.trainer.grad_clip_norm
-            )
+        if self.grad_clip_norm is not None:
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
 
         self.optimizer.step()
         return {
@@ -137,45 +138,104 @@ class Trainer:
         }
 
     def _attach_handlers(self) -> None:
+        # 1. Log training loss every N steps
+        def _log_loss(engine):
+            logger.info(
+                f"epoch={engine.state.epoch} iteration={engine.state.iteration} "
+                f"train_loss={engine.state.output['loss']:.4f}"
+            )
+
         self.engine.add_event_handler(
-            Events.ITERATION_COMPLETED(every=self.config.trainer.log_every_steps),
-            self._log_training,
-        )
-        self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
-        self.engine.add_event_handler(
-            Events.EPOCH_COMPLETED, self._save_last_checkpoint
-        )
-        self.val_evaluator.add_event_handler(
-            Events.COMPLETED, self._update_best_checkpoint
+            Events.ITERATION_COMPLETED(every=self.log_every_steps),
+            _log_loss,
         )
 
-    def _log_training(self, engine: Engine) -> None:
-        metrics = engine.state.metrics
-        epoch = engine.state.epoch
-        iteration = engine.state.iteration
-        loss = float(metrics["loss"])
-        logger.info("epoch=%s iteration=%s train_loss=%.4f", epoch, iteration, loss)
-        self.writer.add_scalar("train/loss", loss, iteration)
+        # 2. Run evaluations
+        self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
+
+        # 3. ModelCheckpoint
+        to_save = {"model": self.model, "optimizer": self.optimizer}
+
+        def score_function(engine):
+            val_acc = engine.state.metrics["token_accuracy"]
+            return val_acc
+
+        checkpoint = ModelCheckpoint(
+            dirname=str(self.run_dir),
+            n_saved=1,
+            filename_prefix="best",
+            score_function=score_function,
+            score_name="val_acc",
+            require_empty=False,
+            global_step_transform=lambda *_: self.engine.state.epoch,
+        )
+        self.val_evaluator.add_event_handler(Events.COMPLETED, checkpoint, to_save)
+
+        last_checkpoint = ModelCheckpoint(
+            dirname=str(self.run_dir),
+            n_saved=1,
+            filename_prefix="last",
+            require_empty=False,
+            global_step_transform=lambda *_: self.engine.state.epoch,
+        )
+        self.engine.add_event_handler(Events.EPOCH_COMPLETED, last_checkpoint, to_save)
+
+        self.handlers["checkpoint_best"] = checkpoint
+        self.handlers["checkpoint_last"] = last_checkpoint
+
+        # 4. EarlyStopping
+        early_stopping = EarlyStopping(
+            patience=3,
+            score_function=lambda engine: -engine.state.metrics["loss"],
+            trainer=self.engine,
+            min_delta=0.0,
+        )
+        self.val_evaluator.add_event_handler(Events.COMPLETED, early_stopping)
+        self.handlers["early_stopping"] = early_stopping
+
+        # 5. TensorboardLogger
+        log_dir = self.run_dir / "tensorboard" if self.run_dir else None
+        tb_logger = TensorboardLogger(log_dir=log_dir)
+        tb_logger.attach_output_handler(
+            self.engine,
+            event_name=Events.ITERATION_COMPLETED,
+            tag="training",
+            output_transform=lambda output: {"batch_loss": output["loss"]},
+        )
+
+        metric_names = ["loss", "token_accuracy"]
+        tb_logger.attach_output_handler(
+            self.train_evaluator,
+            event_name=Events.EPOCH_COMPLETED,
+            tag="training",
+            metric_names=metric_names,
+            global_step_transform=lambda *_: self.engine.state.epoch,
+        )
+        tb_logger.attach_output_handler(
+            self.val_evaluator,
+            event_name=Events.EPOCH_COMPLETED,
+            tag="validation",
+            metric_names=metric_names,
+            global_step_transform=lambda *_: self.engine.state.epoch,
+        )
+
+        tb_logger.attach(
+            self.engine,
+            log_handler=OptimizerParamsHandler(self.optimizer),
+            event_name=Events.ITERATION_STARTED,
+        )
+        self.handlers["tensorboard"] = tb_logger
 
     def _run_evaluations(self, engine: Engine) -> None:
         logger.info("Evaluating on training set...")
         self.train_evaluator.run(self.train_loader)
-        
+
         logger.info("Evaluating on validation set...")
         self.val_evaluator.run(self.val_loader)
 
         train_metrics = self.train_evaluator.state.metrics
         val_metrics = self.val_evaluator.state.metrics
         epoch = engine.state.epoch
-
-        self.writer.add_scalar("eval/train_loss", train_metrics["loss"], epoch)
-        self.writer.add_scalar(
-            "eval/train_token_accuracy", train_metrics["token_accuracy"], epoch
-        )
-        self.writer.add_scalar("eval/val_loss", val_metrics["loss"], epoch)
-        self.writer.add_scalar(
-            "eval/val_token_accuracy", val_metrics["token_accuracy"], epoch
-        )
 
         logger.info(
             "epoch=%s train_loss=%.4f train_acc=%.4f val_loss=%.4f val_acc=%.4f",
@@ -186,31 +246,21 @@ class Trainer:
             val_metrics["token_accuracy"],
         )
 
-    def _save_state(self, path: Path, epoch: int, score: float | None = None) -> None:
-        payload = {
-            "epoch": epoch,
-            "model_state": self.model.state_dict(),
-            "optimizer_state": self.optimizer.state_dict(),
-            "config": self.config.model_dump(),
-            "best_score": self.best_score,
-        }
-        if score is not None:
-            payload["score"] = score
-        torch.save(payload, path)
-
-    def _save_last_checkpoint(self, engine: Engine) -> None:
-        self._save_state(self.last_path, engine.state.epoch)
-
-    def _update_best_checkpoint(self, engine: Engine) -> None:
-        score = float(engine.state.metrics["token_accuracy"])
-        if score > self.best_score:
-            self.best_score = score
-            self._save_state(self.best_path, engine.state.epoch, score)
-            logger.info("saved best checkpoint score=%.4f", score)
-
     def run(self) -> None:
+        # create run directory and handlers when the run actually starts
+        if self.run_dir is None:
+            self.run_dir = self._make_run_dir()
+            dump_config(self.config, self.run_dir / "config.yaml")
+            self._attach_handlers()
+
         logger.info("starting run in %s", self.run_dir)
-        self.writer.add_text("config", str(self.config.model_dump()))
-        self.engine.run(self.train_loader, max_epochs=self.config.trainer.epochs)
-        self.writer.flush()
-        self.writer.close()
+        config_data = self.config.model_dump(
+            by_alias=True, polymorphic_serialization=True
+        )
+        if "tensorboard" in self.handlers:
+            self.handlers["tensorboard"].writer.add_text("config", str(config_data))
+
+        self.engine.run(self.train_loader, max_epochs=self.epochs)
+
+        if "tensorboard" in self.handlers:
+            self.handlers["tensorboard"].close()

@@ -1,12 +1,22 @@
-from __future__ import annotations
-
 import argparse
 import inspect
+import re
 import textwrap
 from pathlib import Path
 from typing import Iterable, Sequence
 
-from trainite.config import default_config, dump_config
+import tomlkit
+from packaging.requirements import Requirement
+
+from trainite.config import (
+    ComponentConfig,
+    DataConfig,
+    DataLoaderConfig,
+    OutputConfig,
+    ProjectConfig,
+    SplitConfig,
+    dump_config,
+)
 from trainite.config.registry import (
     REGISTRY,
     get_dataset_spec,
@@ -38,72 +48,6 @@ def _render_class_source(cls: type) -> str:
     return textwrap.dedent(inspect.getsource(cls)).strip()
 
 
-def _build_config_template(
-    model_name: str, dataset_name: str, trainer_name: str
-) -> str:
-    model_spec = get_model_spec(model_name)
-    dataset_spec = get_dataset_spec(dataset_name)
-    trainer_spec = get_trainer_spec(trainer_name)
-    model_source = textwrap.indent(_render_class_source(model_spec.config_cls), "")
-    dataset_source = textwrap.indent(_render_class_source(dataset_spec.config_cls), "")
-    trainer_source = textwrap.indent(_render_class_source(trainer_spec.config_cls), "")
-    lines = [
-        "from __future__ import annotations",
-        "",
-        "from pathlib import Path",
-        "",
-        "import yaml",
-        "from pydantic import BaseModel, Field",
-        "",
-        model_source,
-        "",
-        dataset_source,
-        "",
-        trainer_source,
-        "",
-        "",
-        "class OutputConfig(BaseModel):",
-        '    root: str = "output"',
-        f'    run_name: str = "{model_name}__{dataset_name}"',
-        "",
-        "",
-        "class ProjectConfig(BaseModel):",
-        f'    model_name: str = "{model_name}"',
-        f'    dataset_name: str = "{dataset_name}"',
-        f'    trainer_name: str = "{trainer_name}"',
-        f"    model: {model_spec.config_cls.__name__} = Field(default_factory={model_spec.config_cls.__name__})",
-        f"    dataset: {dataset_spec.config_cls.__name__} = Field(default_factory={dataset_spec.config_cls.__name__})",
-        f"    trainer: {trainer_spec.config_cls.__name__} = Field(default_factory={trainer_spec.config_cls.__name__})",
-        "    output: OutputConfig = Field(default_factory=OutputConfig)",
-        "    seed: int = 42",
-        "",
-        "",
-        "def load_yaml(path: str | Path) -> dict:",
-        "    config_path = Path(path)",
-        "    data = yaml.safe_load(config_path.read_text()) or {}",
-        "    if not isinstance(data, dict):",
-        '        raise ValueError("Config file must contain a mapping")',
-        "    return data",
-        "",
-        "",
-        "def dump_yaml(data: dict, path: str | Path) -> None:",
-        "    Path(path).write_text(yaml.safe_dump(data, sort_keys=False))",
-        "",
-        "",
-        "def load_config(path: str | Path) -> ProjectConfig:",
-        "    return ProjectConfig.model_validate(load_yaml(path))",
-        "",
-        "",
-        "def dump_config(config: ProjectConfig, path: str | Path) -> None:",
-        "    dump_yaml(config.model_dump(), path)",
-        "",
-        "",
-        "def default_config() -> ProjectConfig:",
-        "    return ProjectConfig()",
-    ]
-    return "\n".join(lines).strip() + "\n"
-
-
 def _prompt_text(prompt: str, default: str) -> str:
     value = input(f"{prompt} [{default}]: ").strip()
     return value or default
@@ -117,7 +61,30 @@ def _prompt_choice(prompt: str, choices: Sequence[str], default: str) -> str:
 
 
 def _project_directory(raw_project_dir: str, force: bool) -> Path:
-    project_dir = Path(raw_project_dir).expanduser().resolve()
+
+    raw_path = Path(raw_project_dir).expanduser()
+
+    parent = raw_path.parent
+    name = raw_path.name
+
+    def _normalize_name(n: str) -> str:
+        n = n.strip().lower()
+        # Replace any character that is not alnum, dot, underscore or hyphen with a hyphen
+        n = re.sub(r"[^a-z0-9._-]+", "-", n)
+        # Collapse consecutive hyphens
+        n = re.sub(r"-+", "-", n)
+        # Strip leading/trailing separators
+        n = n.strip("-_.")
+        if not n:
+            n = "project"
+        if n[0].isdigit():
+            n = f"proj-{n}"
+        return n
+
+    normalized_name = _normalize_name(name)
+
+    project_dir = (parent / normalized_name).resolve()
+
     if project_dir.exists():
         if not project_dir.is_dir():
             raise SystemExit(f"{project_dir} is not a directory")
@@ -132,80 +99,123 @@ def _project_directory(raw_project_dir: str, force: bool) -> Path:
 def _write_file(path: Path, content: str, force: bool) -> None:
     if path.exists() and not force:
         raise FileExistsError(f"{path} already exists; pass --force to overwrite it")
+    if path.parent:
+        path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
 
 
+def generate_uv_project(name: str, version: str, dependencies: list[str]) -> str:
+    doc = tomlkit.document()
+
+    deps_arr = tomlkit.item(dependencies)
+    deps_arr.multiline(True)
+
+    project = tomlkit.table()
+    project.add("name", name)
+    project.add("version", version)
+    project.add("description", f"{name} - generated by Trainite")
+    project.add("dependencies", deps_arr)
+    project.add("requires-python", ">=3.10")
+    doc.add("project", project)
+
+    return tomlkit.dumps(doc)
+
+
+def parse_dependencies(
+    file_path: Path,
+) -> tuple[dict[str, str], dict[str, str]]:
+    with open(file_path, "r") as f:
+        data = tomlkit.parse(f.read())
+
+    # 1. Main dependencies
+    required_deps = data["dependency-groups"]["generated"]
+
+    # 2. Optional dependencies
+    other_deps = []
+    optional_deps = data["project"].get("optional-dependencies", {})
+    for group_deps in optional_deps.values():
+        other_deps.extend(group_deps)
+
+    # 3. Dependency groups (PEP 735)
+    dependency_groups = data["dependency-groups"]
+    for group, group_deps in dependency_groups.items():
+        if group != "generated":
+            other_deps.extend(group_deps)
+
+    dep_map = {}
+    other_dep_map = {}
+
+    for dep in required_deps:
+        req = Requirement(dep)
+        dep_map[req.name] = dep
+
+    for dep in other_deps:
+        req = Requirement(dep)
+        other_dep_map[req.name] = dep
+    return dep_map, other_dep_map
+
+
 def _build_templates(
-    model_name: str, dataset_name: str, trainer_name: str
+    model_name: str, dataset_name: str, trainer_name: str, project_name: str
 ) -> dict[str, str]:
     model_spec = get_model_spec(model_name)
     dataset_spec = get_dataset_spec(dataset_name)
     trainer_spec = get_trainer_spec(trainer_name)
+    spec_deps = set()
+    for spec in [model_spec, dataset_spec, trainer_spec]:
+        spec_deps.update(spec.dependencies)
+    required_deps, other_deps = parse_dependencies(PROJECT_ROOT / "pyproject.toml")
+    final_deps = set(required_deps.values())
+    for dep in spec_deps:
+        if dep not in required_deps and dep not in other_deps:
+            raise ValueError(
+                f"Dependency '{dep}' required by the selected templates is not listed in pyproject.toml"
+            )
+        val = required_deps[dep] if dep in required_deps else other_deps[dep]
+        final_deps.add(val)
     return {
-        "config.py": _build_config_template(model_name, dataset_name, trainer_name),
-        "model.py": _render_template(
+        f"models/{model_spec.name}.py": _render_template(
             model_spec.implementation_path,
-            [
-                (
-                    f"from trainite.config.model import {model_spec.config_cls.__name__}",
-                    f"from config import {model_spec.config_cls.__name__}",
-                ),
-                (
-                    model_spec.builder_symbol,
-                    "build_model",
-                ),
-            ],
+            model_spec.template_replacements,
         ),
-        "dataset.py": _render_template(
+        f"dataset/{dataset_spec.name}.py": _render_template(
             dataset_spec.implementation_path,
-            [
-                (
-                    f"from trainite.config.dataset import {dataset_spec.config_cls.__name__}",
-                    f"from config import {dataset_spec.config_cls.__name__}",
-                ),
-                (
-                    dataset_spec.builder_symbol,
-                    "build_dataloaders",
-                ),
-            ],
+            dataset_spec.template_replacements,
         ),
         "trainer.py": _render_template(
             trainer_spec.implementation_path,
-            [
-                (
-                    "from trainite.config import ProjectConfig, dump_config",
-                    "from config import ProjectConfig, dump_config",
-                ),
-                (
-                    f"from trainite.datasets import {dataset_spec.builder_symbol}",
-                    "from dataset import build_dataloaders",
-                ),
-                (
-                    f"from trainite.models import {model_spec.builder_symbol}",
-                    "from model import build_model",
-                ),
-                ("class PreTrainer:", "class Trainer:"),
-                (f"{model_spec.builder_symbol}(config.model)", "build_model(config.model)"),
-                (
-                    f"{dataset_spec.builder_symbol}(config.dataset)",
-                    "build_dataloaders(config.dataset)",
-                ),
-                ("PreTrainer", "Trainer"),
-            ],
+            trainer_spec.template_replacements,
         ),
+        "utils.py": _render_template(
+            PROJECT_ROOT / "trainite/utils.py",
+            [("trainite.config", "config")],
+        ),
+        "config.py": _render_template(PROJECT_ROOT / "trainite/config/base.py", []),
         "main.py": _render_template(
-            PROJECT_ROOT / "main.py",
+            PROJECT_ROOT / "trainite/main.py",
             [
                 (
-                    "from trainite.config import default_config, load_config",
-                    "from config import default_config, load_config",
+                    "trainite.config",
+                    "config",
                 ),
                 (
                     "from trainite.trainers import PreTrainer",
-                    "from trainer import Trainer",
+                    f"from trainer import {trainer_spec.implementation_symbol}",
                 ),
-                ("trainer = PreTrainer(config)", "trainer = Trainer(config)"),
+                (
+                    "trainer = PreTrainer(config)",
+                    f"trainer = {trainer_spec.implementation_symbol}(config)",
+                ),
             ],
+        ),
+        "README.md": _render_template(
+            PROJECT_ROOT / "trainite/templates/project/README.md",
+            [("{{project_name}}", project_name)],
+        ),
+        "pyproject.toml": generate_uv_project(
+            name=project_name,
+            version="0.1.0",
+            dependencies=sorted(final_deps),
         ),
     }
 
@@ -229,6 +239,9 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("--output-root", help="Output root for generated config")
     init_parser.add_argument("--run-name", help="Run name for generated config")
     init_parser.add_argument(
+        "--trainer", choices=TRAINER_CHOICES, help="Starter trainer template to use"
+    )
+    init_parser.add_argument(
         "--force",
         action="store_true",
         help="Overwrite existing starter files",
@@ -245,41 +258,88 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def init_project(args: argparse.Namespace) -> None:
-    defaults = default_config()
-    if args.project_dir:
-        project_dir_input = args.project_dir
-    elif args.yes:
-        project_dir_input = "my-lm-experiment"
-    else:
-        project_dir_input = _prompt_text("Project directory", "my-lm-experiment")
-    project_dir = _project_directory(project_dir_input, args.force)
-
     if args.yes:
-        model_name = args.model or defaults.model_name
-        dataset_name = args.dataset or defaults.dataset_name
-        output_root = args.output_root or defaults.output.root
+        project_dir = args.project_dir or "my-cool-experiment"
+        model_name = args.model or MODEL_CHOICES[0]
+        dataset_name = args.dataset or DATASET_CHOICES[0]
+        trainer_name = args.trainer or TRAINER_CHOICES[0]
+        output_root = args.output_root or "outputs"
         run_name = args.run_name or f"{model_name}__{dataset_name}"
     else:
+        project_dir = args.project_dir or _prompt_text(
+            "Project directory", "my-cool-experiment"
+        )
         model_name = args.model or _prompt_choice(
-            "Model", MODEL_CHOICES, defaults.model_name
+            "Model", MODEL_CHOICES, MODEL_CHOICES[0]
         )
         dataset_name = args.dataset or _prompt_choice(
-            "Dataset", DATASET_CHOICES, defaults.dataset_name
+            "Dataset", DATASET_CHOICES, DATASET_CHOICES[0]
         )
-        output_root = args.output_root or _prompt_text(
-            "Output directory", defaults.output.root
+        trainer_name = args.trainer or _prompt_choice(
+            "Trainer", TRAINER_CHOICES, TRAINER_CHOICES[0]
         )
+        output_root = args.output_root or _prompt_text("Output directory", "outputs")
         run_name = args.run_name or _prompt_text(
             "Run name", f"{model_name}__{dataset_name}"
         )
 
-    starter_config = default_config()
-    starter_config.model_name = model_name
-    starter_config.dataset_name = dataset_name
-    starter_config.output.root = output_root
-    starter_config.output.run_name = run_name
+    project_dir = _project_directory(project_dir, args.force)
 
-    templates = _build_templates(model_name, dataset_name, defaults.trainer_name)
+    output_config = OutputConfig(root=output_root, run_name=run_name)
+
+    # Build templates for the starter project
+    templates = _build_templates(
+        model_name, dataset_name, trainer_name, project_dir.name
+    )
+
+    model_spec = get_model_spec(model_name)
+    dataset_spec = get_dataset_spec(dataset_name)
+    trainer_spec = get_trainer_spec(trainer_name)
+
+    # Update config to point to the correct builder functions for the model and dataset
+    model_component = model_spec.config_cls()
+    trainer_component = trainer_spec.config_cls()
+
+    model_component.target = f"models.{model_spec.name}.{model_spec.builder_symbol}"
+
+    # Build train split
+    train_dataset = dataset_spec.config_cls()
+    train_dataset.target = f"dataset.{dataset_spec.name}.{dataset_spec.builder_symbol}"
+
+    # Build val split
+    val_dataset = dataset_spec.config_cls()
+    val_dataset.target = f"dataset.{dataset_spec.name}.{dataset_spec.builder_symbol}"
+
+    collate_fn_config = None
+    if dataset_spec.collate_fn_symbol:
+        collate_fn_config = ComponentConfig(
+            _target_=f"dataset.{dataset_spec.name}.{dataset_spec.collate_fn_symbol}"
+        )
+
+    starter_config = ProjectConfig(
+        model=model_component,
+        data=DataConfig(
+            train=SplitConfig(
+                dataset=train_dataset,
+                dataloader=DataLoaderConfig(
+                    batch_size=32,
+                    shuffle=True,
+                    collate_fn=collate_fn_config,
+                ),
+            ),
+            val=SplitConfig(
+                dataset=val_dataset,
+                dataloader=DataLoaderConfig(
+                    batch_size=32,
+                    shuffle=False,
+                    collate_fn=collate_fn_config,
+                ),
+            ),
+        ),
+        trainer=trainer_component,
+        output=output_config,
+    )
+
     dump_config(starter_config, project_dir / "config.yaml")
     for filename, content in templates.items():
         _write_file(project_dir / filename, content, args.force)

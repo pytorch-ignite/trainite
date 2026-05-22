@@ -3,16 +3,33 @@ name = "trainite-prototype"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.10"
 dependencies = [
-    "torch",
-    "pytorch-ignite",
     "pydantic>=2",
     "PyYAML",
-    "tensorboard",
+    "omegaconf>=2.3.0",
+    "tomlkit>=0.15.0",
+    "packaging>=26.2",
 ]
+
+
 [project.scripts]
 trainite = "trainite.cli:main"
 
 [tool.uv]
 package = true
+
+[dependency-groups]
+generated = [
+    "pydantic>=2",
+    "PyYAML",
+    "omegaconf>=2.3.0",
+    "torch",
+    "pytorch-ignite",
+    "tensorboard",
+]
+dev = [
+    "torch",
+    "pytorch-ignite",
+    "tensorboard",
+]
