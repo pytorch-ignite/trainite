@@ -38,15 +38,13 @@ class PreTrainer:
         torch.manual_seed(config.seed)
 
         self.config = config
-        self.device = device or config.device
+        resolved_device = config.device
+        if resolved_device == "auto":
+            resolved_device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = device or resolved_device
         self.epochs = epochs or config.trainer.epochs
         self.log_every_steps = log_every_steps or config.trainer.log_every_steps
         self.grad_clip_norm = grad_clip_norm or config.trainer.grad_clip_norm
-        self.model = model or instantiate(config.model)
-        self.model.to(self.device)
-        self.loss_fn = nn.CrossEntropyLoss()
-        self.optimizer = instantiate(config.optimizer, params=self.model.parameters())
-        self.lr = lr or config.optimizer.lr
 
         if train_loader is None:
             train_loader = self._build_dataloader(config.data.train)
@@ -63,6 +61,26 @@ class PreTrainer:
 
         self.train_loader = train_loader
         self.val_loader = val_loader
+
+        self.vocab_size = getattr(train_loader.dataset, "vocab_size", None)
+        model_params = config.model.model_dump(by_alias=True)
+        configured_vocab_size = model_params.get("vocab_size")
+
+        if configured_vocab_size is not None:
+            if self.vocab_size is not None and configured_vocab_size < self.vocab_size:
+                raise ValueError(
+                    f"Configured model vocab_size ({configured_vocab_size}) is smaller than "
+                    f"the dataset vocabulary size ({self.vocab_size}). "
+                    f"Please increase model vocab_size or remove it from config.yaml "
+                    f"to let it resolve automatically."
+                )
+            self.vocab_size = configured_vocab_size
+
+        self.model = model or instantiate(config.model, vocab_size=self.vocab_size)
+        self.model.to(self.device)
+        self.loss_fn = nn.CrossEntropyLoss()
+        self.optimizer = instantiate(config.optimizer, params=self.model.parameters())
+        self.lr = lr or config.optimizer.lr
         self.total_iters = len(self.train_loader) * self.epochs
         self.run_dir: Path | None = None
         self.handlers: dict = {}

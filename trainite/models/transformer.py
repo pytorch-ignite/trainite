@@ -48,7 +48,11 @@ class TransformerBlock(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         normed = self.norm1(x)
-        attn_output, _ = self.attention(normed, normed, normed)
+        sz = x.size(1)
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(sz, device=x.device)
+        attn_output, _ = self.attention(
+            normed, normed, normed, attn_mask=mask, is_causal=True
+        )
         x = x + attn_output
 
         normed = self.norm2(x)
