@@ -13,31 +13,37 @@ ALPHABET_PRESETS = {
 class CharTokenizer:
     """A simple character-level tokenizer.
 
-    Maps each character in the alphabet to a unique integer ID (1-indexed).
+    Maps each character in the alphabet to a unique integer ID.
     ID 0 is reserved as the padding token.
+    ID 1 is reserved as the BOS token.
+    ID 2 is reserved as the EOS token.
     """
 
     def __init__(self, alphabet: str = "abcdefghijklmnopqrstuvwxyz") -> None:
         self.alphabet = ALPHABET_PRESETS.get(alphabet, alphabet)
         self.pad_token_id = 0
-        self.char_to_id = {c: i + 1 for i, c in enumerate(self.alphabet)}
-        self.id_to_char = {i + 1: c for i, c in enumerate(self.alphabet)}
+        self.bos_token_id = 1
+        self.eos_token_id = 2
+
+        self.char_to_id = {c: i + 3 for i, c in enumerate(self.alphabet)}
+        self.id_to_char = {i + 3: c for i, c in enumerate(self.alphabet)}
 
     @property
     def vocab_size(self) -> int:
-        """Number of unique tokens in the vocabulary (excludes padding token)."""
-        return len(self.alphabet)
+        """Number of unique tokens in the vocabulary (includes special tokens)."""
+        return len(self.alphabet) + 3
 
     def encode(self, text: str) -> list[int]:
         """Convert a string to a list of token IDs."""
         return [self.char_to_id[c] for c in text]
 
     def decode(self, ids: list[int] | torch.Tensor) -> str:
-        """Convert a list of token IDs back to a string, skipping padding tokens."""
+        """Convert a list of token IDs back to a string, skipping padding and special tokens."""
         if isinstance(ids, torch.Tensor):
             ids = ids.tolist()
+        special_token_ids = {self.pad_token_id, self.bos_token_id, self.eos_token_id}
         return "".join(
-            self.id_to_char[i] for i in ids if i != self.pad_token_id
+            self.id_to_char[i] for i in ids if i not in special_token_ids and i in self.id_to_char
         )
 
 
@@ -56,17 +62,13 @@ class StringReverseDataset(Dataset):
 
         generator = torch.Generator().manual_seed(seed)
 
-        if fixed_length:
-            self.inputs = torch.randint(
-                low=1,
-                high=self.vocab_size + 1,
-                size=(size, max_seq_len),
-                generator=generator,
-            )
-            self.labels = torch.flip(self.inputs, dims=[1])
-        else:
-            self.inputs = []
-            for _ in range(size):
+        self.inputs = []
+        self.labels = []
+
+        for _ in range(size):
+            if fixed_length:
+                length = max_seq_len
+            else:
                 length = torch.randint(
                     low=min_seq_len,
                     high=max_seq_len + 1,
@@ -74,15 +76,28 @@ class StringReverseDataset(Dataset):
                     generator=generator,
                 ).item()
 
-                seq = torch.randint(
-                    low=1,
-                    high=self.vocab_size + 1,
-                    size=(length,),
-                    generator=generator,
-                )
-                self.inputs.append(seq)
-
-            self.labels = [torch.flip(seq, dims=[0]) for seq in self.inputs]
+            seq = torch.randint(
+                low=3,
+                high=self.vocab_size,
+                size=(length,),
+                generator=generator,
+            )
+            
+            reversed_seq = torch.flip(seq, dims=[0])
+            
+            bos_t = torch.tensor([self.tokenizer.bos_token_id])
+            eos_t = torch.tensor([self.tokenizer.eos_token_id])
+            
+            full_seq = torch.cat([bos_t, seq, eos_t, reversed_seq, eos_t])
+            
+            input_ids = full_seq[:-1]
+            target_labels = full_seq[1:].clone()
+            
+            prompt_len = len(seq) + 2
+            target_labels[:prompt_len - 1] = -100
+            
+            self.inputs.append(input_ids)
+            self.labels.append(target_labels)
 
     def __len__(self) -> int:
         return len(self.inputs)
