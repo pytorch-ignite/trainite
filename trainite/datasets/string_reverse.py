@@ -1,7 +1,6 @@
 import torch
-from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
-
+from torch.utils.data import Dataset
 
 ALPHABET_PRESETS = {
     "@alpha": "abcdefghijklmnopqrstuvwxyz",
@@ -26,7 +25,6 @@ class CharTokenizer:
         self.bos_token_id = 1
         self.eos_token_id = 2
         self.unk_token_id = 3
-        
 
         self.char_to_id = {c: i + 4 for i, c in enumerate(self.alphabet)}
         self.id_to_char = {i + 4: c for i, c in enumerate(self.alphabet)}
@@ -37,6 +35,9 @@ class CharTokenizer:
             self.eos_token_id: "<eos>",
             self.unk_token_id: "<unk>",
         }
+
+        for k, v in self.special_tokens.items():
+            self.id_to_char[k] = v
 
     @property
     def vocab_size(self) -> int:
@@ -62,7 +63,7 @@ class CharTokenizer:
         """
         if isinstance(ids, torch.Tensor):
             ids = ids.tolist()
-            
+
         decoded_chars = []
         for i in ids:
             if i == ignore_index:
@@ -112,20 +113,20 @@ class StringReverseDataset(Dataset):
                 size=(length,),
                 generator=generator,
             )
-            
+
             reversed_seq = torch.flip(seq, dims=[0])
-            
+
             bos_t = torch.tensor([self.tokenizer.bos_token_id])
             eos_t = torch.tensor([self.tokenizer.eos_token_id])
-            
+
             full_seq = torch.cat([bos_t, seq, eos_t, reversed_seq, eos_t])
-            
+
             input_ids = full_seq[:-1]
             target_labels = full_seq[1:].clone()
-            
+
             prompt_len = len(seq) + 2
-            target_labels[:prompt_len - 1] = -100
-            
+            target_labels[: prompt_len - 1] = -100
+
             self.inputs.append(input_ids)
             self.labels.append(target_labels)
 
