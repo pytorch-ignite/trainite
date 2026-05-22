@@ -17,6 +17,7 @@ class CharTokenizer:
     ID 0 is reserved as the padding token.
     ID 1 is reserved as the BOS token.
     ID 2 is reserved as the EOS token.
+    ID 3 is reserved as the UNK token.
     """
 
     def __init__(self, alphabet: str = "abcdefghijklmnopqrstuvwxyz") -> None:
@@ -24,27 +25,56 @@ class CharTokenizer:
         self.pad_token_id = 0
         self.bos_token_id = 1
         self.eos_token_id = 2
+        self.unk_token_id = 3
+        
 
-        self.char_to_id = {c: i + 3 for i, c in enumerate(self.alphabet)}
-        self.id_to_char = {i + 3: c for i, c in enumerate(self.alphabet)}
+        self.char_to_id = {c: i + 4 for i, c in enumerate(self.alphabet)}
+        self.id_to_char = {i + 4: c for i, c in enumerate(self.alphabet)}
+
+        self.special_tokens = {
+            self.pad_token_id: "<pad>",
+            self.bos_token_id: "<bos>",
+            self.eos_token_id: "<eos>",
+            self.unk_token_id: "<unk>",
+        }
 
     @property
     def vocab_size(self) -> int:
         """Number of unique tokens in the vocabulary (includes special tokens)."""
-        return len(self.alphabet) + 3
+        return len(self.alphabet) + 4
 
     def encode(self, text: str) -> list[int]:
-        """Convert a string to a list of token IDs."""
-        return [self.char_to_id[c] for c in text]
+        """Convert a string to a list of token IDs, mapping unrecognized characters to UNK."""
+        return [self.char_to_id.get(c, self.unk_token_id) for c in text]
 
-    def decode(self, ids: list[int] | torch.Tensor) -> str:
-        """Convert a list of token IDs back to a string, skipping padding and special tokens."""
+    def decode(
+        self,
+        ids: list[int] | torch.Tensor,
+        skip_special_tokens: bool = True,
+        ignore_index: int = -100,
+    ) -> str:
+        """Convert a list of token IDs back to a string.
+
+        Args:
+            ids: List or tensor of token IDs to decode.
+            skip_special_tokens: If True, skips printing special tokens like <bos> and <eos>.
+            ignore_index: The token ID used for loss masking. These are silently ignored.
+        """
         if isinstance(ids, torch.Tensor):
             ids = ids.tolist()
-        special_token_ids = {self.pad_token_id, self.bos_token_id, self.eos_token_id}
-        return "".join(
-            self.id_to_char[i] for i in ids if i not in special_token_ids and i in self.id_to_char
-        )
+            
+        decoded_chars = []
+        for i in ids:
+            if i == ignore_index:
+                continue
+            if i in self.special_tokens:
+                if not skip_special_tokens or i == self.unk_token_id:
+                    decoded_chars.append(self.special_tokens[i])
+            elif i in self.id_to_char:
+                decoded_chars.append(self.id_to_char[i])
+            else:
+                decoded_chars.append(self.special_tokens[self.unk_token_id])
+        return "".join(decoded_chars)
 
 
 class StringReverseDataset(Dataset):
@@ -77,7 +107,7 @@ class StringReverseDataset(Dataset):
                 ).item()
 
             seq = torch.randint(
-                low=3,
+                low=4,
                 high=self.vocab_size,
                 size=(length,),
                 generator=generator,
@@ -108,8 +138,15 @@ class StringReverseDataset(Dataset):
             "labels": self.labels[index],
         }
 
-    def decode(self, ids: torch.Tensor) -> str:
-        return self.tokenizer.decode(ids)
+    def decode(
+        self,
+        ids: torch.Tensor,
+        skip_special_tokens: bool = True,
+        ignore_index: int = -100,
+    ) -> str:
+        return self.tokenizer.decode(
+            ids, skip_special_tokens=skip_special_tokens, ignore_index=ignore_index
+        )
 
 
 def collate_fn(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
