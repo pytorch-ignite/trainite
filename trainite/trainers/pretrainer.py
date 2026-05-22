@@ -56,8 +56,11 @@ class PreTrainer:
         self._attach_metrics()
         self._attach_handlers()
 
-        self.logger = setup_logger("trainer", level=logging.INFO)
-        self._setup_file_logging()
+        self.logger = setup_logger(
+            "trainer",
+            level=logging.INFO,
+            filepath=str(self.run_dir / "output.log"),
+        )
         self.train_fb_logger = FBResearchLogger(logger=self.logger, show_output=True)
         self.train_fb_logger.attach(self.engine, name="Train", every=self.config.trainer.log_every_steps, optimizer=self.optimizer, output_transform=lambda output: {"loss": output["loss"].item()})
 
@@ -211,16 +214,6 @@ class PreTrainer:
             self.best_score = score
             self._save_state(self.best_path, engine.state.epoch, score)
             self.logger.info("saved best checkpoint score=%.4f", score)
-
-    def _setup_file_logging(self) -> None:
-        handler = logging.FileHandler(self.run_dir / "output.log")
-
-        handler.setFormatter(
-            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-        )
-
-        self.logger.addHandler(handler)
-
 
     def run(self) -> None:
         self.logger.info("starting run in %s", self.run_dir)
