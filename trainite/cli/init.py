@@ -327,14 +327,6 @@ def init_project(args: argparse.Namespace) -> None:
                     collate_fn=collate_fn_config,
                 ),
             ),
-            val=SplitConfig(
-                dataset=val_dataset,
-                dataloader=DataLoaderConfig(
-                    batch_size=32,
-                    shuffle=False,
-                    collate_fn=collate_fn_config,
-                ),
-            ),
         ),
         trainer=trainer_component,
         output=output_config,

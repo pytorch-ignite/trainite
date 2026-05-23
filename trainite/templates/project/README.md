@@ -39,11 +39,13 @@ Trainite is a toolbox for training language models with PyTorch-Ignite. This pro
 Edit the files in `models/`. You can change the architecture, add new layers, or change how the loss is calculated if it's part of the model.
 
 ### Using Your Own Data
-Update the dataset factory and `Dataset` class in `dataset/`. In `config.yaml`, the `data` section allows you to configure `train` and `val` splits separately. Each split contains:
+Update the dataset factory and `Dataset` class in `dataset/`. In `config.yaml`, the `data` section allows you to configure `train`, `val` and `test` splits separately. Each split contains:
 - `dataset`: Configuration for the dataset builder.
 - `dataloader`: Parameters for the PyTorch DataLoader (batch size, shuffle, num_workers, etc.).
 
 If you omit the `val` section, the trainer will fall back to using the `train` configuration for validation (with a warning).
+
+If you omit the `test` section, the trainer will skip the testing phase after training (with a warning).
 
 ### Custom Training Logic
 If you need to change the training loop (e.g., add gradient clipping, custom logging, or a different optimization step), edit `trainer.py`. You can override methods of the `PreTrainer` (or `RLTrainer`) class.
