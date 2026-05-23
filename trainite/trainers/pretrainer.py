@@ -108,13 +108,22 @@ class PreTrainer:
         run_dir.mkdir(parents=True, exist_ok=True)
         return run_dir
 
-    def _flatten_accuracy(
+    def _exact_accuracy_transform(
         self, output: dict[str, torch.Tensor]
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        logits = output["logits"].reshape(-1, output["logits"].size(-1))
-        targets = output["targets"].reshape(-1)
+        logits = output["logits"]
+        targets = output["targets"]
+
+        preds = torch.argmax(logits, dim=-1)
         mask = targets != self.loss_fn.ignore_index
-        return logits[mask], targets[mask]
+
+        correct = (preds == targets) | ~mask
+        seq_correct = correct.all(dim=-1)
+
+        y_pred = seq_correct.long()
+        y = torch.ones_like(seq_correct)
+
+        return y_pred, y
 
     def _flatten_loss(
         self, output: dict[str, torch.Tensor]
@@ -162,14 +171,14 @@ class PreTrainer:
         )
 
         train_loss = Loss(self.loss_fn, output_transform=self._flatten_loss)
-        train_accuracy = Accuracy(output_transform=self._flatten_accuracy)
+        train_accuracy = Accuracy(output_transform=self._exact_accuracy_transform)
         val_loss = Loss(self.loss_fn, output_transform=self._flatten_loss)
-        val_accuracy = Accuracy(output_transform=self._flatten_accuracy)
+        val_accuracy = Accuracy(output_transform=self._exact_accuracy_transform)
 
         train_loss.attach(self.train_evaluator, "loss")
-        train_accuracy.attach(self.train_evaluator, "token_accuracy")
+        train_accuracy.attach(self.train_evaluator, "accuracy")
         val_loss.attach(self.val_evaluator, "loss")
-        val_accuracy.attach(self.val_evaluator, "token_accuracy")
+        val_accuracy.attach(self.val_evaluator, "accuracy")
 
         self.metrics = {
             "train_loss": train_loss,
@@ -218,7 +227,7 @@ class PreTrainer:
         to_save = {"model": self.model, "optimizer": self.optimizer}
 
         def score_function(engine):
-            val_acc = engine.state.metrics["token_accuracy"]
+            val_acc = engine.state.metrics["accuracy"]
             return val_acc
 
         checkpoint = ModelCheckpoint(
@@ -264,7 +273,7 @@ class PreTrainer:
             output_transform=lambda output: {"batch_loss": output["loss"]},
         )
 
-        metric_names = ["loss", "token_accuracy"]
+        metric_names = ["loss", "accuracy"]
         tb_logger.attach_output_handler(
             self.train_evaluator,
             event_name=Events.EPOCH_COMPLETED,
@@ -302,9 +311,9 @@ class PreTrainer:
             "epoch=%s train_loss=%.4f train_acc=%.4f val_loss=%.4f val_acc=%.4f",
             epoch,
             train_metrics["loss"],
-            train_metrics["token_accuracy"],
+            train_metrics["accuracy"],
             val_metrics["loss"],
-            val_metrics["token_accuracy"],
+            val_metrics["accuracy"],
         )
 
     def run(self) -> None:
