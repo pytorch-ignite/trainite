@@ -9,9 +9,9 @@ from ignite.handlers import (
     ModelCheckpoint,
     create_lr_scheduler_with_warmup,
 )
+from ignite.handlers.fbresearch_logger import FBResearchLogger
 from ignite.handlers.tensorboard_logger import OptimizerParamsHandler, TensorboardLogger
 from ignite.metrics import Accuracy, Loss, RunningAverage
-from ignite.handlers.fbresearch_logger import FBResearchLogger
 from ignite.utils import setup_logger
 from torch import nn
 from torch.optim.lr_scheduler import LinearLR
@@ -105,7 +105,6 @@ class PreTrainer:
             collate_fn = get_target(split_config.dataloader.collate_fn.target)
 
         return DataLoader(dataset, collate_fn=collate_fn, **dl_kwargs)
-
 
     def _make_run_dir(self) -> Path:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -338,7 +337,7 @@ class PreTrainer:
     def test(self, test_loader: DataLoader | None = None) -> None:
         loader = test_loader or self.test_loader
         if loader is None:
-            logger.warning("No test loader provided. Skipping testing.")
+            self.logger.warning("No test loader provided. Skipping testing.")
             return
 
         # Load best model if available
@@ -346,16 +345,16 @@ class PreTrainer:
         if checkpoint_handler and checkpoint_handler.last_checkpoint:
             checkpoint_path = checkpoint_handler.last_checkpoint
 
-            logger.info("Loading best model for testing from %s", checkpoint_path)
+            self.logger.info("Loading best model for testing from %s", checkpoint_path)
             checkpoint = torch.load(
                 checkpoint_path, map_location=self.device, weights_only=True
             )
             self.model.load_state_dict(checkpoint["model"])
 
-        logger.info("Running testing...")
+        self.logger.info("Running testing...")
         self.test_evaluator.run(loader)
         metrics = self.test_evaluator.state.metrics
-        logger.info(
+        self.logger.info(
             "Test results: loss=%.4f acc=%.4f",
             metrics["loss"],
             metrics["token_accuracy"],
