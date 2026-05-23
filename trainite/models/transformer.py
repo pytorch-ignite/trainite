@@ -142,7 +142,10 @@ class TransformerModel(nn.Module):
         B, S = input_ids.shape
         x = self.embedding(input_ids) * math.sqrt(self.embedding.embedding_dim)
         x = self.pos_encoding(x)
-        padding_mask = (input_ids != self.embedding.padding_idx).reshape(B, 1, 1, S)
+        if (input_ids == self.embedding.padding_idx).any():
+            padding_mask = (input_ids != self.embedding.padding_idx).reshape(B, 1, 1, S)
+        else:
+            padding_mask = None
         for block in self.blocks:
             x = block(x, padding_mask=padding_mask)
         x = self.norm(x)
