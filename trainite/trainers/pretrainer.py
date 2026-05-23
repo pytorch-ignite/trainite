@@ -56,10 +56,9 @@ class PreTrainer:
                 val_loader = self._build_dataloader(config.data.val)
             else:
                 self.logger.warning(
-                    "Validation config not provided. Falling back to training config for validation. "
-                    "This is not recommended for actual training as it may lead to overfitting."
+                    "Validation config not provided. Early stopping and best model checkpointing will be disabled. "
+                    "Only the last model will be saved."
                 )
-                val_loader = self._build_dataloader(config.data.train)
 
         if test_loader is None and config.data.test:
             test_loader = self._build_dataloader(config.data.test)
@@ -237,20 +236,23 @@ class PreTrainer:
         # 3. ModelCheckpoint
         to_save = {"model": self.model, "optimizer": self.optimizer}
 
-        def score_function(engine):
-            val_acc = engine.state.metrics["exact_accuracy"]
-            return val_acc
+        if self.val_loader:
 
-        checkpoint = ModelCheckpoint(
-            dirname=str(self.run_dir),
-            n_saved=1,
-            filename_prefix="best",
-            score_function=score_function,
-            score_name="val_acc",
-            require_empty=False,
-            global_step_transform=lambda *_: self.engine.state.epoch,
-        )
-        self.val_evaluator.add_event_handler(Events.COMPLETED, checkpoint, to_save)
+            def score_function(engine):
+                val_acc = engine.state.metrics["exact_accuracy"]
+                return val_acc
+
+            checkpoint = ModelCheckpoint(
+                dirname=str(self.run_dir),
+                n_saved=1,
+                filename_prefix="best",
+                score_function=score_function,
+                score_name="val_acc",
+                require_empty=False,
+                global_step_transform=lambda *_: self.engine.state.epoch,
+            )
+            self.val_evaluator.add_event_handler(Events.COMPLETED, checkpoint, to_save)
+            self.handlers["checkpoint_best"] = checkpoint
 
         last_checkpoint = ModelCheckpoint(
             dirname=str(self.run_dir),
@@ -261,18 +263,18 @@ class PreTrainer:
         )
         self.engine.add_event_handler(Events.EPOCH_COMPLETED, last_checkpoint, to_save)
 
-        self.handlers["checkpoint_best"] = checkpoint
         self.handlers["checkpoint_last"] = last_checkpoint
 
         # 4. EarlyStopping
-        early_stopping = EarlyStopping(
-            patience=3,
-            score_function=lambda engine: -engine.state.metrics["loss"],
-            trainer=self.engine,
-            min_delta=0.0,
-        )
-        self.val_evaluator.add_event_handler(Events.COMPLETED, early_stopping)
-        self.handlers["early_stopping"] = early_stopping
+        if self.val_loader:
+            early_stopping = EarlyStopping(
+                patience=3,
+                score_function=lambda engine: -engine.state.metrics["loss"],
+                trainer=self.engine,
+                min_delta=0.0,
+            )
+            self.val_evaluator.add_event_handler(Events.COMPLETED, early_stopping)
+            self.handlers["early_stopping"] = early_stopping
 
         # 5. TensorboardLogger
         log_dir = self.run_dir / "tensorboard" if self.run_dir else None
@@ -292,20 +294,22 @@ class PreTrainer:
             metric_names=metric_names,
             global_step_transform=lambda *_: self.engine.state.epoch,
         )
-        tb_logger.attach_output_handler(
-            self.val_evaluator,
-            event_name=Events.EPOCH_COMPLETED,
-            tag="validation",
-            metric_names=metric_names,
-            global_step_transform=lambda *_: self.engine.state.epoch,
-        )
-        tb_logger.attach_output_handler(
-            self.test_evaluator,
-            event_name=Events.COMPLETED,
-            tag="testing",
-            metric_names=metric_names,
-            global_step_transform=lambda *_: self.engine.state.epoch,
-        )
+        if self.val_loader:
+            tb_logger.attach_output_handler(
+                self.val_evaluator,
+                event_name=Events.EPOCH_COMPLETED,
+                tag="validation",
+                metric_names=metric_names,
+                global_step_transform=lambda *_: self.engine.state.epoch,
+            )
+        if self.test_loader:
+            tb_logger.attach_output_handler(
+                self.test_evaluator,
+                event_name=Events.COMPLETED,
+                tag="testing",
+                metric_names=metric_names,
+                global_step_transform=lambda *_: self.engine.state.epoch,
+            )
 
         tb_logger.attach(
             self.engine,
@@ -317,22 +321,28 @@ class PreTrainer:
     def _run_evaluations(self, engine: Engine) -> None:
         self.logger.info("Evaluating on training set...")
         self.train_evaluator.run(self.train_loader)
-
-        self.logger.info("Evaluating on validation set...")
-        self.val_evaluator.run(self.val_loader)
-
         train_metrics = self.train_evaluator.state.metrics
-        val_metrics = self.val_evaluator.state.metrics
         epoch = engine.state.epoch
 
-        self.logger.info(
-            "epoch=%s train_loss=%.4f train_acc=%.4f val_loss=%.4f val_acc=%.4f",
-            epoch,
-            train_metrics["loss"],
-            train_metrics["exact_accuracy"],
-            val_metrics["loss"],
-            val_metrics["exact_accuracy"],
-        )
+        if self.val_loader:
+            self.logger.info("Evaluating on validation set...")
+            self.val_evaluator.run(self.val_loader)
+            val_metrics = self.val_evaluator.state.metrics
+            self.logger.info(
+                "epoch=%s train_loss=%.4f train_acc=%.4f val_loss=%.4f val_acc=%.4f",
+                epoch,
+                train_metrics["loss"],
+                train_metrics["exact_accuracy"],
+                val_metrics["loss"],
+                val_metrics["exact_accuracy"],
+            )
+        else:
+            self.logger.info(
+                "epoch=%s train_loss=%.4f train_acc=%.4f",
+                epoch,
+                train_metrics["loss"],
+                train_metrics["exact_accuracy"],
+            )
 
     def test(self, test_loader: DataLoader | None = None) -> None:
         loader = test_loader or self.test_loader
@@ -341,7 +351,9 @@ class PreTrainer:
             return
 
         # Load best model if available
-        checkpoint_handler = self.handlers.get("checkpoint_best")
+        checkpoint_handler = self.handlers.get("checkpoint_best") or self.handlers.get(
+            "checkpoint_last"
+        )
         if checkpoint_handler and checkpoint_handler.last_checkpoint:
             checkpoint_path = checkpoint_handler.last_checkpoint
 
