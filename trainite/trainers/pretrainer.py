@@ -357,7 +357,7 @@ class PreTrainer:
         self.logger.info(
             "Test results: loss=%.4f acc=%.4f",
             metrics["loss"],
-            metrics["token_accuracy"],
+            metrics["exact_accuracy"],
         )
 
     def run(self) -> None:
