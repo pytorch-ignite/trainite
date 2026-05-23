@@ -33,6 +33,7 @@ class PreTrainer:
         model: nn.Module | None = None,
         train_loader=None,
         val_loader=None,
+        test_loader=None,
         **kwargs,
     ) -> None:
         self.logger = setup_logger("trainer", level=logging.INFO)
@@ -60,8 +61,12 @@ class PreTrainer:
                 )
                 val_loader = self._build_dataloader(config.data.train)
 
+        if test_loader is None and config.data.test:
+            test_loader = self._build_dataloader(config.data.test)
+
         self.train_loader = train_loader
         self.val_loader = val_loader
+        self.test_loader = test_loader
 
         self.vocab_size = getattr(train_loader.dataset, "vocab_size", None)
         model_params = config.model.model_dump(by_alias=True)
@@ -88,6 +93,7 @@ class PreTrainer:
         self.engine = Engine(self._train_step)
         self.train_evaluator = Engine(self._eval_step)
         self.val_evaluator = Engine(self._eval_step)
+        self.test_evaluator = Engine(self._eval_step)
         self.metrics = {}
         self._attach_metrics()
 
@@ -174,17 +180,23 @@ class PreTrainer:
         train_accuracy = Accuracy(output_transform=self._exact_accuracy_transform)
         val_loss = Loss(self.loss_fn, output_transform=self._flatten_loss)
         val_accuracy = Accuracy(output_transform=self._exact_accuracy_transform)
+        test_loss = Loss(self.loss_fn, output_transform=self._flatten_loss)
+        test_accuracy = Accuracy(output_transform=self._exact_accuracy_transform)
 
         train_loss.attach(self.train_evaluator, "loss")
         train_accuracy.attach(self.train_evaluator, "exact_accuracy")
         val_loss.attach(self.val_evaluator, "loss")
         val_accuracy.attach(self.val_evaluator, "exact_accuracy")
+        test_loss.attach(self.test_evaluator, "loss")
+        test_accuracy.attach(self.test_evaluator, "exact_accuracy")
 
         self.metrics = {
             "train_loss": train_loss,
             "train_accuracy": train_accuracy,
             "val_loss": val_loss,
             "val_accuracy": val_accuracy,
+            "test_loss": test_loss,
+            "test_accuracy": test_accuracy,
         }
 
     def _attach_handlers(self) -> None:
@@ -288,6 +300,13 @@ class PreTrainer:
             metric_names=metric_names,
             global_step_transform=lambda *_: self.engine.state.epoch,
         )
+        tb_logger.attach_output_handler(
+            self.test_evaluator,
+            event_name=Events.COMPLETED,
+            tag="testing",
+            metric_names=metric_names,
+            global_step_transform=lambda *_: self.engine.state.epoch,
+        )
 
         tb_logger.attach(
             self.engine,
@@ -299,7 +318,7 @@ class PreTrainer:
     def _run_evaluations(self, engine: Engine) -> None:
         self.logger.info("Evaluating on training set...")
         self.train_evaluator.run(self.train_loader)
-        
+
         self.logger.info("Evaluating on validation set...")
         self.val_evaluator.run(self.val_loader)
 
@@ -314,6 +333,32 @@ class PreTrainer:
             train_metrics["exact_accuracy"],
             val_metrics["loss"],
             val_metrics["exact_accuracy"],
+        )
+
+    def test(self, test_loader: DataLoader | None = None) -> None:
+        loader = test_loader or self.test_loader
+        if loader is None:
+            logger.warning("No test loader provided. Skipping testing.")
+            return
+
+        # Load best model if available
+        checkpoint_handler = self.handlers.get("checkpoint_best")
+        if checkpoint_handler and checkpoint_handler.last_checkpoint:
+            checkpoint_path = checkpoint_handler.last_checkpoint
+
+            logger.info("Loading best model for testing from %s", checkpoint_path)
+            checkpoint = torch.load(
+                checkpoint_path, map_location=self.device, weights_only=True
+            )
+            self.model.load_state_dict(checkpoint["model"])
+
+        logger.info("Running testing...")
+        self.test_evaluator.run(loader)
+        metrics = self.test_evaluator.state.metrics
+        logger.info(
+            "Test results: loss=%.4f acc=%.4f",
+            metrics["loss"],
+            metrics["token_accuracy"],
         )
 
     def run(self) -> None:
@@ -331,6 +376,9 @@ class PreTrainer:
             self.handlers["tensorboard"].writer.add_text("config", str(config_data))
 
         self.engine.run(self.train_loader, max_epochs=self.epochs)
+
+        if self.test_loader:
+            self.test()
 
         if "tensorboard" in self.handlers:
             self.handlers["tensorboard"].close()

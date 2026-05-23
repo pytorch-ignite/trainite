@@ -42,6 +42,7 @@ class SplitConfig(BaseModel):
 class DataConfig(BaseModel):
     train: SplitConfig
     val: SplitConfig | None = None
+    test: SplitConfig | None = None
 
 
 class ProjectConfig(BaseModel):
