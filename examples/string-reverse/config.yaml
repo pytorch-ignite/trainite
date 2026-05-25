@@ -1,31 +1,38 @@
 model:
   _target_: models.transformer.build_transformer_model
-  vocab_size: 32
   hidden_size: 64
   num_layers: 2
   num_heads: 2
   feedforward_dim: 128
   dropout: 0.1
   max_seq_len: 128
-dataset:
-  _target_: dataset.string-reverse.build_string_reverse_dataloaders
-  alphabet: abcdefghijklmnopqrstuvwxyz
-  train_size: 256
-  val_size: 64
-  batch_size: 32
-  min_seq_len: 1
-  max_seq_len: 16
-  fixed_length: true
-  num_workers: 2
-  seed: 7
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 0.001
+data:
+  train:
+    dataset:
+      _target_: dataset.string-reverse.build_string_reverse_dataset
+      size: 256
+      alphabet: abcdefghijklmnopqrstuvwxyz
+      min_seq_len: 1
+      max_seq_len: 16
+      fixed_length: true
+      seed: 7
+    dataloader:
+      batch_size: 32
+      shuffle: true
+      num_workers: 2
+      collate_fn:
+        _target_: dataset.string-reverse.collate_fn
+  val: null
+  test: null
 trainer:
-  learning_rate: 0.001
   log_every_steps: 10
-  type: pre
   epochs: 3
   grad_clip_norm: null
 output:
   root: outputs
   run_name: transformer__string-reverse
 seed: 42
-device: cpu
+device: auto

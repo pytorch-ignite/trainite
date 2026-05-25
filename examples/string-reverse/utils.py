@@ -4,6 +4,25 @@ from typing import Any
 from config import ComponentConfig
 
 
+def get_target(target_path: str) -> Any:
+    """
+    Gets a class or a function defined by a `_target_` key
+    using an OmegaConf DictConfig.
+    """
+    if not target_path:
+        raise ValueError("The '_target_' key must not be empty.")
+
+    try:
+        # Split 'module.submodule.ClassName' into 'module.submodule' and 'ClassName'
+        module_path, symbol_name = target_path.rsplit(".", 1)
+        module = importlib.import_module(module_path)
+        target_symbol = getattr(module, symbol_name)
+    except (ValueError, ImportError, AttributeError) as e:
+        raise ImportError(f"Could not locate target '{target_path}': {e}") from e
+
+    return target_symbol
+
+
 def instantiate(config: ComponentConfig, **kwargs) -> Any:
     """
     Instantiates a class or calls a function defined by a `_target_` key
@@ -21,16 +40,7 @@ def instantiate(config: ComponentConfig, **kwargs) -> Any:
     params = config_dict.copy()
     target_path = params.pop("_target_")
 
-    if not target_path:
-        raise ValueError("The '_target_' key must not be empty.")
-
-    try:
-        # Split 'module.submodule.ClassName' into 'module.submodule' and 'ClassName'
-        module_path, symbol_name = target_path.rsplit(".", 1)
-        module = importlib.import_module(module_path)
-        target_symbol = getattr(module, symbol_name)
-    except (ValueError, ImportError, AttributeError) as e:
-        raise ImportError(f"Could not locate target '{target_path}': {e}") from e
+    target_symbol = get_target(target_path)
 
     final_kwargs = {**params, **kwargs}
 

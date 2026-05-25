@@ -1,13 +1,81 @@
 import torch
-from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence
-
+from torch.utils.data import Dataset
 
 ALPHABET_PRESETS = {
     "@alpha": "abcdefghijklmnopqrstuvwxyz",
     "@digits": "0123456789",
     "@alphanumeric": "abcdefghijklmnopqrstuvwxyz0123456789",
 }
+
+
+class CharTokenizer:
+    """A simple character-level tokenizer.
+
+    Maps each character in the alphabet to a unique integer ID.
+    ID 0 is reserved as the padding token.
+    ID 1 is reserved as the BOS token.
+    ID 2 is reserved as the EOS token.
+    ID 3 is reserved as the UNK token.
+    """
+
+    def __init__(self, alphabet: str = "abcdefghijklmnopqrstuvwxyz") -> None:
+        self.alphabet = ALPHABET_PRESETS.get(alphabet, alphabet)
+        self.pad_token_id = 0
+        self.bos_token_id = 1
+        self.eos_token_id = 2
+        self.unk_token_id = 3
+
+        self.char_to_id = {c: i + 4 for i, c in enumerate(self.alphabet)}
+        self.id_to_char = {i + 4: c for i, c in enumerate(self.alphabet)}
+
+        self.special_tokens = {
+            self.pad_token_id: "<pad>",
+            self.bos_token_id: "<bos>",
+            self.eos_token_id: "<eos>",
+            self.unk_token_id: "<unk>",
+        }
+
+        for k, v in self.special_tokens.items():
+            self.id_to_char[k] = v
+
+    @property
+    def vocab_size(self) -> int:
+        """Number of unique tokens in the vocabulary (includes special tokens)."""
+        return len(self.alphabet) + 4
+
+    def encode(self, text: str) -> list[int]:
+        """Convert a string to a list of token IDs, mapping unrecognized characters to UNK."""
+        return [self.char_to_id.get(c, self.unk_token_id) for c in text]
+
+    def decode(
+        self,
+        ids: list[int] | torch.Tensor,
+        skip_special_tokens: bool = True,
+        ignore_index: int = -100,
+    ) -> str:
+        """Convert a list of token IDs back to a string.
+
+        Args:
+            ids: List or tensor of token IDs to decode.
+            skip_special_tokens: If True, skips printing special tokens like <bos> and <eos>.
+            ignore_index: The token ID used for loss masking. These are silently ignored.
+        """
+        if isinstance(ids, torch.Tensor):
+            ids = ids.tolist()
+
+        decoded_chars = []
+        for i in ids:
+            if i == ignore_index:
+                continue
+            if i in self.special_tokens:
+                if not skip_special_tokens or i == self.unk_token_id:
+                    decoded_chars.append(self.special_tokens[i])
+            elif i in self.id_to_char:
+                decoded_chars.append(self.id_to_char[i])
+            else:
+                decoded_chars.append(self.special_tokens[self.unk_token_id])
+        return "".join(decoded_chars)
 
 
 class StringReverseDataset(Dataset):
@@ -20,24 +88,18 @@ class StringReverseDataset(Dataset):
         fixed_length: bool = True,
         alphabet: str = "abcdefghijklmnopqrstuvwxyz",
     ) -> None:
-        self.alphabet = ALPHABET_PRESETS.get(alphabet, alphabet)
-        vocab_size = len(self.alphabet)
-        self.char_to_id = {c: i + 1 for i, c in enumerate(self.alphabet)}
-        self.id_to_char = {i + 1: c for i, c in enumerate(self.alphabet)}
+        self.tokenizer = CharTokenizer(alphabet)
+        self.vocab_size = self.tokenizer.vocab_size
 
         generator = torch.Generator().manual_seed(seed)
 
-        if fixed_length:
-            self.inputs = torch.randint(
-                low=1,
-                high=vocab_size + 1,
-                size=(size, max_seq_len),
-                generator=generator,
-            )
-            self.labels = torch.flip(self.inputs, dims=[1])
-        else:
-            self.inputs = []
-            for _ in range(size):
+        self.inputs = []
+        self.labels = []
+
+        for _ in range(size):
+            if fixed_length:
+                length = max_seq_len
+            else:
                 length = torch.randint(
                     low=min_seq_len,
                     high=max_seq_len + 1,
@@ -45,15 +107,28 @@ class StringReverseDataset(Dataset):
                     generator=generator,
                 ).item()
 
-                seq = torch.randint(
-                    low=1,
-                    high=vocab_size + 1,
-                    size=(length,),
-                    generator=generator,
-                )
-                self.inputs.append(seq)
+            seq = torch.randint(
+                low=4,
+                high=self.vocab_size,
+                size=(length,),
+                generator=generator,
+            )
 
-            self.labels = [torch.flip(seq, dims=[0]) for seq in self.inputs]
+            reversed_seq = torch.flip(seq, dims=[0])
+
+            bos_t = torch.tensor([self.tokenizer.bos_token_id])
+            eos_t = torch.tensor([self.tokenizer.eos_token_id])
+
+            full_seq = torch.cat([bos_t, seq, eos_t, reversed_seq, eos_t])
+
+            input_ids = full_seq[:-1]
+            target_labels = full_seq[1:].clone()
+
+            prompt_len = len(seq) + 2
+            target_labels[: prompt_len - 1] = -100
+
+            self.inputs.append(input_ids)
+            self.labels.append(target_labels)
 
     def __len__(self) -> int:
         return len(self.inputs)
@@ -64,8 +139,15 @@ class StringReverseDataset(Dataset):
             "labels": self.labels[index],
         }
 
-    def decode(self, ids: torch.Tensor) -> str:
-        return "".join([self.id_to_char[idx.item()] for idx in ids if idx.item() != 0])
+    def decode(
+        self,
+        ids: torch.Tensor,
+        skip_special_tokens: bool = True,
+        ignore_index: int = -100,
+    ) -> str:
+        return self.tokenizer.decode(
+            ids, skip_special_tokens=skip_special_tokens, ignore_index=ignore_index
+        )
 
 
 def collate_fn(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
@@ -81,46 +163,20 @@ def collate_fn(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     }
 
 
-def build_string_reverse_dataloaders(
-    train_size: int = 256,
-    val_size: int = 64,
-    batch_size: int = 32,
+def build_string_reverse_dataset(
+    size: int = 256,
     min_seq_len: int = 1,
     max_seq_len: int = 16,
     fixed_length: bool = True,
     alphabet: str = "abcdefghijklmnopqrstuvwxyz",
-    num_workers: int = 0,
     seed: int = 7,
     **kwargs,
-) -> tuple[DataLoader, DataLoader]:
-    train_dataset = StringReverseDataset(
-        size=train_size,
+) -> StringReverseDataset:
+    return StringReverseDataset(
+        size=size,
         min_seq_len=min_seq_len,
         max_seq_len=max_seq_len,
         seed=seed,
         fixed_length=fixed_length,
         alphabet=alphabet,
     )
-    val_dataset = StringReverseDataset(
-        size=val_size,
-        min_seq_len=min_seq_len,
-        max_seq_len=max_seq_len,
-        seed=seed + 1,
-        fixed_length=fixed_length,
-        alphabet=alphabet,
-    )
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        collate_fn=collate_fn,
-        num_workers=num_workers,
-    )
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        collate_fn=collate_fn,
-        num_workers=num_workers,
-    )
-    return train_loader, val_loader

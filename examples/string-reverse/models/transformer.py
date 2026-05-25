@@ -24,6 +24,59 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
+class Attention(nn.Module):
+    def __init__(self, embed_dim: int, num_heads: int, dropout: float = 0.1):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        assert self.num_heads * self.head_dim == self.embed_dim, (
+            "embed_dim must be divisible by num_heads"
+        )
+        self.qkv_projection = nn.Linear(embed_dim, embed_dim * 3, bias=False)
+        self.out = nn.Linear(embed_dim, embed_dim, bias=False)
+        self.dropout = nn.Dropout(p=dropout)
+        self.dropout_p = dropout
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        padding_mask: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        B, S, C = x.shape
+
+        qkv = self.qkv_projection(x)
+        q, k, v = qkv.chunk(3, dim=-1)
+
+        # Reshape for multi-head attention (B, S, num_heads, head_dim) and transpose to (B, num_heads, S, head_dim)
+        q = q.view(B, S, self.num_heads, self.head_dim).transpose(1, 2)
+        k = k.view(B, S, self.num_heads, self.head_dim).transpose(1, 2)
+        v = v.view(B, S, self.num_heads, self.head_dim).transpose(1, 2)
+        # padding mask shape should be (B,1,1,S) to broadcast correctly with attention scores of shape (B, num_heads, S, S)
+        if padding_mask is not None:
+            causal_mask = torch.ones(S, S, dtype=torch.bool, device=x.device).tril()
+            mask = causal_mask & padding_mask
+            context = nn.functional.scaled_dot_product_attention(
+                q,
+                k,
+                v,
+                attn_mask=mask,
+                is_causal=False,
+                dropout_p=self.dropout_p if self.training else 0.0,
+            )
+        else:
+            context = nn.functional.scaled_dot_product_attention(
+                q,
+                k,
+                v,
+                is_causal=True,
+                dropout_p=self.dropout_p if self.training else 0.0,
+            )
+        context = context.transpose(1, 2).contiguous().view(B, S, C)
+        out = self.out(context)
+        return self.dropout(out), context
+
+
 class TransformerBlock(nn.Module):
     def __init__(
         self,
@@ -34,9 +87,7 @@ class TransformerBlock(nn.Module):
     ) -> None:
         super().__init__()
         self.norm1 = nn.LayerNorm(d_model)
-        self.attention = nn.MultiheadAttention(
-            d_model, num_heads, dropout=dropout, batch_first=True
-        )
+        self.attention = Attention(d_model, num_heads, dropout=dropout)
         self.norm2 = nn.LayerNorm(d_model)
         self.feedforward = nn.Sequential(
             nn.Linear(d_model, feedforward_dim),
@@ -46,9 +97,11 @@ class TransformerBlock(nn.Module):
             nn.Dropout(dropout),
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, padding_mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
         normed = self.norm1(x)
-        attn_output, _ = self.attention(normed, normed, normed)
+        attn_output, _ = self.attention(normed, padding_mask=padding_mask)
         x = x + attn_output
 
         normed = self.norm2(x)
@@ -86,10 +139,15 @@ class TransformerModel(nn.Module):
         self.norm = nn.LayerNorm(hidden_size)
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
+        B, S = input_ids.shape
         x = self.embedding(input_ids) * math.sqrt(self.embedding.embedding_dim)
         x = self.pos_encoding(x)
+        if (input_ids == self.embedding.padding_idx).any():
+            padding_mask = (input_ids != self.embedding.padding_idx).reshape(B, 1, 1, S)
+        else:
+            padding_mask = None
         for block in self.blocks:
-            x = block(x)
+            x = block(x, padding_mask=padding_mask)
         x = self.norm(x)
         return self.proj(x)
 

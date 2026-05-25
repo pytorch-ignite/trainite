@@ -1,7 +1,6 @@
 from pathlib import Path
 from typing import Any
 
-import torch
 import yaml
 from omegaconf import OmegaConf
 from pydantic import BaseModel, ConfigDict, Field
@@ -19,17 +18,41 @@ class ComponentConfig(BaseModel):
 
 class TrainerConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
-    learning_rate: float = 1e-3
     log_every_steps: int = 10
+
+
+class OptimizerConfig(ComponentConfig):
+    target: str = Field(alias="_target_", default="torch.optim.AdamW")
+    lr: float = 1e-3
+
+
+class DataLoaderConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    batch_size: int = 32
+    shuffle: bool = False
+    num_workers: int = 2
+    collate_fn: ComponentConfig | None = None
+
+
+class SplitConfig(BaseModel):
+    dataset: ComponentConfig
+    dataloader: DataLoaderConfig = Field(default_factory=DataLoaderConfig)
+
+
+class DataConfig(BaseModel):
+    train: SplitConfig
+    val: SplitConfig | None = None
+    test: SplitConfig | None = None
 
 
 class ProjectConfig(BaseModel):
     model: ComponentConfig
-    dataset: ComponentConfig
+    optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
+    data: DataConfig
     trainer: TrainerConfig
     output: OutputConfig
     seed: int = 42
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    device: str = "auto"
 
 
 def load_yaml(path: str | Path) -> dict:
@@ -40,7 +63,7 @@ def load_yaml(path: str | Path) -> dict:
     return data
 
 
-def dump_yaml(data: Any, path: str | Path) -> None:
+def dump_yaml(data: dict["str", Any], path: str | Path) -> None:
     Path(path).write_text(yaml.safe_dump(data, sort_keys=False))
 
 
