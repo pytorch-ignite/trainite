@@ -13,4 +13,4 @@ class StringReverseDatasetConfig(ComponentConfig):
     min_seq_len: int | None = 1
     max_seq_len: int | None = 16
     seq_len: int | None = None
-    seed: int = 7
+    seed: int = 42

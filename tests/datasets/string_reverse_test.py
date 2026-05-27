@@ -4,7 +4,8 @@ from torch.utils.data import DataLoader
 
 from trainite.config import DataLoaderConfig, get_dataset_spec
 from trainite.datasets.string_reverse import (
-    ALPHABET_PRESETS,
+    CHARSET_PRESETS,
+    UNIVERSAL_VOCAB,
     CharTokenizer,
     StringReverseDataset,
     build_string_reverse_dataset,
@@ -14,8 +15,8 @@ from trainite.utils import get_target, instantiate
 
 
 def test_char_tokenizer():
-    tokenizer = CharTokenizer(alphabet="abc")
-    assert tokenizer.vocab_size == 7  # 4 special + 3 chars
+    tokenizer = CharTokenizer()
+    assert tokenizer.vocab_size == len(UNIVERSAL_VOCAB) + 4  # +4 for special tokens
 
     encoded = tokenizer.encode("abc")
     assert encoded == [4, 5, 6]
@@ -31,7 +32,10 @@ def test_char_tokenizer():
     assert tokenizer.decode([0, 1, 2, 3], skip_special_tokens=True) == "<unk>"
 
     # Test unk
-    assert tokenizer.encode("d") == [3]
+    assert tokenizer.encode("Δ") == [
+        3
+    ]  # Δ is not in the universal vocab, should map to UNK token ID 3
+    assert tokenizer.decode([3]) == "<unk>"
 
 
 def test_string_reverse_dataset():
@@ -67,28 +71,23 @@ def test_string_reverse_dataset():
 
 
 def test_string_reverse_variable_lengths_and_presets():
-    # variable lengths when fixed_length=False
-    dataset = StringReverseDataset(
-        size=20, min_seq_len=1, max_seq_len=8, seed=42, fixed_length=False
-    )
+    # variable lengths when min/max_seq_len are provided
+    dataset = StringReverseDataset(size=20, min_seq_len=1, max_seq_len=8, seed=42)
     input_lengths = [len(x) for x in dataset.inputs]
     label_lengths = [len(x) for x in dataset.labels]
     assert input_lengths == label_lengths
-    assert len(input_lengths) > 1
+    assert len(set(input_lengths)) > 1
     assert all(
         [4 <= _len <= 18 for _len in input_lengths]
     )  # (BOS + seq(8) + EOS + reversed_seq(8) + EOS) - 1 (labels shift)
 
 
 def test_string_reverse_fixed_lengths_and_presets():
-    # variable lengths when fixed_length=False
-    dataset = StringReverseDataset(
-        size=20, min_seq_len=1, max_seq_len=8, seed=42, fixed_length=True
-    )
+    # fixed length when seq_len is provided
+    dataset = StringReverseDataset(size=20, seq_len=8, seed=42)
     input_lengths = [len(x) for x in dataset.inputs]
     label_lengths = [len(x) for x in dataset.labels]
     assert input_lengths == label_lengths
-    assert len(input_lengths) > 1
     assert all(
         [
             _len == 18 for _len in input_lengths
@@ -98,14 +97,16 @@ def test_string_reverse_fixed_lengths_and_presets():
 
 @pytest.mark.parametrize(
     "preset",
-    ["@digits", "@alpha", "@alphanumeric", "random"],
+    ["@digits", "@alpha", "@alphanumeric", "@universal", "abc"],
 )
 def test_char_tokenizer_with_digits_preset(preset: str):
-    tokenizer = CharTokenizer(preset)
-    if preset in ALPHABET_PRESETS:
-        assert tokenizer.vocab_size == len(ALPHABET_PRESETS[preset]) + 4
+    dataset = StringReverseDataset(
+        size=10, seed=42, charset=preset, min_seq_len=1, max_seq_len=5
+    )
+    if preset in CHARSET_PRESETS:
+        assert len(dataset.valid_token_ids) == len(CHARSET_PRESETS[preset])
     else:
-        assert tokenizer.vocab_size == len(preset) + 4
+        assert len(dataset.valid_token_ids) == len(preset)
 
 
 def test_collate_fn():

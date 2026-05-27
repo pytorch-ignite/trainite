@@ -7,6 +7,13 @@ from torch.utils.data import Dataset
 # Hardcoded universal vocabulary: all printable ASCII characters
 UNIVERSAL_VOCAB = string.ascii_letters + string.digits + string.punctuation + " "
 
+CHARSET_PRESETS = {
+    "@universal": UNIVERSAL_VOCAB,
+    "@alpha": string.ascii_letters,
+    "@digits": string.digits,
+    "@alphanumeric": string.ascii_letters + string.digits,
+}
+
 
 class CharTokenizer:
     """A simple character-level tokenizer with a hardcoded universal vocabulary.
@@ -80,9 +87,9 @@ class StringReverseDataset(Dataset):
     def __init__(
         self,
         size: int,
-        min_seq_len: int,
-        max_seq_len: int,
-        seed: int,
+        min_seq_len: int | None = None,
+        max_seq_len: int | None = None,
+        seed: int = 42,
         seq_len: int | None = None,
         charset: str | None = None,
     ) -> None:
@@ -90,15 +97,10 @@ class StringReverseDataset(Dataset):
         self.vocab_size = self.tokenizer.vocab_size
 
         # If charset is not provided, use the full universal vocab
-        if charset is None or charset == "@universal":
+        if charset is None:
             chars = UNIVERSAL_VOCAB
-        # Map charset presets or raw strings to token IDs
-        elif charset == "@alpha":
-            chars = string.ascii_letters
-        elif charset == "@digits":
-            chars = string.digits
-        elif charset == "@alphanumeric":
-            chars = string.ascii_letters + string.digits
+        elif charset in CHARSET_PRESETS:
+            chars = CHARSET_PRESETS[charset]
         else:
             chars = charset
 
@@ -196,17 +198,13 @@ def collate_fn(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
 
 def build_string_reverse_dataset(
     size: int = 256,
-    min_seq_len: int = 1,
-    max_seq_len: int = 16,
+    min_seq_len: int | None = 1,
+    max_seq_len: int | None = 16,
     seq_len: int | None = None,
     charset: str | None = None,
-    seed: int = 7,
+    seed: int = 42,
     **kwargs,
 ) -> StringReverseDataset:
-    # Handle 'alphabet' if passed from old configs for backward compatibility or just ignore
-    if "alphabet" in kwargs and charset is None:
-        charset = kwargs["alphabet"]
-
     return StringReverseDataset(
         size=size,
         min_seq_len=min_seq_len,
