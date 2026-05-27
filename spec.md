@@ -240,7 +240,7 @@ Testing for Tranite has two distinct concerns that must be addressed separately.
 ### 9.1 Unit Testing
 
 The CLI, config parsing, and file generation logic should have unit tests covering:
- 
+
 - `tranite init` generates the correct files for each combination of flags
 - Generated files are valid Python (parseable without errors)
 - Config validation raises clear errors on malformed or missing fields
@@ -249,7 +249,7 @@ The CLI, config parsing, and file generation logic should have unit tests coveri
 ### 9.2 Integration Testing
 
 There should be integration test per built-in dataset and model that:
- 
+
 1. Runs `tranite init` with a given configuration
 2. Runs `python main.py config.yaml` for a small number of epochs
 3. Asserts that training loss decreases

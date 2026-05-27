@@ -9,6 +9,10 @@ class PositionalEncoding(nn.Module):
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
 
+        assert d_model % 2 == 0, (
+            "d_model must be even for sinusoidal positional encoding"
+        )
+
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
         div_term = torch.exp(
@@ -135,7 +139,7 @@ class TransformerModel(nn.Module):
                 for _ in range(num_layers)
             ]
         )
-        self.proj = nn.Linear(hidden_size, vocab_size + 1)
+        self.proj = nn.Linear(hidden_size, vocab_size)
         self.norm = nn.LayerNorm(hidden_size)
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:

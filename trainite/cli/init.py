@@ -61,7 +61,6 @@ def _prompt_choice(prompt: str, choices: Sequence[str], default: str) -> str:
 
 
 def _project_directory(raw_project_dir: str, force: bool) -> Path:
-
     raw_path = Path(raw_project_dir).expanduser()
 
     parent = raw_path.parent

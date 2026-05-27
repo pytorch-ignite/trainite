@@ -1,6 +1,6 @@
 # Trainite Project: string_reverse
 
-Welcome to your new Trainite-generated training project! 
+Welcome to your new Trainite-generated training project!
 
 Trainite is a toolbox for training language models with PyTorch-Ignite. This project contains real, readable Python files that you own and can modify as needed.
 

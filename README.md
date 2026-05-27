@@ -1,4 +1,4 @@
-# Trainite 
+# Trainite
 
 **Trainite** is a cookiecutter-style toolbox for training language models with PyTorch-Ignite. It is designed for researchers who want to go from zero to a running training loop in minutes without fighting a framework's abstractions.
 
