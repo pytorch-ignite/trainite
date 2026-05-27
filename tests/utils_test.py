@@ -1,6 +1,5 @@
 import pytest
 
-from trainite.config.base import ComponentConfig
 from trainite.utils import get_target, instantiate
 
 

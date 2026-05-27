@@ -109,7 +109,6 @@ def test_char_tokenizer_with_digits_preset(preset: str):
 
 
 def test_collate_fn():
-
     tokenizer = CharTokenizer()
     encoded1 = torch.tensor(tokenizer.encode("abc"))
     encoded2 = torch.tensor(tokenizer.encode("d"))
