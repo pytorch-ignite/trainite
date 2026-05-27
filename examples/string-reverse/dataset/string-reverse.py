@@ -118,8 +118,16 @@ class StringReverseDataset(Dataset):
         self.labels = []
 
         for _ in range(size):
+            if seq_len is not None and (min_seq_len or max_seq_len):
+                raise ValueError(
+                    "Cannot specify both seq_len and min_seq_len/max_seq_len."
+                )
             if seq_len is not None:
                 length = seq_len
+            elif min_seq_len is None or max_seq_len is None:
+                raise ValueError(
+                    "Must specify either seq_len or both min_seq_len and max_seq_len."
+                )
             else:
                 length = torch.randint(
                     low=min_seq_len,

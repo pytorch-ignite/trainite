@@ -10,7 +10,7 @@ class StringReverseDatasetConfig(ComponentConfig):
     )
     size: int = 256
     charset: str | None = None
-    min_seq_len: int = 1
-    max_seq_len: int = 16
+    min_seq_len: int | None = 1
+    max_seq_len: int | None = 16
     seq_len: int | None = None
     seed: int = 7
