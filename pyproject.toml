@@ -32,4 +32,5 @@ dev = [
     "torch",
     "pytorch-ignite",
     "tensorboard",
+    "pytest>=9.0.3",
 ]

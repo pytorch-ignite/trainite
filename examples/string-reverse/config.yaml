@@ -13,8 +13,8 @@ data:
   train:
     dataset:
       _target_: dataset.string-reverse.build_string_reverse_dataset
-      size: 256
-      alphabet: abcdefghijklmnopqrstuvwxyz
+      size: 1024
+      charset: "@alpha"
       min_seq_len: 1
       max_seq_len: 16
       fixed_length: true
@@ -25,7 +25,21 @@ data:
       num_workers: 2
       collate_fn:
         _target_: dataset.string-reverse.collate_fn
-  val: null
+  val:
+    dataset:
+      _target_: dataset.string-reverse.build_string_reverse_dataset
+      size: 128
+      charset: "@digits"
+      min_seq_len: 1
+      max_seq_len: 16
+      fixed_length: true
+      seed: 7
+    dataloader:
+      batch_size: 32
+      shuffle: false
+      num_workers: 2
+      collate_fn:
+        _target_: dataset.string-reverse.collate_fn
   test: null
 trainer:
   log_every_steps: 10

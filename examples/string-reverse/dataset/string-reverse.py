@@ -1,33 +1,31 @@
+import string
+
 import torch
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset
 
-ALPHABET_PRESETS = {
-    "@alpha": "abcdefghijklmnopqrstuvwxyz",
-    "@digits": "0123456789",
-    "@alphanumeric": "abcdefghijklmnopqrstuvwxyz0123456789",
-}
+# Hardcoded universal vocabulary: all printable ASCII characters
+UNIVERSAL_VOCAB = string.ascii_letters + string.digits + string.punctuation + " "
 
 
 class CharTokenizer:
-    """A simple character-level tokenizer.
+    """A simple character-level tokenizer with a hardcoded universal vocabulary.
 
-    Maps each character in the alphabet to a unique integer ID.
+    Maps each character in UNIVERSAL_VOCAB to a unique integer ID.
     ID 0 is reserved as the padding token.
     ID 1 is reserved as the BOS token.
     ID 2 is reserved as the EOS token.
     ID 3 is reserved as the UNK token.
     """
 
-    def __init__(self, alphabet: str = "abcdefghijklmnopqrstuvwxyz") -> None:
-        self.alphabet = ALPHABET_PRESETS.get(alphabet, alphabet)
+    def __init__(self) -> None:
         self.pad_token_id = 0
         self.bos_token_id = 1
         self.eos_token_id = 2
         self.unk_token_id = 3
 
-        self.char_to_id = {c: i + 4 for i, c in enumerate(self.alphabet)}
-        self.id_to_char = {i + 4: c for i, c in enumerate(self.alphabet)}
+        self.char_to_id = {c: i + 4 for i, c in enumerate(UNIVERSAL_VOCAB)}
+        self.id_to_char = {i + 4: c for i, c in enumerate(UNIVERSAL_VOCAB)}
 
         self.special_tokens = {
             self.pad_token_id: "<pad>",
@@ -42,7 +40,7 @@ class CharTokenizer:
     @property
     def vocab_size(self) -> int:
         """Number of unique tokens in the vocabulary (includes special tokens)."""
-        return len(self.alphabet) + 4
+        return len(UNIVERSAL_VOCAB) + 4
 
     def encode(self, text: str) -> list[int]:
         """Convert a string to a list of token IDs, mapping unrecognized characters to UNK."""
@@ -85,20 +83,43 @@ class StringReverseDataset(Dataset):
         min_seq_len: int,
         max_seq_len: int,
         seed: int,
-        fixed_length: bool = True,
-        alphabet: str = "abcdefghijklmnopqrstuvwxyz",
+        seq_len: int | None = None,
+        charset: str | None = None,
     ) -> None:
-        self.tokenizer = CharTokenizer(alphabet)
+        self.tokenizer = CharTokenizer()
         self.vocab_size = self.tokenizer.vocab_size
 
+        # If charset is not provided, use the full universal vocab
+        if charset is None or charset == "@universal":
+            chars = UNIVERSAL_VOCAB
+        # Map charset presets or raw strings to token IDs
+        elif charset == "@alpha":
+            chars = string.ascii_letters
+        elif charset == "@digits":
+            chars = string.digits
+        elif charset == "@alphanumeric":
+            chars = string.ascii_letters + string.digits
+        else:
+            chars = charset
+
+        self.valid_token_ids = [
+            self.tokenizer.char_to_id[c]
+            for c in chars
+            if c in self.tokenizer.char_to_id
+        ]
+
+        if not self.valid_token_ids:
+            raise ValueError(f"Charset '{charset}' resulted in empty token IDs.")
+
         generator = torch.Generator().manual_seed(seed)
+        self.valid_token_ids_tensor = torch.tensor(self.valid_token_ids)
 
         self.inputs = []
         self.labels = []
 
         for _ in range(size):
-            if fixed_length:
-                length = max_seq_len
+            if seq_len is not None:
+                length = seq_len
             else:
                 length = torch.randint(
                     low=min_seq_len,
@@ -107,12 +128,14 @@ class StringReverseDataset(Dataset):
                     generator=generator,
                 ).item()
 
-            seq = torch.randint(
-                low=4,
-                high=self.vocab_size,
+            # Sample from the valid token IDs
+            indices = torch.randint(
+                low=0,
+                high=len(self.valid_token_ids),
                 size=(length,),
                 generator=generator,
             )
+            seq = self.valid_token_ids_tensor[indices]
 
             reversed_seq = torch.flip(seq, dims=[0])
 
@@ -167,16 +190,20 @@ def build_string_reverse_dataset(
     size: int = 256,
     min_seq_len: int = 1,
     max_seq_len: int = 16,
-    fixed_length: bool = True,
-    alphabet: str = "abcdefghijklmnopqrstuvwxyz",
+    seq_len: int | None = None,
+    charset: str | None = None,
     seed: int = 7,
     **kwargs,
 ) -> StringReverseDataset:
+    # Handle 'alphabet' if passed from old configs for backward compatibility or just ignore
+    if "alphabet" in kwargs and charset is None:
+        charset = kwargs["alphabet"]
+
     return StringReverseDataset(
         size=size,
         min_seq_len=min_seq_len,
         max_seq_len=max_seq_len,
         seed=seed,
-        fixed_length=fixed_length,
-        alphabet=alphabet,
+        seq_len=seq_len,
+        charset=charset,
     )

@@ -122,7 +122,7 @@ class TransformerModel(nn.Module):
         **kwargs,
     ) -> None:
         super().__init__()
-        self.embedding = nn.Embedding(vocab_size + 1, hidden_size, padding_idx=0)
+        self.embedding = nn.Embedding(vocab_size, hidden_size, padding_idx=0)
         self.pos_encoding = PositionalEncoding(hidden_size, max_seq_len, dropout)
         self.blocks = nn.ModuleList(
             [
