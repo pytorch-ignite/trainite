@@ -42,7 +42,7 @@ MODEL_SPECS = {
 
 DATASET_SPECS = {
     "string-reverse": DatasetSpec(
-        name="string-reverse",
+        name="string_reverse",
         implementation_path=Path("trainite/datasets/string_reverse.py"),
         config_cls=StringReverseDatasetConfig,
         implementation_symbol="StringReverseDataset",
