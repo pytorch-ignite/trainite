@@ -129,10 +129,6 @@ def test_collate_fn():
 
 
 def test_build_string_reverse_dataset():
-    dataset = build_string_reverse_dataset(size=5)
-    assert isinstance(dataset, StringReverseDataset)
-    assert len(dataset) == 5
-
     dataset = build_string_reverse_dataset(size=5, seq_len=3)
     assert isinstance(dataset, StringReverseDataset)
     assert len(dataset) == 5
@@ -142,25 +138,26 @@ def test_build_string_reverse_dataset():
     assert len(dataset) == 5
 
     with pytest.raises(
-        ValueError, match="Cannot specify both seq_len and min_seq_len/max_seq_len."
+        ValueError,
+        match="Cannot specify both seq_len and min_seq_len/max_seq_len.",
     ):
         build_string_reverse_dataset(size=5, seq_len=3, min_seq_len=1, max_seq_len=5)
 
     with pytest.raises(
         ValueError,
-        match="At least one of seq_len or min_seq_len/max_seq_len must be specified.",
+        match="Must specify either seq_len or both min_seq_len and max_seq_len.",
     ):
         build_string_reverse_dataset(size=5)
 
     with pytest.raises(
         ValueError,
-        match="At least one of seq_len or min_seq_len/max_seq_len must be specified.",
+        match="Must specify either seq_len or both min_seq_len and max_seq_len.",
     ):
         build_string_reverse_dataset(size=5, min_seq_len=1)
 
     with pytest.raises(
         ValueError,
-        match="At least one of seq_len or min_seq_len/max_seq_len must be specified.",
+        match="Must specify either seq_len or both min_seq_len and max_seq_len.",
     ):
         build_string_reverse_dataset(size=5, max_seq_len=1)
 
