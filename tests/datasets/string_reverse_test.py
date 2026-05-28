@@ -99,7 +99,7 @@ def test_string_reverse_fixed_lengths_and_presets():
     "preset",
     ["@digits", "@alpha", "@alphanumeric", "@universal", "abc"],
 )
-def test_char_tokenizer_with_digits_preset(preset: str):
+def test_string_reverse_dataset_charset_presets(preset: str):
     dataset = StringReverseDataset(
         size=10, seed=42, charset=preset, min_seq_len=1, max_seq_len=5
     )
