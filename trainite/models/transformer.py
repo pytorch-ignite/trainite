@@ -9,9 +9,8 @@ class PositionalEncoding(nn.Module):
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
 
-        assert d_model % 2 == 0, (
-            "d_model must be even for sinusoidal positional encoding"
-        )
+        if d_model % 2 != 0:
+            raise ValueError("d_model must be even for sinusoidal positional encoding")
 
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)

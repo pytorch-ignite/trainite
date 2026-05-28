@@ -198,8 +198,8 @@ def collate_fn(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
 
 def build_string_reverse_dataset(
     size: int = 256,
-    min_seq_len: int | None = 1,
-    max_seq_len: int | None = 16,
+    min_seq_len: int | None = None,
+    max_seq_len: int | None = None,
     seq_len: int | None = None,
     charset: str | None = None,
     seed: int = 42,

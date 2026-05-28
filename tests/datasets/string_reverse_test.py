@@ -133,6 +133,37 @@ def test_build_string_reverse_dataset():
     assert isinstance(dataset, StringReverseDataset)
     assert len(dataset) == 5
 
+    dataset = build_string_reverse_dataset(size=5, seq_len=3)
+    assert isinstance(dataset, StringReverseDataset)
+    assert len(dataset) == 5
+
+    dataset = build_string_reverse_dataset(size=5, min_seq_len=1, max_seq_len=5)
+    assert isinstance(dataset, StringReverseDataset)
+    assert len(dataset) == 5
+
+    with pytest.raises(
+        ValueError, match="Cannot specify both seq_len and min_seq_len/max_seq_len."
+    ):
+        build_string_reverse_dataset(size=5, seq_len=3, min_seq_len=1, max_seq_len=5)
+
+    with pytest.raises(
+        ValueError,
+        match="At least one of seq_len or min_seq_len/max_seq_len must be specified.",
+    ):
+        build_string_reverse_dataset(size=5)
+
+    with pytest.raises(
+        ValueError,
+        match="At least one of seq_len or min_seq_len/max_seq_len must be specified.",
+    ):
+        build_string_reverse_dataset(size=5, min_seq_len=1)
+
+    with pytest.raises(
+        ValueError,
+        match="At least one of seq_len or min_seq_len/max_seq_len must be specified.",
+    ):
+        build_string_reverse_dataset(size=5, max_seq_len=1)
+
 
 def test_config_build_string_reverse_dataset():
     spec = get_dataset_spec("string-reverse")

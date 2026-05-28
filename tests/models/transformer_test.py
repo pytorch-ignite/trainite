@@ -48,7 +48,9 @@ def test_attention():
     assert output.shape == x.shape
 
     # Non-divisible embed_dim should raise an assertion error
-    with pytest.raises(AssertionError):
+    with pytest.raises(
+        ValueError, match="d_model must be even for sinusoidal positional encoding"
+    ):
         Attention(15, 2)
 
 
@@ -113,7 +115,7 @@ def test_build_transformer_model():
     assert isinstance(model, TransformerModel)
 
 
-def test_config_build_string_reverse_dataset():
+def test_build_transformer_model_from_spec():
     spec = get_model_spec("transformer")
     model_conf = spec.config_cls()
     model = instantiate(model_conf)
