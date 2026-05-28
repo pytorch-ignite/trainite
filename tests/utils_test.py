@@ -1,26 +1,50 @@
 import pytest
 
+from trainite.config import ComponentConfig
 from trainite.utils import get_target, instantiate
 
 
-def test_get_target_valid_and_invalid():
-    # valid target
+def test_get_target_success():
     target = get_target("trainite.utils.get_target")
     assert target is get_target
 
-    # empty target raises ValueError
+
+def test_get_target_empty_path():
     with pytest.raises(ValueError):
         get_target("")
 
-    # invalid target path raises ImportError
-    with pytest.raises(ImportError):
+
+def test_get_target_import_error():
+    with pytest.raises(ImportError, match="Could not locate target"):
         get_target("trainite.nonexistent.Nope")
 
 
-def test_instantiate_invalid_inputs():
-    # instantiate requires a ComponentConfig instance
+def test_instantiate_non_component_config():
     with pytest.raises(ValueError):
         instantiate("not_a_config")
 
-    # constructing a bare ComponentConfig without _target_ will raise when validating,
-    # but instantiate only accepts ComponentConfig instances; ensure non-instance is rejected above.
+
+def test_instantiate_import_error():
+    config = ComponentConfig(_target_="trainite.utils.Nope")
+    with pytest.raises(ImportError, match="Could not locate target"):
+        instantiate(config)
+
+
+def test_instantiate_get_target():
+    config = ComponentConfig(
+        _target_="trainite.utils.get_target", target_path="trainite.utils.get_target"
+    )
+    target = instantiate(config)
+    assert target is get_target
+
+
+def test_instantiate_dict_with_kwargs():
+    config = ComponentConfig(_target_="builtins.dict", key="value")
+    result = instantiate(config)
+    assert result == {"key": "value"}
+
+
+def test_instantiate_kwargs_override():
+    config = ComponentConfig(_target_="builtins.dict", key="value")
+    result = instantiate(config, key="override")
+    assert result == {"key": "override"}
