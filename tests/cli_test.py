@@ -33,7 +33,7 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
             trainer,
             str(project_dir),
         ]
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True, timeout=60)
 
         dataset_spec = get_dataset_spec(dataset)
         model_spec = get_model_spec(model)
