@@ -172,17 +172,33 @@ def _build_templates(
             )
         val = required_deps[dep] if dep in required_deps else other_deps[dep]
         final_deps.add(val)
+    model_docs = ""
+    if model_spec.readme_template_path:
+        model_docs = _render_template(PROJECT_ROOT / model_spec.readme_template_path)
+
+    dataset_docs = ""
+    if dataset_spec.readme_template_path:
+        dataset_docs = _render_template(
+            PROJECT_ROOT / dataset_spec.readme_template_path
+        )
+
+    trainer_docs = ""
+    if trainer_spec.readme_template_path:
+        trainer_docs = _render_template(
+            PROJECT_ROOT / trainer_spec.readme_template_path
+        )
+
     return {
         f"models/{model_spec.name}.py": _render_template(
-            model_spec.implementation_path,
+            PROJECT_ROOT / model_spec.implementation_path,
             model_spec.template_replacements,
         ),
         f"dataset/{dataset_spec.name}.py": _render_template(
-            dataset_spec.implementation_path,
+            PROJECT_ROOT / dataset_spec.implementation_path,
             dataset_spec.template_replacements,
         ),
         "trainer.py": _render_template(
-            trainer_spec.implementation_path,
+            PROJECT_ROOT / trainer_spec.implementation_path,
             trainer_spec.template_replacements,
         ),
         "utils.py": _render_template(
@@ -209,7 +225,15 @@ def _build_templates(
         ),
         "README.md": _render_template(
             PROJECT_ROOT / "trainite/templates/project/README.md",
-            [("{{project_name}}", project_name)],
+            [
+                ("{{project_name}}", project_name),
+                ("{{model_name}}", model_spec.name),
+                ("{{model_docs}}", model_docs),
+                ("{{dataset_name}}", dataset_spec.name),
+                ("{{dataset_docs}}", dataset_docs),
+                ("{{trainer_name}}", trainer_spec.name),
+                ("{{trainer_docs}}", trainer_docs),
+            ],
         ),
         "pyproject.toml": generate_uv_project(
             name=project_name,

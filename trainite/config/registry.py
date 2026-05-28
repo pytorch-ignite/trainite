@@ -13,6 +13,7 @@ class ComponentSpec(BaseModel):
     implementation_path: Path
     config_cls: type
     implementation_symbol: str
+    readme_template_path: Path | None = None
     template_replacements: list[tuple[str, str]] = []
     dependencies: list[str] = []
 
@@ -37,6 +38,9 @@ MODEL_SPECS = {
         config_cls=TransformerModelConfig,
         implementation_symbol="TransformerModel",
         builder_symbol="build_transformer_model",
+        readme_template_path=Path(
+            "trainite/templates/components/models/transformer.md"
+        ),
     ),
 }
 
@@ -48,6 +52,9 @@ DATASET_SPECS = {
         implementation_symbol="StringReverseDataset",
         builder_symbol="build_string_reverse_dataset",
         collate_fn_symbol="collate_fn",
+        readme_template_path=Path(
+            "trainite/templates/components/datasets/string_reverse.md"
+        ),
     ),
 }
 
@@ -64,6 +71,9 @@ TRAINER_SPECS = {
             ),
             ("trainite.utils", "utils"),
         ],
+        readme_template_path=Path(
+            "trainite/templates/components/trainers/pretrainer.md"
+        ),
     ),
 }
 
