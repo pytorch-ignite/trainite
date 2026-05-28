@@ -1,44 +1,128 @@
-# from __future__ import annotations
+import py_compile
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 
-# import py_compile
-# import tempfile
-# from pathlib import Path
+import pytest
 
-# from trainite.cli import main
+from trainite.config import get_dataset_spec, get_model_spec
 
 
-# def test_init_generates_parseable_starter_project() -> None:
-#     with tempfile.TemporaryDirectory() as temp_dir:
-#         project_dir = Path(temp_dir) / "demo-project"
-#         # Use --yes to skip interactive prompts so the test is deterministic
-#         main(["init", "--yes", str(project_dir)])
+@pytest.mark.parametrize(
+    "model,dataset,trainer",
+    [
+        ("transformer", "string-reverse", "pretrainer"),
+    ],
+)
+def test_init_generates_valid_project(model: str, dataset: str, trainer: str) -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        project_dir = Path(temp_dir) / "demo-project"
+        # Run trainite init
+        cmd = [
+            sys.executable,
+            "-m",
+            "trainite.cli",
+            "init",
+            "--yes",
+            "--model",
+            model,
+            "--dataset",
+            dataset,
+            "--trainer",
+            trainer,
+            str(project_dir),
+        ]
+        subprocess.run(cmd, check=True)
 
-#         expected_files = [
-#             "config.yaml",
-#             "config.py",
-#             "model.py",
-#             "dataset.py",
-#             "trainer.py",
-#             "main.py",
-#         ]
-#         for filename in expected_files:
-#             assert (project_dir / filename).exists(), filename
+        dataset_spec = get_dataset_spec(dataset)
+        model_spec = get_model_spec(model)
 
-#         for filename in [
-#             "config.py",
-#             "model.py",
-#             "dataset.py",
-#             "trainer.py",
-#             "main.py",
-#         ]:
-#             py_compile.compile(str(project_dir / filename), doraise=True)
+        expected_files = [
+            "config.yaml",
+            "config.py",
+            f"models/{model_spec.name}.py",
+            f"dataset/{dataset_spec.name}.py",
+            "trainer.py",
+            "utils.py",
+            "main.py",
+            "pyproject.toml",
+            "README.md",
+        ]
+        for filename in expected_files:
+            assert (project_dir / filename).exists(), f"{filename} missing"
 
-#         trainer_text = (project_dir / "trainer.py").read_text()
-#         main_text = (project_dir / "main.py").read_text()
+        # Check if python files are parseable
+        python_files = [
+            "config.py",
+            f"models/{model_spec.name}.py",
+            f"dataset/{dataset_spec.name}.py",
+            "trainer.py",
+            "utils.py",
+            "main.py",
+        ]
+        for filename in python_files:
+            py_compile.compile(str(project_dir / filename), doraise=True)
 
-#         assert "from config import Config, dump_config" in trainer_text
-#         assert "from dataset import build_dataloaders" in trainer_text
-#         assert "from model import build_model" in trainer_text
-#         assert "from trainer import Trainer" in main_text
-#         assert "trainite." not in trainer_text
-#         assert "trainite." not in main_text
+
+def test_generated_string_reversal_project_is_runnable() -> None:
+    """
+    Test that the generated project can actually be run for a few steps.
+    """
+    with tempfile.TemporaryDirectory() as temp_dir:
+        project_dir = Path(temp_dir) / "runnable-project"
+
+        # 1. Generate project
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "trainite.cli",
+                "init",
+                "--yes",
+                "--model",
+                "transformer",
+                "--dataset",
+                "string-reverse",
+                "--trainer",
+                "pretrainer",
+                str(project_dir),
+            ],
+            check=True,
+        )
+
+        # 2. Modify config.yaml to run for only 1 step/epoch to keep test fast
+        config_path = project_dir / "config.yaml"
+        import yaml
+
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f)
+
+        config["trainer"]["epochs"] = 1
+        config["trainer"]["log_every_steps"] = 1
+        config["model"]["layers"] = 1
+        config["model"]["hidden_size"] = 16
+        config["model"]["feedforward_dim"] = 32
+        config["model"]["num_heads"] = 2
+        config["data"]["train"]["dataset"]["size"] = 16
+
+        with open(config_path, "w") as f:
+            yaml.safe_dump(config, f)
+
+        # 3. Run the generated main.py
+
+        try:
+            subprocess.run(
+                [sys.executable, "main.py", "config.yaml"],
+                cwd=project_dir,
+                check=True,
+                timeout=60,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as e:
+            pytest.fail(
+                f"Generated project failed to run:\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}"
+            )
+        except subprocess.TimeoutExpired:
+            pytest.fail("Generated project timed out")
