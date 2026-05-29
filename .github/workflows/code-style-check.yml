@@ -20,7 +20,7 @@ jobs:
           enable-cache: true
           python-version: 3.11
 
-      - name: install pre-commit and run pre-commit hooks
+      - name: Sync dev dependencies and run pre-commit hooks
         run: |
-          uv pip install pre-commit
-          pre-commit run --all-files
+          uv sync --locked --all-extras --dev
+          uv run pre-commit run --all-files
