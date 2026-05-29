@@ -19,6 +19,19 @@ trainite = "trainite.cli:main"
 [tool.uv]
 package = true
 
+[tool.pyrefly]
+
+project-excludes = [
+    "**/venv/**",
+    "**/.venv/**",
+    "**/build/**",
+    "**/docs/**",
+    "**/examples/**",
+]
+
+preset = "basic"
+output-format = "full-text"
+
 [dependency-groups]
 generated = [
     "pydantic>=2",
@@ -34,4 +47,5 @@ dev = [
     "tensorboard",
     "pytest>=9.0.3",
     "pre-commit>=4.6.0",
+    "pyrefly>=1.0.0",
 ]

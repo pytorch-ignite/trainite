@@ -1,0 +1,48 @@
+name: cpu tests
+
+on:
+  push:
+    branches: [main, "develop"]
+    paths:
+      - "trainite/**"
+      - "tests/**"
+      - "examples/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/**"
+  pull_request:
+    branches: [main, "develop"]
+    paths:
+      - "trainite/**"
+      - "tests/**"
+      - "examples/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+
+      - name: Sync dependencies
+        run: uv sync --locked --dev
+
+      - name: Run tests
+        run: uv run pytest

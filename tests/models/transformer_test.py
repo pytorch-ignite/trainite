@@ -24,7 +24,7 @@ def test_positional_encoding():
     d_model = 15
     max_len = 32
     with pytest.raises(
-        AssertionError, match="d_model must be even for sinusoidal positional encoding"
+        ValueError, match="d_model must be even for sinusoidal positional encoding."
     ):
         PositionalEncoding(d_model, max_len)
 
@@ -48,9 +48,7 @@ def test_attention():
     assert output.shape == x.shape
 
     # Non-divisible embed_dim should raise an assertion error
-    with pytest.raises(
-        ValueError, match="d_model must be even for sinusoidal positional encoding"
-    ):
+    with pytest.raises(ValueError, match="embed_dim must be divisible by num_heads."):
         Attention(15, 2)
 
 

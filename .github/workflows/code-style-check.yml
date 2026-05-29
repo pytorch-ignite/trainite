@@ -1,0 +1,26 @@
+name: code style check and type check
+
+on:
+  push:
+    branches: [main, "develop"]
+  pull_request:
+    branches: [main, "develop"]
+  workflow_dispatch:
+
+jobs:
+  code-style-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install uv and dependencies
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: 3.11
+
+      - name: Sync dev dependencies and run pre-commit hooks
+        run: |
+          uv sync --locked --all-extras --dev
+          uv run pre-commit run --all-files
