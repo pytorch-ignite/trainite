@@ -1,4 +1,4 @@
-name: code style check
+name: code style check and type check
 
 on:
   push:
@@ -14,5 +14,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: checks code style
-        uses: pre-commit/action@v3.0.1
+      - name: Install uv and dependencies
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: 3.11
+
+      - name: install pre-commit and run pre-commit hooks
+        run: |
+          uv pip install pre-commit
+          pre-commit run --all-files
