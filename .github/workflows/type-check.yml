@@ -16,9 +16,12 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          python-version: 3.11
 
       - name: Sync dependencies
         run: uv sync
 
       - name: Run Pyrefly
         uses: facebook/pyrefly@main
+        with:
+          python-version: 3.11
