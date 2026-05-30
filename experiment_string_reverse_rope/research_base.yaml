@@ -1,0 +1,66 @@
+model:
+    _target_: models.transformer.build_transformer_model
+    hidden_size: 128
+    num_layers: 2
+    num_heads: 2
+    feedforward_dim: 512
+    dropout: 0.1
+    max_seq_len: 1030
+optimizer:
+    _target_: torch.optim.AdamW
+    lr: 0.001
+data:
+    train:
+        dataset:
+            _target_: dataset.string_reverse.build_string_reverse_dataset
+            size: 10000
+            alphabet: "@alphanumeric"
+            min_seq_len: 1
+            max_seq_len: 124
+            fixed_length: false
+            seed: 7
+        dataloader:
+            batch_size: 64
+            shuffle: true
+            num_workers: 2
+            collate_fn:
+                _target_: dataset.string_reverse.collate_fn
+    val:
+        dataset:
+            _target_: dataset.string_reverse.build_string_reverse_dataset
+            size: 500
+            alphabet: "@alphanumeric"
+            min_seq_len: 1
+            max_seq_len: 124
+            fixed_length: false
+            seed: 42
+        dataloader:
+            batch_size: 64
+            shuffle: false
+            num_workers: 2
+            collate_fn:
+                _target_: dataset.string_reverse.collate_fn
+    test:
+        dataset:
+            _target_: dataset.string_reverse.build_string_reverse_dataset
+            size: 500
+            alphabet: "@alphanumeric"
+            min_seq_len: 1
+            max_seq_len: 124
+            fixed_length: false
+            seed: 123
+        dataloader:
+            batch_size: 64
+            shuffle: false
+            num_workers: 2
+            collate_fn:
+                _target_: dataset.string_reverse.collate_fn
+trainer:
+    log_every_steps: 50
+    epochs: 50
+    grad_clip_norm: 1.0
+output:
+    root: research_outputs
+    run_name: transformer_research
+seed: 42
+device: auto
