@@ -104,7 +104,7 @@ def test_decoder_block():
 def test_encoder_decoder_model():
     vocab_size = 10
     hidden_size = 16
-    
+
     model = EncoderDecoderModel(vocab_size=vocab_size, hidden_size=hidden_size)
 
     enc_input_ids = torch.randint(1, vocab_size, (2, 8))
@@ -129,7 +129,7 @@ def test_encoder_decoder_model():
     )
     assert len(model_custom.encoder_blocks) == 3
     assert len(model_custom.decoder_blocks) == 1
-    
+
     enc_ids_custom = torch.randint(1, vocab_size, (2, 40))
     dec_ids_custom = torch.randint(1, vocab_size, (2, 20))
     model_custom.eval()

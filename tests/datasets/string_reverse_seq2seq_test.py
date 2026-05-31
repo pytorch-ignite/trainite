@@ -68,7 +68,9 @@ def test_string_reverse_seq2seq_variable_lengths():
     assert len(set(dec_in_lengths)) > 1
     assert len(set(dec_lbl_lengths)) > 1
 
-    for enc_len, dec_in_len, dec_lbl_len in zip(enc_lengths, dec_in_lengths, dec_lbl_lengths):
+    for enc_len, dec_in_len, dec_lbl_len in zip(
+        enc_lengths, dec_in_lengths, dec_lbl_lengths
+    ):
         # enc_len: seq_len + 2
         # dec_in_len: seq_len + 1
         # dec_lbl_len: seq_len + 1
@@ -107,14 +109,14 @@ def test_collate_fn():
     batch = [
         {
             "encoder_input_ids": torch.tensor([1, 4, 5, 2]),  # len 4
-            "decoder_input_ids": torch.tensor([1, 5, 4]),     # len 3
-            "decoder_labels": torch.tensor([5, 4, 2]),        # len 3
+            "decoder_input_ids": torch.tensor([1, 5, 4]),  # len 3
+            "decoder_labels": torch.tensor([5, 4, 2]),  # len 3
         },
         {
-            "encoder_input_ids": torch.tensor([1, 6, 2]),     # len 3
-            "decoder_input_ids": torch.tensor([1, 6]),        # len 2
-            "decoder_labels": torch.tensor([6, 2]),           # len 2
-        }
+            "encoder_input_ids": torch.tensor([1, 6, 2]),  # len 3
+            "decoder_input_ids": torch.tensor([1, 6]),  # len 2
+            "decoder_labels": torch.tensor([6, 2]),  # len 2
+        },
     ]
 
     collated = collate_fn(batch)

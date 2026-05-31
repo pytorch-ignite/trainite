@@ -169,11 +169,19 @@ def _build_templates(
 
     if model_name == "encoder-decoder":
         if dataset_name == "string-reverse":
-            dataset_implementation_path = Path("trainite/datasets/string_reverse_seq2seq.py")
-            dataset_readme_path = Path("trainite/templates/components/datasets/string_reverse_seq2seq.md")
+            dataset_implementation_path = Path(
+                "trainite/datasets/string_reverse_seq2seq.py"
+            )
+            dataset_readme_path = Path(
+                "trainite/templates/components/datasets/string_reverse_seq2seq.md"
+            )
         if trainer_name == "pretrainer":
-            trainer_implementation_path = Path("trainite/trainers/pretrainer_seq2seq.py")
-            trainer_readme_path = Path("trainite/templates/components/trainers/pretrainer_seq2seq.md")
+            trainer_implementation_path = Path(
+                "trainite/trainers/pretrainer_seq2seq.py"
+            )
+            trainer_readme_path = Path(
+                "trainite/templates/components/trainers/pretrainer_seq2seq.md"
+            )
 
     spec_deps = set()
     for spec in [model_spec, dataset_spec, trainer_spec]:
@@ -212,7 +220,6 @@ def _build_templates(
             PROJECT_ROOT / trainer_implementation_path,
             trainer_spec.template_replacements,
         ),
-
         "utils.py": _render_template(
             PROJECT_ROOT / "trainite/utils.py",
             [("trainite.config", "config")],

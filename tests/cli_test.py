@@ -190,4 +190,3 @@ def test_generated_encoder_decoder_project_is_runnable() -> None:
             )
         except subprocess.TimeoutExpired:
             pytest.fail("Generated project timed out")
-

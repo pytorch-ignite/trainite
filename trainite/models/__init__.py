@@ -1,5 +1,8 @@
 from trainite.models.decoder import DecoderModel, build_decoder_model
-from trainite.models.encoder_decoder import EncoderDecoderModel, build_encoder_decoder_model
+from trainite.models.encoder_decoder import (
+    EncoderDecoderModel,
+    build_encoder_decoder_model,
+)
 
 __all__ = [
     "DecoderModel",
@@ -7,5 +10,3 @@ __all__ = [
     "EncoderDecoderModel",
     "build_encoder_decoder_model",
 ]
-
-

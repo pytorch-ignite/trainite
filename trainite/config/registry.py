@@ -38,9 +38,7 @@ MODEL_SPECS = {
         config_cls=DecoderModelConfig,
         implementation_symbol="DecoderModel",
         builder_symbol="build_decoder_model",
-        readme_template_path=Path(
-            "trainite/templates/components/models/decoder.md"
-        ),
+        readme_template_path=Path("trainite/templates/components/models/decoder.md"),
     ),
     "encoder-decoder": ModelSpec(
         name="encoder_decoder",

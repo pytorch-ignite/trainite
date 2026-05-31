@@ -71,7 +71,9 @@ class MultiHeadAttention(nn.Module):
 
         if padding_mask is not None:
             if is_causal:
-                causal_mask = torch.ones(S, S_k, dtype=torch.bool, device=x.device).tril()
+                causal_mask = torch.ones(
+                    S, S_k, dtype=torch.bool, device=x.device
+                ).tril()
                 mask = causal_mask & padding_mask
             else:
                 mask = padding_mask
@@ -197,8 +199,12 @@ class EncoderDecoderModel(nn.Module):
     ) -> None:
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, hidden_size, padding_idx=0)
-        self.encoder_pos_encoding = PositionalEncoding(hidden_size, encoder_max_seq_len, dropout)
-        self.decoder_pos_encoding = PositionalEncoding(hidden_size, decoder_max_seq_len, dropout)
+        self.encoder_pos_encoding = PositionalEncoding(
+            hidden_size, encoder_max_seq_len, dropout
+        )
+        self.decoder_pos_encoding = PositionalEncoding(
+            hidden_size, decoder_max_seq_len, dropout
+        )
 
         self.encoder_blocks = nn.ModuleList(
             [
@@ -223,11 +229,15 @@ class EncoderDecoderModel(nn.Module):
     ) -> torch.Tensor:
         # Encoder forward
         B_enc, S_enc = encoder_input_ids.shape
-        x_enc = self.embedding(encoder_input_ids) * math.sqrt(self.embedding.embedding_dim)
+        x_enc = self.embedding(encoder_input_ids) * math.sqrt(
+            self.embedding.embedding_dim
+        )
         x_enc = self.encoder_pos_encoding(x_enc)
 
         if (encoder_input_ids == self.embedding.padding_idx).any():
-            enc_padding_mask = (encoder_input_ids != self.embedding.padding_idx).reshape(B_enc, 1, 1, S_enc)
+            enc_padding_mask = (
+                encoder_input_ids != self.embedding.padding_idx
+            ).reshape(B_enc, 1, 1, S_enc)
         else:
             enc_padding_mask = None
 
@@ -238,17 +248,23 @@ class EncoderDecoderModel(nn.Module):
 
         # Decoder forward
         B_dec, S_dec = decoder_input_ids.shape
-        x_dec = self.embedding(decoder_input_ids) * math.sqrt(self.embedding.embedding_dim)
+        x_dec = self.embedding(decoder_input_ids) * math.sqrt(
+            self.embedding.embedding_dim
+        )
         x_dec = self.decoder_pos_encoding(x_dec)
 
         if (decoder_input_ids == self.embedding.padding_idx).any():
-            dec_padding_mask = (decoder_input_ids != self.embedding.padding_idx).reshape(B_dec, 1, 1, S_dec)
+            dec_padding_mask = (
+                decoder_input_ids != self.embedding.padding_idx
+            ).reshape(B_dec, 1, 1, S_dec)
         else:
             dec_padding_mask = None
 
         # Cross attention padding mask (B_dec, 1, 1, S_enc) to mask out padded tokens in encoder memory
         if (encoder_input_ids == self.embedding.padding_idx).any():
-            cross_padding_mask = (encoder_input_ids != self.embedding.padding_idx).reshape(B_dec, 1, 1, S_enc)
+            cross_padding_mask = (
+                encoder_input_ids != self.embedding.padding_idx
+            ).reshape(B_dec, 1, 1, S_enc)
         else:
             cross_padding_mask = None
 

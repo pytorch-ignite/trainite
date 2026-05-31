@@ -104,4 +104,3 @@ If the dataset is tiny, start with a small model:
 - `feedforward_dim=128`
 
 If training is stable and the model underfits, scale up from there.
-

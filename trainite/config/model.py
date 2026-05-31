@@ -15,10 +15,10 @@ class DecoderModelConfig(ComponentConfig):
     max_seq_len: int = 128
 
 
-
 class EncoderDecoderModelConfig(ComponentConfig):
     target: str = Field(
-        default="trainite.models.encoder_decoder.build_encoder_decoder_model", alias="_target_"
+        default="trainite.models.encoder_decoder.build_encoder_decoder_model",
+        alias="_target_",
     )
     hidden_size: int = 64
     num_encoder_layers: int = 2
@@ -28,5 +28,3 @@ class EncoderDecoderModelConfig(ComponentConfig):
     dropout: float = 0.1
     encoder_max_seq_len: int = 128
     decoder_max_seq_len: int = 128
-
-

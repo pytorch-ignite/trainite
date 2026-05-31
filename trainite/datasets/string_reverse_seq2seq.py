@@ -188,9 +188,15 @@ def collate_fn(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     decoder_input_ids = [item["decoder_input_ids"] for item in batch]
     decoder_labels = [item["decoder_labels"] for item in batch]
 
-    padded_enc_input = pad_sequence(encoder_input_ids, batch_first=True, padding_value=0)
-    padded_dec_input = pad_sequence(decoder_input_ids, batch_first=True, padding_value=0)
-    padded_dec_labels = pad_sequence(decoder_labels, batch_first=True, padding_value=-100)
+    padded_enc_input = pad_sequence(
+        encoder_input_ids, batch_first=True, padding_value=0
+    )
+    padded_dec_input = pad_sequence(
+        decoder_input_ids, batch_first=True, padding_value=0
+    )
+    padded_dec_labels = pad_sequence(
+        decoder_labels, batch_first=True, padding_value=-100
+    )
 
     return {
         "encoder_input_ids": padded_enc_input,
