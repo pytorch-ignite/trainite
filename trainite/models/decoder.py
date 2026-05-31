@@ -79,7 +79,7 @@ class Attention(nn.Module):
         return self.dropout(out), context
 
 
-class TransformerBlock(nn.Module):
+class DecoderBlock(nn.Module):
     def __init__(
         self,
         d_model: int,
@@ -111,7 +111,7 @@ class TransformerBlock(nn.Module):
         return x
 
 
-class TransformerModel(nn.Module):
+class DecoderModel(nn.Module):
     def __init__(
         self,
         vocab_size: int = 32,
@@ -128,7 +128,7 @@ class TransformerModel(nn.Module):
         self.pos_encoding = PositionalEncoding(hidden_size, max_seq_len, dropout)
         self.blocks = nn.ModuleList(
             [
-                TransformerBlock(
+                DecoderBlock(
                     hidden_size,
                     num_heads,
                     feedforward_dim,
@@ -154,7 +154,7 @@ class TransformerModel(nn.Module):
         return self.proj(x)
 
 
-def build_transformer_model(
+def build_decoder_model(
     vocab_size: int = 32,
     hidden_size: int = 64,
     num_layers: int = 2,
@@ -163,8 +163,8 @@ def build_transformer_model(
     dropout: float = 0.1,
     max_seq_len: int = 128,
     **kwargs,
-) -> TransformerModel:
-    return TransformerModel(
+) -> DecoderModel:
+    return DecoderModel(
         vocab_size=vocab_size,
         hidden_size=hidden_size,
         num_layers=num_layers,

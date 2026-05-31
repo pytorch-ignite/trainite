@@ -160,6 +160,29 @@ def _build_templates(
     model_spec = get_model_spec(model_name)
     dataset_spec = get_dataset_spec(dataset_name)
     trainer_spec = get_trainer_spec(trainer_name)
+
+    # Dynamic routing for encoder-decoder setup
+    dataset_implementation_path = dataset_spec.implementation_path
+    trainer_implementation_path = trainer_spec.implementation_path
+    dataset_readme_path = dataset_spec.readme_template_path
+    trainer_readme_path = trainer_spec.readme_template_path
+
+    if model_name == "encoder-decoder":
+        if dataset_name == "string-reverse":
+            dataset_implementation_path = Path(
+                "trainite/datasets/string_reverse_seq2seq.py"
+            )
+            dataset_readme_path = Path(
+                "trainite/templates/components/datasets/string_reverse_seq2seq.md"
+            )
+        if trainer_name == "pretrainer":
+            trainer_implementation_path = Path(
+                "trainite/trainers/pretrainer_seq2seq.py"
+            )
+            trainer_readme_path = Path(
+                "trainite/templates/components/trainers/pretrainer_seq2seq.md"
+            )
+
     spec_deps = set()
     for spec in [model_spec, dataset_spec, trainer_spec]:
         spec_deps.update(spec.dependencies)
@@ -177,16 +200,12 @@ def _build_templates(
         model_docs = _render_template(PROJECT_ROOT / model_spec.readme_template_path)
 
     dataset_docs = ""
-    if dataset_spec.readme_template_path:
-        dataset_docs = _render_template(
-            PROJECT_ROOT / dataset_spec.readme_template_path
-        )
+    if dataset_readme_path:
+        dataset_docs = _render_template(PROJECT_ROOT / dataset_readme_path)
 
     trainer_docs = ""
-    if trainer_spec.readme_template_path:
-        trainer_docs = _render_template(
-            PROJECT_ROOT / trainer_spec.readme_template_path
-        )
+    if trainer_readme_path:
+        trainer_docs = _render_template(PROJECT_ROOT / trainer_readme_path)
 
     return {
         f"models/{model_spec.name}.py": _render_template(
@@ -194,11 +213,11 @@ def _build_templates(
             model_spec.template_replacements,
         ),
         f"dataset/{dataset_spec.name}.py": _render_template(
-            PROJECT_ROOT / dataset_spec.implementation_path,
+            PROJECT_ROOT / dataset_implementation_path,
             dataset_spec.template_replacements,
         ),
         "trainer.py": _render_template(
-            PROJECT_ROOT / trainer_spec.implementation_path,
+            PROJECT_ROOT / trainer_implementation_path,
             trainer_spec.template_replacements,
         ),
         "utils.py": _render_template(

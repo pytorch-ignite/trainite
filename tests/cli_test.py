@@ -12,7 +12,8 @@ from trainite.config import get_dataset_spec, get_model_spec
 @pytest.mark.parametrize(
     "model,dataset,trainer",
     [
-        ("transformer", "string-reverse", "pretrainer"),
+        ("decoder", "string-reverse", "pretrainer"),
+        ("encoder-decoder", "string-reverse", "pretrainer"),
     ],
 )
 def test_init_generates_valid_project(model: str, dataset: str, trainer: str) -> None:
@@ -81,7 +82,7 @@ def test_generated_string_reversal_project_is_runnable() -> None:
                 "init",
                 "--yes",
                 "--model",
-                "transformer",
+                "decoder",
                 "--dataset",
                 "string-reverse",
                 "--trainer",
@@ -111,6 +112,69 @@ def test_generated_string_reversal_project_is_runnable() -> None:
 
         # 3. Run the generated main.py
 
+        try:
+            subprocess.run(
+                [sys.executable, "main.py", "config.yaml"],
+                cwd=project_dir,
+                check=True,
+                timeout=60,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as e:
+            pytest.fail(
+                f"Generated project failed to run:\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}"
+            )
+        except subprocess.TimeoutExpired:
+            pytest.fail("Generated project timed out")
+
+
+def test_generated_encoder_decoder_project_is_runnable() -> None:
+    """
+    Test that the generated encoder-decoder project can actually be run for a few steps.
+    """
+    with tempfile.TemporaryDirectory() as temp_dir:
+        project_dir = Path(temp_dir) / "runnable-enc-dec-project"
+
+        # 1. Generate project
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "trainite.cli",
+                "init",
+                "--yes",
+                "--model",
+                "encoder-decoder",
+                "--dataset",
+                "string-reverse",
+                "--trainer",
+                "pretrainer",
+                str(project_dir),
+            ],
+            check=True,
+        )
+
+        # 2. Modify config.yaml to run for only 1 step/epoch to keep test fast
+        config_path = project_dir / "config.yaml"
+        import yaml
+
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f)
+
+        config["trainer"]["epochs"] = 1
+        config["trainer"]["log_every_steps"] = 1
+        config["model"]["num_encoder_layers"] = 1
+        config["model"]["num_decoder_layers"] = 1
+        config["model"]["hidden_size"] = 16
+        config["model"]["feedforward_dim"] = 32
+        config["model"]["num_heads"] = 2
+        config["data"]["train"]["dataset"]["size"] = 16
+
+        with open(config_path, "w") as f:
+            yaml.safe_dump(config, f)
+
+        # 3. Run the generated main.py
         try:
             subprocess.run(
                 [sys.executable, "main.py", "config.yaml"],

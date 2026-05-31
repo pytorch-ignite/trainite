@@ -3,7 +3,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from trainite.config.dataset import StringReverseDatasetConfig
-from trainite.config.model import TransformerModelConfig
+from trainite.config.model import DecoderModelConfig, EncoderDecoderModelConfig
 from trainite.config.trainer import PreTrainerConfig
 
 
@@ -32,17 +32,26 @@ class DatasetSpec(ComponentSpec):
 
 
 MODEL_SPECS = {
-    "transformer": ModelSpec(
-        name="transformer",
-        implementation_path=Path("trainite/models/transformer.py"),
-        config_cls=TransformerModelConfig,
-        implementation_symbol="TransformerModel",
-        builder_symbol="build_transformer_model",
+    "decoder": ModelSpec(
+        name="decoder",
+        implementation_path=Path("trainite/models/decoder.py"),
+        config_cls=DecoderModelConfig,
+        implementation_symbol="DecoderModel",
+        builder_symbol="build_decoder_model",
+        readme_template_path=Path("trainite/templates/components/models/decoder.md"),
+    ),
+    "encoder-decoder": ModelSpec(
+        name="encoder_decoder",
+        implementation_path=Path("trainite/models/encoder_decoder.py"),
+        config_cls=EncoderDecoderModelConfig,
+        implementation_symbol="EncoderDecoderModel",
+        builder_symbol="build_encoder_decoder_model",
         readme_template_path=Path(
-            "trainite/templates/components/models/transformer.md"
+            "trainite/templates/components/models/encoder_decoder.md"
         ),
     ),
 }
+
 
 DATASET_SPECS = {
     "string-reverse": DatasetSpec(
