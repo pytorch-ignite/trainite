@@ -2,12 +2,12 @@ import pytest
 import torch
 
 from trainite.config import get_model_spec
-from trainite.models.transformer import (
+from trainite.models.decoder import (
     Attention,
     PositionalEncoding,
-    TransformerBlock,
-    TransformerModel,
-    build_transformer_model,
+    DecoderBlock,
+    DecoderModel,
+    build_decoder_model,
 )
 from trainite.utils import instantiate
 
@@ -52,11 +52,11 @@ def test_attention():
         Attention(15, 2)
 
 
-def test_transformer_block():
+def test_decoder_block():
     d_model = 16
     num_heads = 2
     feedforward_dim = 32
-    block = TransformerBlock(d_model, num_heads, feedforward_dim)
+    block = DecoderBlock(d_model, num_heads, feedforward_dim)
     x = torch.randn(2, 10, d_model)
     output = block(x)
     assert output.shape == x.shape
@@ -91,10 +91,10 @@ def test_attention_context_and_dropout_behavior():
     assert not torch.allclose(out3, out4)
 
 
-def test_transformer_model():
+def test_decoder_model():
     vocab_size = 10
     hidden_size = 16
-    model = TransformerModel(vocab_size=vocab_size, hidden_size=hidden_size)
+    model = DecoderModel(vocab_size=vocab_size, hidden_size=hidden_size)
 
     input_ids = torch.randint(1, vocab_size, (2, 10))
     model.eval()
@@ -108,13 +108,13 @@ def test_transformer_model():
     assert output.shape == (2, 10, vocab_size)
 
 
-def test_build_transformer_model():
-    model = build_transformer_model(vocab_size=10, hidden_size=16)
-    assert isinstance(model, TransformerModel)
+def test_build_decoder_model():
+    model = build_decoder_model(vocab_size=10, hidden_size=16)
+    assert isinstance(model, DecoderModel)
 
 
-def test_build_transformer_model_from_spec():
-    spec = get_model_spec("transformer")
+def test_build_decoder_model_from_spec():
+    spec = get_model_spec("decoder")
     model_conf = spec.config_cls()
     model = instantiate(model_conf)
-    assert isinstance(model, TransformerModel)
+    assert isinstance(model, DecoderModel)

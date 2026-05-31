@@ -1,4 +1,4 @@
-# Transformer model
+# Decoder model
 
 This is the model that learns the string-reverse task.
 
@@ -19,8 +19,8 @@ The model is small and standard:
    Converts token IDs into vectors.
 2. **Positional encoding**
    Adds token order information.
-3. **Transformer blocks**
-   Repeated attention + feedforward layers.
+3. **Decoder blocks**
+   Repeated causal self-attention + feedforward layers.
 4. **Final projection**
    Maps hidden states back to vocabulary logits.
 
@@ -46,19 +46,15 @@ Size of the token embeddings and hidden states.
 Bigger values usually give more capacity, but cost more memory and time.
 
 ### `num_layers`
-How many Transformer blocks to stack.
+How many Decoder blocks to stack.
 
 More layers = more capacity, slower training.
 
 ### `num_heads`
-How many attention heads to use.
-
-Choose a value that divides `hidden_size` cleanly.
+How many attention heads to use. Choose a value that divides `hidden_size` cleanly.
 
 ### `feedforward_dim`
-Size of the feedforward layer inside each block.
-
-A common choice is `2x` to `4x` of `hidden_size`.
+Size of the feedforward layer inside each block. A common choice is `2x` to `4x` of `hidden_size`.
 
 ### `dropout`
 Dropout rate used in attention, feedforward layers, and positional encoding.
@@ -70,7 +66,7 @@ Maximum sequence length supported by positional encoding.
 
 ```yaml
 model:
-  _target_: trainite.models.transformer.build_transformer_model
+  _target_: trainite.models.decoder.build_decoder_model
   hidden_size: 128
   num_layers: 4
   num_heads: 4
@@ -81,7 +77,7 @@ model:
 
 ## When to change this file
 
-Edit `trainite/models/transformer.py` if you want to:
+Edit `models/decoder.py` if you want to:
 
 - make the model wider or deeper
 - swap attention or feedforward behavior

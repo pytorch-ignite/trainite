@@ -13,7 +13,7 @@ from trainite.config.base import (
     load_yaml,
 )
 from trainite.config.dataset import StringReverseDatasetConfig
-from trainite.config.model import TransformerModelConfig
+from trainite.config.model import DecoderModelConfig, EncoderDecoderModelConfig
 from trainite.config.registry import (
     DATASET_CONFIGS,
     MODEL_CONFIGS,
@@ -32,7 +32,8 @@ __all__ = [
     "OptimizerConfig",
     "TrainerConfig",
     "StringReverseDatasetConfig",
-    "TransformerModelConfig",
+    "DecoderModelConfig",
+    "EncoderDecoderModelConfig",
     "ComponentConfig",
     "DataConfig",
     "SplitConfig",
