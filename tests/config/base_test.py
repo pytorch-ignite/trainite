@@ -23,7 +23,7 @@ def test_data_config_option_1_missing_train():
     # Invalid Option 1: missing train
     with pytest.raises(
         ValidationError,
-        match="Explicit splits mode (Option 1) requires at least the 'train' split",
+        match="requires at least the 'train' split",
     ):
         DataConfig(val=SplitConfig(dataset=ComponentConfig(_target_="dataset.val")))
 
@@ -43,7 +43,7 @@ def test_data_config_option_2_missing_dataset():
     # Actually, if I provide just train_ratio, it might think it's Option 2 but missing dataset
     with pytest.raises(
         ValidationError,
-        match="Automatic splitting mode (Option 2) requires the 'dataset' field",
+        match="requires the 'dataset' field",
     ):
         DataConfig(train_ratio=0.8)
 
@@ -52,7 +52,7 @@ def test_data_config_mixed_modes_dataset_and_splits():
     # Mixed: dataset and train split
     with pytest.raises(
         ValidationError,
-        match=r"Cannot provide train/val/test levels when 'dataset' is provided at the data level",
+        match="when 'dataset' or 'dataloader' is provided",
     ):
         DataConfig(
             dataset=ComponentConfig(_target_="dataset.all"),
@@ -75,6 +75,6 @@ def test_data_config_mixed_modes_ratios_and_splits():
 def test_data_config_empty():
     with pytest.raises(
         ValidationError,
-        match="Must provide either explicit splits (train) or automatic splitting (dataset)",
+        match="Must provide either explicit splits",
     ):
         DataConfig()
