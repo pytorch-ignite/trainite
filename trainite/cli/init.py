@@ -3,7 +3,7 @@ import inspect
 import re
 import textwrap
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Sequence
 
 import tomlkit
 from packaging.requirements import Requirement
@@ -280,6 +280,25 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _update_targets(config: Any, old_prefix: str, new_prefix: str) -> None:
+    if isinstance(config, ComponentConfig):
+        if config.target.startswith(old_prefix):
+            config.target = config.target.replace(old_prefix, new_prefix, 1)
+    elif isinstance(config, ProjectConfig):
+        # Recursively update all components in ProjectConfig
+        for field in config.model_fields:
+            _update_targets(getattr(config, field), old_prefix, new_prefix)
+    elif isinstance(config, DataConfig):
+        for field in config.model_fields:
+            _update_targets(getattr(config, field), old_prefix, new_prefix)
+    elif isinstance(config, SplitConfig):
+        _update_targets(config.dataset, old_prefix, new_prefix)
+        _update_targets(config.dataloader, old_prefix, new_prefix)
+    elif isinstance(config, DataLoaderConfig):
+        if config.collate_fn:
+            _update_targets(config.collate_fn, old_prefix, new_prefix)
+
+
 def init_project(args: argparse.Namespace) -> None:
     if args.yes:
         project_dir = args.project_dir or "my-cool-experiment"
@@ -319,38 +338,26 @@ def init_project(args: argparse.Namespace) -> None:
     dataset_spec = get_dataset_spec(dataset_name)
     trainer_spec = get_trainer_spec(trainer_name)
 
-    # Update config to point to the correct builder functions for the model and dataset
+    # Instantiate configs from specs
     model_component = model_spec.config_cls()
+    data_config = dataset_spec.config_cls()
     trainer_component = trainer_spec.config_cls()
 
-    model_component.target = f"models.{model_spec.name}.{model_spec.builder_symbol}"
-
-    # Build train split
-    train_dataset = dataset_spec.config_cls()
-    train_dataset.target = f"dataset.{dataset_spec.name}.{dataset_spec.builder_symbol}"
-
-    # Build val split
-    val_dataset = dataset_spec.config_cls()
-    val_dataset.target = f"dataset.{dataset_spec.name}.{dataset_spec.builder_symbol}"
-
-    collate_fn_config = None
-    if dataset_spec.collate_fn_symbol:
-        collate_fn_config = ComponentConfig(
-            _target_=f"dataset.{dataset_spec.name}.{dataset_spec.collate_fn_symbol}"
-        )
+    # Update targets to point to the local project structure
+    _update_targets(
+        model_component,
+        f"trainite.models.{model_spec.name}",
+        f"models.{model_spec.name}",
+    )
+    _update_targets(
+        data_config,
+        f"trainite.datasets.{dataset_spec.name}",
+        f"dataset.{dataset_spec.name}",
+    )
 
     starter_config = ProjectConfig(
         model=model_component,
-        data=DataConfig(
-            train=SplitConfig(
-                dataset=train_dataset,
-                dataloader=DataLoaderConfig(
-                    batch_size=32,
-                    shuffle=True,
-                    collate_fn=collate_fn_config,
-                ),
-            ),
-        ),
+        data=data_config,
         trainer=trainer_component,
         output=output_config,
     )

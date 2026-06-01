@@ -46,6 +46,40 @@ Trainite is a toolbox for training language models with PyTorch-Ignite. This pro
 
 ## Customization
 
+### Dataset Configuration
+
+You can configure your data in two ways in `config.yaml`:
+
+#### Option 1: Explicit Splits
+Define exactly what goes into each split. Use this for established datasets with fixed splits.
+```yaml
+data:
+  train:
+    dataset:
+      _target_: ...
+    dataloader:
+      batch_size: 32
+      shuffle: true
+  val:
+    dataset:
+      _target_: ...
+    dataloader:
+      batch_size: 32
+```
+
+#### Option 2: Automatic Splitting
+Define a single dataset and split ratios. Trainite will split it randomly (with a fixed seed).
+```yaml
+data:
+  dataset:
+    _target_: ...
+  train_ratio: 0.8
+  val_ratio: 0.2
+  dataloader:
+    batch_size: 32
+```
+*Note: In Option 2, the training split defaults to `shuffle: true`, while others default to `shuffle: false`.*
+
 ### Adding Configuration Parameters
 1. Add the parameter to `config.yaml`.
 2. Update the corresponding Pydantic model in `config.py` to include the new field.

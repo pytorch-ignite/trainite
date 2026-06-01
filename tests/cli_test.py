@@ -104,7 +104,7 @@ def test_generated_string_reversal_project_is_runnable() -> None:
         config["model"]["hidden_size"] = 16
         config["model"]["feedforward_dim"] = 32
         config["model"]["num_heads"] = 2
-        config["data"]["train"]["dataset"]["size"] = 16
+        config["data"]["dataset"]["per_seq_size"] = 16
 
         with open(config_path, "w") as f:
             yaml.safe_dump(config, f)

@@ -10,14 +10,21 @@ from ignite.handlers import (
     create_lr_scheduler_with_warmup,
 )
 from ignite.handlers.fbresearch_logger import FBResearchLogger
+from ignite.handlers.param_scheduler import ParamScheduler
 from ignite.handlers.tensorboard_logger import OptimizerParamsHandler, TensorboardLogger
 from ignite.metrics import Accuracy, Loss, RunningAverage
 from ignite.utils import setup_logger
 from torch import nn
 from torch.optim.lr_scheduler import LinearLR
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset, random_split
 
-from config import ProjectConfig, SplitConfig, dump_config
+from config import (
+    DataConfig,
+    DataLoaderConfig,
+    ProjectConfig,
+    SplitConfig,
+    dump_config,
+)
 from utils import get_target, instantiate
 
 
@@ -36,43 +43,37 @@ class PreTrainer:
         test_loader=None,
         **kwargs,
     ) -> None:
-        self.logger = setup_logger("trainer", level=logging.INFO)
+        self.logger: logging.Logger = setup_logger("trainer", level=logging.INFO)
         torch.manual_seed(config.seed)
+        self.train_loader: DataLoader | None = None
+        self.val_loader: DataLoader | None = None
+        self.test_loader: DataLoader | None = None
 
-        self.config = config
+        self.config: ProjectConfig = config
         resolved_device = config.device
         if resolved_device == "auto":
             resolved_device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.device = device or resolved_device
-        self.epochs = epochs or config.trainer.epochs
-        self.log_every_steps = log_every_steps or config.trainer.log_every_steps
-        self.grad_clip_norm = grad_clip_norm or config.trainer.grad_clip_norm
-
-        if train_loader is None:
-            train_loader = self._build_dataloader(config.data.train)
-
-        if val_loader is None:
-            if config.data.val:
-                val_loader = self._build_dataloader(config.data.val)
-            else:
-                self.logger.warning(
-                    "Validation config not provided. Early stopping and best model checkpointing will be disabled. "
-                    "Only the last model will be saved."
-                )
-
-        if test_loader is None and config.data.test:
-            test_loader = self._build_dataloader(config.data.test)
-
-        self.train_loader = train_loader
-        self.val_loader = val_loader
-        self.test_loader = test_loader
-
-        self.vocab_size = getattr(train_loader.dataset, "vocab_size", None)
+        self.device: str | torch.device = device or resolved_device
+        self.epochs: int = epochs or config.trainer.epochs
+        self.log_every_steps: int = log_every_steps or config.trainer.log_every_steps
+        self.grad_clip_norm: float | None = grad_clip_norm or getattr(
+            config.trainer, "grad_clip_norm", None
+        )
+        self.set_loaders(config, train_loader, val_loader, test_loader)
+        if self.train_loader is None:
+            raise ValueError(
+                "At least a training loader must be provided either directly or via config"
+            )
+        train_dataset = self.train_loader.dataset
+        # Handle Subset (from random_split) which wraps the original dataset
+        if isinstance(train_dataset, torch.utils.data.Subset):
+            train_dataset = train_dataset.dataset
+        self.vocab_size: int = getattr(train_dataset, "vocab_size")
         model_params = config.model.model_dump(by_alias=True)
-        configured_vocab_size = model_params.get("vocab_size")
+        configured_vocab_size: int | None = model_params.get("vocab_size")
 
         if configured_vocab_size is not None:
-            if self.vocab_size is not None and configured_vocab_size < self.vocab_size:
+            if configured_vocab_size < self.vocab_size:
                 raise ValueError(
                     f"Configured model vocab_size ({configured_vocab_size}) is smaller than "
                     f"the dataset vocabulary size ({self.vocab_size}). "
@@ -81,29 +82,134 @@ class PreTrainer:
                 )
             self.vocab_size = configured_vocab_size
 
-        self.model = model or instantiate(config.model, vocab_size=self.vocab_size)
+        self.model: nn.Module = model or instantiate(
+            config.model, vocab_size=self.vocab_size
+        )
         self.model.to(self.device)
-        self.loss_fn = nn.CrossEntropyLoss()
-        self.optimizer = instantiate(config.optimizer, params=self.model.parameters())
-        self.lr = lr or config.optimizer.lr
-        self.total_iters = len(self.train_loader) * self.epochs
+        self.loss_fn: nn.CrossEntropyLoss = nn.CrossEntropyLoss()
+        self.optimizer: torch.optim.Optimizer = instantiate(
+            config.optimizer, params=self.model.parameters()
+        )
+        self.lr: float = lr or config.optimizer.lr
+        self.total_iters: int = len(self.train_loader) * self.epochs
         self.run_dir: Path | None = None
         self.handlers: dict = {}
-        self.engine = Engine(self._train_step)
-        self.train_evaluator = Engine(self._eval_step)
-        self.val_evaluator = Engine(self._eval_step)
-        self.test_evaluator = Engine(self._eval_step)
-        self.metrics = {}
+        self.engine: Engine = Engine(self._train_step)
+        self.train_evaluator: Engine = Engine(self._eval_step)
+        self.val_evaluator: Engine = Engine(self._eval_step)
+        self.test_evaluator: Engine = Engine(self._eval_step)
+        self.metrics: dict = {}
         self._attach_metrics()
 
     def _build_dataloader(self, split_config: SplitConfig) -> DataLoader:
         dataset = instantiate(split_config.dataset)
-        dl_kwargs = split_config.dataloader.model_dump(exclude={"collate_fn"})
-        collate_fn = None
-        if split_config.dataloader.collate_fn:
-            collate_fn = get_target(split_config.dataloader.collate_fn.target)
+        return self._create_dataloader(dataset, split_config.dataloader)
 
-        return DataLoader(dataset, collate_fn=collate_fn, **dl_kwargs)
+    def _create_dataloader(
+        self,
+        dataset: Dataset,
+        dl_config: DataLoaderConfig,
+        shuffle: bool | None = None,
+    ) -> DataLoader:
+        dl_kwargs = dl_config.model_dump(exclude={"collate_fn", "shuffle"})
+        if shuffle is None:
+            shuffle = getattr(dl_config, "shuffle", False)
+
+        collate_fn = None
+        if dl_config.collate_fn:
+            collate_fn = get_target(dl_config.collate_fn.target)
+
+        return DataLoader(dataset, shuffle=shuffle, collate_fn=collate_fn, **dl_kwargs)
+
+    def _build_loaders_from_ratios(
+        self, data_config: DataConfig
+    ) -> tuple[DataLoader, DataLoader | None, DataLoader | None]:
+        if data_config.dataset is None:
+            raise ValueError(
+                "dataset must be provided in data_config for automatic splitting"
+            )
+        dataset = instantiate(data_config.dataset)
+        total_len = len(dataset)
+
+        train_ratio = (
+            data_config.train_ratio if data_config.train_ratio is not None else 1.0
+        )
+        val_ratio = data_config.val_ratio if data_config.val_ratio is not None else 0.0
+
+        if train_ratio <= 0.0 or val_ratio < 0:
+            raise ValueError(
+                f"train_ratio must be between 0 and 1. Got train_ratio={train_ratio}, val_ratio={val_ratio}"
+            )
+
+        if train_ratio + val_ratio > 1.0:
+            raise ValueError(
+                f"Sum of train_ratio ({train_ratio}) and val_ratio ({val_ratio}) exceeds 1.0"
+            )
+
+        train_len = int(total_len * train_ratio)
+        val_len = int(total_len * val_ratio)
+        test_len = total_len - train_len - val_len
+
+        train_ds, val_ds, test_ds = random_split(
+            dataset,
+            [train_len, val_len, test_len],
+            generator=torch.Generator().manual_seed(self.config.seed),
+        )
+
+        dl_config = data_config.dataloader or DataLoaderConfig()
+
+        train_loader = self._create_dataloader(train_ds, dl_config, shuffle=True)
+        val_loader = (
+            self._create_dataloader(val_ds, dl_config, shuffle=False)
+            if val_len > 0
+            else None
+        )
+        test_loader = (
+            self._create_dataloader(test_ds, dl_config, shuffle=False)
+            if test_len > 0
+            else None
+        )
+
+        return train_loader, val_loader, test_loader
+
+    def set_loaders(
+        self,
+        config: ProjectConfig,
+        train_loader: DataLoader | None,
+        val_loader: DataLoader | None,
+        test_loader: DataLoader | None,
+    ):
+        if train_loader is None:
+            if config.data.train:
+                train_loader = self._build_dataloader(config.data.train)
+                if val_loader is None and config.data.val:
+                    val_loader = self._build_dataloader(config.data.val)
+                if test_loader is None and config.data.test:
+                    test_loader = self._build_dataloader(config.data.test)
+            elif config.data.dataset:
+                self.logger.info(
+                    "Automatic splitting requested with ratios: train=%s, val=%s",
+                    config.data.train_ratio,
+                    config.data.val_ratio,
+                )
+                t_loader, v_loader, te_loader = self._build_loaders_from_ratios(
+                    config.data
+                )
+                train_loader = t_loader
+                if val_loader is None:
+                    val_loader = v_loader
+                if test_loader is None:
+                    test_loader = te_loader
+
+        if val_loader is None:
+            self.logger.warning(
+                "Validation config not provided. Early stopping and best model checkpointing will be disabled. "
+                "Only the last model will be saved."
+            )
+
+        self.train_loader = train_loader
+        self.val_loader = val_loader
+        self.test_loader = test_loader
 
     def _make_run_dir(self) -> Path:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -204,7 +310,9 @@ class PreTrainer:
             filepath=str(self.run_dir / "output.log") if self.run_dir else None,
             reset=True,
         )
-        self.train_fb_logger = FBResearchLogger(logger=self.logger, show_output=True)
+        self.train_fb_logger: FBResearchLogger = FBResearchLogger(
+            logger=self.logger, show_output=True
+        )
         self.train_fb_logger.attach(
             self.engine,
             name="Train",
@@ -221,7 +329,7 @@ class PreTrainer:
             end_factor=0.0,
             total_iters=self.total_iters - warmup_iters,
         )
-        self.scheduler = create_lr_scheduler_with_warmup(
+        self.scheduler: ParamScheduler = create_lr_scheduler_with_warmup(
             linear_decay,
             warmup_start_value=0.0,
             warmup_end_value=self.lr,

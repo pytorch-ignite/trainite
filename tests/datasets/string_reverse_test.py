@@ -2,7 +2,7 @@ import pytest
 import torch
 from torch.utils.data import DataLoader
 
-from trainite.config import DataLoaderConfig, get_dataset_spec
+from trainite.config import get_dataset_spec
 from trainite.datasets.string_reverse import (
     CHARSET_PRESETS,
     UNIVERSAL_VOCAB,
@@ -39,13 +39,13 @@ def test_char_tokenizer():
 
 
 def test_string_reverse_dataset():
-    size = 10
+    per_seq_size = 10
     max_len = 5
     dataset = StringReverseDataset(
-        size=size, min_seq_len=max_len, max_seq_len=max_len, seed=42
+        per_seq_size=per_seq_size, min_seq_len=max_len, max_seq_len=max_len, seed=42
     )
 
-    assert len(dataset) == size
+    assert len(dataset) == per_seq_size
     item = dataset[0]
     assert "input_ids" in item
     assert "labels" in item
@@ -72,7 +72,9 @@ def test_string_reverse_dataset():
 
 def test_string_reverse_variable_lengths_and_presets():
     # variable lengths when min/max_seq_len are provided
-    dataset = StringReverseDataset(size=20, min_seq_len=1, max_seq_len=8, seed=42)
+    dataset = StringReverseDataset(
+        per_seq_size=20, min_seq_len=1, max_seq_len=8, seed=42
+    )
     input_lengths = [len(x) for x in dataset.inputs]
     label_lengths = [len(x) for x in dataset.labels]
     assert input_lengths == label_lengths
@@ -84,7 +86,7 @@ def test_string_reverse_variable_lengths_and_presets():
 
 def test_string_reverse_fixed_lengths_and_presets():
     # fixed length when seq_len is provided
-    dataset = StringReverseDataset(size=20, seq_len=8, seed=42)
+    dataset = StringReverseDataset(per_seq_size=20, seq_len=8, seed=42)
     input_lengths = [len(x) for x in dataset.inputs]
     label_lengths = [len(x) for x in dataset.labels]
     assert input_lengths == label_lengths
@@ -101,7 +103,7 @@ def test_string_reverse_fixed_lengths_and_presets():
 )
 def test_string_reverse_dataset_charset_presets(preset: str):
     dataset = StringReverseDataset(
-        size=10, seed=42, charset=preset, min_seq_len=1, max_seq_len=5
+        per_seq_size=10, seed=42, charset=preset, min_seq_len=1, max_seq_len=5
     )
     if preset in CHARSET_PRESETS:
         assert len(dataset.valid_token_ids) == len(CHARSET_PRESETS[preset])
@@ -129,56 +131,58 @@ def test_collate_fn():
 
 
 def test_build_string_reverse_dataset():
-    dataset = build_string_reverse_dataset(size=5, seq_len=3)
+    dataset = build_string_reverse_dataset(per_seq_size=5, seq_len=3)
     assert isinstance(dataset, StringReverseDataset)
     assert len(dataset) == 5
 
-    dataset = build_string_reverse_dataset(size=5, min_seq_len=1, max_seq_len=5)
+    dataset = build_string_reverse_dataset(per_seq_size=5, min_seq_len=1, max_seq_len=5)
     assert isinstance(dataset, StringReverseDataset)
-    assert len(dataset) == 5
+    assert len(dataset) == 5 * 5  # 5 per length, 5 lengths (1..5)
 
     with pytest.raises(
         ValueError,
         match="Cannot specify both seq_len and min_seq_len/max_seq_len.",
     ):
-        build_string_reverse_dataset(size=5, seq_len=3, min_seq_len=1, max_seq_len=5)
+        build_string_reverse_dataset(
+            per_seq_size=5, seq_len=3, min_seq_len=1, max_seq_len=5
+        )
 
     with pytest.raises(
         ValueError,
         match="Must specify either seq_len or both min_seq_len and max_seq_len.",
     ):
-        build_string_reverse_dataset(size=5)
+        build_string_reverse_dataset(per_seq_size=5)
 
     with pytest.raises(
         ValueError,
         match="Must specify either seq_len or both min_seq_len and max_seq_len.",
     ):
-        build_string_reverse_dataset(size=5, min_seq_len=1)
+        build_string_reverse_dataset(per_seq_size=5, min_seq_len=1)
 
     with pytest.raises(
         ValueError,
         match="Must specify either seq_len or both min_seq_len and max_seq_len.",
     ):
-        build_string_reverse_dataset(size=5, max_seq_len=1)
+        build_string_reverse_dataset(per_seq_size=5, max_seq_len=1)
 
 
 def test_config_build_string_reverse_dataset():
     spec = get_dataset_spec("string-reverse")
     dataset_conf = spec.config_cls()
-    dataset = instantiate(dataset_conf)
+    dataset = instantiate(dataset_conf.dataset)
     assert isinstance(dataset, StringReverseDataset)
-    assert len(dataset) == dataset_conf.size
 
     collate_fn_obj = None
     if spec.collate_fn_symbol:
         module_path = str(spec.implementation_path.with_suffix("")).replace("/", ".")
         collate_fn_obj = get_target(f"{module_path}.{spec.collate_fn_symbol}")
 
-    dataloader_conf = DataLoaderConfig(batch_size=4)
+    dataloader_conf = dataset_conf.dataloader
     dataloader_kwargs = dataloader_conf.model_dump(exclude={"collate_fn"})
     loader = DataLoader(dataset, **dataloader_kwargs, collate_fn=collate_fn_obj)
 
     batch = next(iter(loader))
     assert "input_ids" in batch
     assert "labels" in batch
-    assert batch["input_ids"].shape[0] == 4
+    assert batch["input_ids"].shape[0] == dataloader_conf.batch_size
+    assert batch["input_ids"].shape == batch["labels"].shape

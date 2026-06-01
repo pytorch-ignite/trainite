@@ -103,6 +103,32 @@ Output: `output/<run_name>/<timestamp>/` — config snapshot, log, best/last che
 
 Configuration is YAML → Pydantic → validated. Every component has a dedicated Pydantic model.
 
+### Dataset Configuration Styles
+
+Trainite supports two ways to define your data:
+
+#### Option 1: Explicit Splits
+Manually define every split. Each split gets its own dataset instance and dataloader config.
+```yaml
+data:
+  train:
+    dataset: { _target_: ..., size: 1000 }
+    dataloader: { batch_size: 32, shuffle: true }
+  val:
+    dataset: { _target_: ..., size: 200 }
+    dataloader: { batch_size: 32 }
+```
+
+#### Option 2: Automatic Splitting
+Define one dataset and let Trainite handle the math. Useful for quick prototyping.
+```yaml
+data:
+  dataset: { _target_: ..., size: 1200 }
+  train_ratio: 0.8
+  val_ratio: 0.2
+  dataloader: { batch_size: 32 } # Applied to all splits
+```
+
 **Hierarchy:**
 
 ```
@@ -197,7 +223,11 @@ trainite/
 
 ---
 
-## Installation
+## Getting Started
+
+### 1. Installation
+
+Requires [uv](https://github.com/astral-sh/uv) for dependency management.
 
 ```bash
 git clone <repo-url>
@@ -205,4 +235,30 @@ cd trainite_prototype
 uv sync
 ```
 
-Dependencies: PyTorch, PyTorch-Ignite, Pydantic, PyYAML, OmegaConf, TensorBoard.
+### 2. Initialize a Project
+
+Create a new, isolated training project using the CLI:
+
+```bash
+# General syntax: uv run trainite init <project-name> --model <model> --dataset <dataset>
+uv run trainite init my-experiment --model transformer --dataset string-reverse
+```
+
+### 3. Run Training
+
+Your generated project is a standalone application. Navigate to it and run:
+
+```bash
+cd my-experiment
+uv run python main.py config.yaml
+```
+
+### 4. Monitor & Iterate
+
+- **TensorBoard**: `uv run tensorboard --logdir outputs`
+- **Edit Code**: Open `my-experiment/models/transformer.py` to change architecture.
+- **Edit Config**: Open `my-experiment/config.yaml` to change learning rates or data splits.
+
+---
+
+## Extending

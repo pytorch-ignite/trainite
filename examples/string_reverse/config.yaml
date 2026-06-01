@@ -10,23 +10,25 @@ optimizer:
   _target_: torch.optim.AdamW
   lr: 0.001
 data:
-  train:
-    dataset:
-      _target_: dataset.string_reverse.build_string_reverse_dataset
-      size: 256
-      charset: '@alpha'
-      min_seq_len: 1
-      max_seq_len: 16
-      seq_len: null
-      seed: 7
-    dataloader:
-      batch_size: 32
-      shuffle: true
-      num_workers: 2
-      collate_fn:
-        _target_: dataset.string_reverse.collate_fn
+  train: null
   val: null
   test: null
+  dataset:
+    _target_: dataset.string_reverse.build_string_reverse_dataset
+    per_seq_size: 256
+    charset: "@alpha"
+    min_seq_len: 1
+    max_seq_len: 16
+    seq_len: null
+    seed: 42
+  dataloader:
+    batch_size: 32
+    shuffle: true
+    num_workers: 2
+    collate_fn:
+      _target_: dataset.string_reverse.collate_fn
+  train_ratio: 0.8
+  val_ratio: 0.1
 trainer:
   log_every_steps: 10
   epochs: 3

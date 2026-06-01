@@ -1,6 +1,7 @@
 import shutil
 import tempfile
 from pathlib import Path
+from typing import Any, Sized
 from unittest import mock
 
 import pytest
@@ -18,6 +19,13 @@ from trainite.config import (
 )
 from trainite.config.trainer import PreTrainerConfig
 from trainite.trainers.pretrainer import PreTrainer
+
+
+def cc(target: str | None = None, **kwargs: Any) -> ComponentConfig:
+    """Helper to create ComponentConfig with extra arguments without type errors."""
+    if target:
+        kwargs["_target_"] = target
+    return ComponentConfig.model_validate(kwargs)
 
 
 class SimpleModel(nn.Module):
@@ -46,6 +54,10 @@ class SimpleDataset(torch.utils.data.Dataset):
         }
 
 
+def dummy_collate_fn(batch):
+    return batch
+
+
 @pytest.fixture
 def temp_run_dir():
     temp_dir = tempfile.mkdtemp()
@@ -56,16 +68,16 @@ def temp_run_dir():
 @pytest.fixture
 def project_config(temp_run_dir):
     return ProjectConfig(
-        model=ComponentConfig(
-            _target_="tests.trainers.pretrainer_test.SimpleModel",
+        model=cc(
+            "tests.trainers.pretrainer_test.SimpleModel",
             vocab_size=10,
             hidden_size=8,
         ),
         optimizer=OptimizerConfig(_target_="torch.optim.AdamW", lr=1e-3),
         data=DataConfig(
             train=SplitConfig(
-                dataset=ComponentConfig(
-                    _target_="tests.trainers.pretrainer_test.SimpleDataset",
+                dataset=cc(
+                    "tests.trainers.pretrainer_test.SimpleDataset",
                     size=16,
                     seq_len=4,
                     vocab_size=10,
@@ -73,8 +85,8 @@ def project_config(temp_run_dir):
                 dataloader=DataLoaderConfig(batch_size=4),
             ),
             val=SplitConfig(
-                dataset=ComponentConfig(
-                    _target_="tests.trainers.pretrainer_test.SimpleDataset",
+                dataset=cc(
+                    "tests.trainers.pretrainer_test.SimpleDataset",
                     size=8,
                     seq_len=4,
                     vocab_size=10,
@@ -134,6 +146,8 @@ def test_pretrainer_init(project_config):
     trainer = PreTrainer(project_config)
     assert trainer.epochs == 1
     assert isinstance(trainer.model, SimpleModel)
+    assert trainer.train_loader is not None
+    assert trainer.val_loader is not None
     assert len(trainer.train_loader) == 4  # 16 / 4
     assert len(trainer.val_loader) == 2  # 8 / 4
 
@@ -156,11 +170,12 @@ def test_pretrainer_auto_vocab_size(project_config):
     # Remove vocab_size from model config
     model_conf = project_config.model.model_dump(by_alias=True)
     model_conf.pop("vocab_size", None)
-    project_config.model = ComponentConfig(**model_conf)
+    project_config.model = cc(**model_conf)
 
     # Ensure dataset has vocab_size
     trainer = PreTrainer(project_config)
     assert trainer.vocab_size == 10
+    assert isinstance(trainer.model, SimpleModel)
     assert trainer.model.embedding.num_embeddings == 10
 
 
@@ -168,7 +183,7 @@ def test_pretrainer_vocab_size_mismatch(project_config):
     # Set model vocab_size smaller than dataset
     model_conf = project_config.model.model_dump(by_alias=True)
     model_conf["vocab_size"] = 5
-    project_config.model = ComponentConfig(**model_conf)
+    project_config.model = cc(**model_conf)
 
     with pytest.raises(ValueError, match="is smaller than the dataset vocabulary size"):
         PreTrainer(project_config)
@@ -236,8 +251,8 @@ def test_pretrainer_test_no_loader(project_config):
 def test_pretrainer_test_method(project_config, temp_run_dir):
     # Add test split to config
     project_config.data.test = SplitConfig(
-        dataset=ComponentConfig(
-            _target_="tests.trainers.pretrainer_test.SimpleDataset",
+        dataset=cc(
+            "tests.trainers.pretrainer_test.SimpleDataset",
             size=4,
             seq_len=4,
             vocab_size=10,
@@ -259,8 +274,8 @@ def test_pretrainer_test_without_val(project_config, temp_run_dir):
     project_config.data.val = None
     # Add test split
     project_config.data.test = SplitConfig(
-        dataset=ComponentConfig(
-            _target_="tests.trainers.pretrainer_test.SimpleDataset",
+        dataset=cc(
+            "tests.trainers.pretrainer_test.SimpleDataset",
             size=4,
             seq_len=4,
             vocab_size=10,
@@ -283,3 +298,137 @@ def test_pretrainer_test_without_val(project_config, temp_run_dir):
     mock_load.assert_any_call(
         last_checkpoint_path, map_location=trainer.device, weights_only=True
     )
+
+
+def test_pretrainer_dataloader_collate_fn(project_config):
+    project_config.data.train.dataloader.collate_fn = cc(
+        "tests.trainers.pretrainer_test.dummy_collate_fn"
+    )
+    trainer = PreTrainer(project_config)
+    assert trainer.train_loader is not None
+    assert trainer.train_loader.collate_fn is dummy_collate_fn
+
+
+def test_pretrainer_option_1_shuffle(project_config):
+    # Option 1: Explicitly set shuffle to True
+    project_config.data.train.dataloader.shuffle = True
+    trainer = PreTrainer(project_config)
+    assert trainer.train_loader is not None
+    # PyTorch DataLoader uses RandomSampler when shuffle is True
+    assert isinstance(trainer.train_loader.sampler, torch.utils.data.RandomSampler)
+
+
+def test_trainer_option_2(tmp_path):
+    config = ProjectConfig(
+        model=cc(
+            "trainite.models.transformer.build_transformer_model",
+            vocab_size=100,
+            d_model=32,
+            nhead=2,
+            num_layers=1,
+        ),
+        data=DataConfig(
+            dataset=cc(
+                "trainite.datasets.string_reverse.build_string_reverse_dataset",
+                per_seq_size=100,
+                seq_len=10,
+            ),
+            train_ratio=0.8,
+            val_ratio=0.2,
+        ),
+        trainer=PreTrainerConfig(epochs=1),
+        output=OutputConfig(root=str(tmp_path), run_name="test"),
+    )
+
+    trainer = PreTrainer(config)
+
+    # Check that loaders were built and split correctly
+    assert trainer.train_loader is not None
+    assert trainer.val_loader is not None
+    assert isinstance(trainer.train_loader.dataset, Sized)
+    assert isinstance(trainer.val_loader.dataset, Sized)
+    assert len(trainer.train_loader.dataset) == 80
+    assert len(trainer.val_loader.dataset) == 20
+    assert trainer.test_loader is None
+
+
+def test_pretrainer_option_2_with_test_split(tmp_path):
+    config = ProjectConfig(
+        model=cc(
+            "trainite.models.transformer.build_transformer_model",
+            vocab_size=100,
+            d_model=32,
+            nhead=2,
+            num_layers=1,
+        ),
+        data=DataConfig(
+            dataset=cc(
+                "trainite.datasets.string_reverse.build_string_reverse_dataset",
+                per_seq_size=100,
+                seq_len=10,
+            ),
+            train_ratio=0.6,
+            val_ratio=0.2,
+        ),
+        trainer=PreTrainerConfig(epochs=1),
+        output=OutputConfig(root=str(tmp_path), run_name="test"),
+    )
+
+    trainer = PreTrainer(config)
+
+    assert trainer.train_loader is not None
+    assert trainer.val_loader is not None
+    assert trainer.test_loader is not None
+
+    assert isinstance(trainer.train_loader.dataset, Sized)
+    assert isinstance(trainer.val_loader.dataset, Sized)
+    assert isinstance(trainer.test_loader.dataset, Sized)
+
+    assert len(trainer.train_loader.dataset) == 60
+    assert len(trainer.val_loader.dataset) == 20
+    assert len(trainer.test_loader.dataset) == 20
+
+    # Check shuffle defaults for Option 2
+    assert isinstance(trainer.train_loader.sampler, torch.utils.data.RandomSampler)
+    assert isinstance(trainer.val_loader.sampler, torch.utils.data.SequentialSampler)
+    assert isinstance(trainer.test_loader.sampler, torch.utils.data.SequentialSampler)
+
+
+def test_pretrainer_invalid_split_ratios(project_config):
+    # Test train_ratio <= 0.0
+    project_config.data = DataConfig.model_construct(
+        dataset=cc("tests.trainers.pretrainer_test.SimpleDataset"),
+        train_ratio=0.0,
+    )
+    with pytest.raises(ValueError, match="train_ratio must be between 0 and 1"):
+        PreTrainer(project_config)
+
+    # Test val_ratio < 0.0
+    project_config.data = DataConfig.model_construct(
+        dataset=cc("tests.trainers.pretrainer_test.SimpleDataset"),
+        train_ratio=0.8,
+        val_ratio=-0.1,
+    )
+    with pytest.raises(ValueError, match="train_ratio must be between 0 and 1"):
+        PreTrainer(project_config)
+
+    # Test train_ratio + val_ratio > 1.0
+    project_config.data = DataConfig.model_construct(
+        dataset=cc("tests.trainers.pretrainer_test.SimpleDataset"),
+        train_ratio=0.8,
+        val_ratio=0.3,
+    )
+    with pytest.raises(ValueError, match="exceeds 1.0"):
+        PreTrainer(project_config)
+
+
+def test_pretrainer_missing_dataset_for_ratios(project_config):
+    # Manually trigger _build_loaders_from_ratios with missing dataset
+    # We use model_construct to bypass Pydantic validation
+    data_config = DataConfig.model_construct(
+        train_ratio=0.8,
+        val_ratio=0.2,
+    )
+    trainer = PreTrainer.__new__(PreTrainer)
+    with pytest.raises(ValueError, match="dataset must be provided"):
+        trainer._build_loaders_from_ratios(data_config)

@@ -3,7 +3,12 @@ from typing import Any
 
 import yaml
 from omegaconf import OmegaConf
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    model_validator,
+)
 
 
 class OutputConfig(BaseModel):
@@ -19,6 +24,7 @@ class ComponentConfig(BaseModel):
 class TrainerConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
     log_every_steps: int = 10
+    epochs: int = 10
 
 
 class OptimizerConfig(ComponentConfig):
@@ -40,9 +46,51 @@ class SplitConfig(BaseModel):
 
 
 class DataConfig(BaseModel):
-    train: SplitConfig
+    # Option 1: Explicit splits
+    train: SplitConfig | None = None
     val: SplitConfig | None = None
     test: SplitConfig | None = None
+
+    # Option 2: Automatic splitting
+    dataset: ComponentConfig | None = None
+    dataloader: DataLoaderConfig | None = None
+    train_ratio: float | None = None
+    val_ratio: float | None = None
+
+    @model_validator(mode="after")
+    def validate_options(self) -> "DataConfig":
+        option1_fields = {"train", "val", "test"}
+        option2_fields = {"dataset", "train_ratio", "val_ratio", "dataloader"}
+
+        present_option1 = {f for f in option1_fields if getattr(self, f) is not None}
+        present_option2 = {f for f in option2_fields if getattr(self, f) is not None}
+
+        if present_option1 and present_option2:
+            if "dataset" in present_option2 or "dataloader" in present_option2:
+                raise ValueError(
+                    r"Cannot provide train/val/test levels when 'dataset' or 'dataloader' is provided at the data level"
+                )
+            else:
+                raise ValueError(
+                    "Cannot provide train_ratio or val_ratio at the data level when explicit splits are used"
+                )
+
+        if not present_option1 and not present_option2:
+            raise ValueError(
+                "Must provide either explicit splits (train) or automatic splitting (dataset)"
+            )
+
+        if present_option1 and "train" not in present_option1:
+            raise ValueError(
+                "Explicit splits mode (Option 1) requires at least the 'train' split"
+            )
+
+        if present_option2 and "dataset" not in present_option2:
+            raise ValueError(
+                "Automatic splitting mode (Option 2) requires the 'dataset' field"
+            )
+
+        return self
 
 
 class ProjectConfig(BaseModel):

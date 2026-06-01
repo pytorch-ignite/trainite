@@ -2,7 +2,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from trainite.config.dataset import StringReverseDatasetConfig
+from trainite.config.dataset import StringReverseDataConfig
 from trainite.config.model import TransformerModelConfig
 from trainite.config.trainer import PreTrainerConfig
 
@@ -48,7 +48,7 @@ DATASET_SPECS = {
     "string-reverse": DatasetSpec(
         name="string_reverse",
         implementation_path=Path("trainite/datasets/string_reverse.py"),
-        config_cls=StringReverseDatasetConfig,
+        config_cls=StringReverseDataConfig,
         implementation_symbol="StringReverseDataset",
         builder_symbol="build_string_reverse_dataset",
         collate_fn_symbol="collate_fn",

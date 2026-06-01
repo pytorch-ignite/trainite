@@ -1,4 +1,5 @@
 import string
+import warnings
 
 import torch
 from torch.nn.utils.rnn import pad_sequence
@@ -6,6 +7,13 @@ from torch.utils.data import Dataset
 
 # Hardcoded universal vocabulary: all printable ASCII characters
 UNIVERSAL_VOCAB = string.ascii_letters + string.digits + string.punctuation + " "
+
+CHARSET_PRESETS = {
+    "@universal": UNIVERSAL_VOCAB,
+    "@alpha": string.ascii_letters,
+    "@digits": string.digits,
+    "@alphanumeric": string.ascii_letters + string.digits,
+}
 
 
 class CharTokenizer:
@@ -24,10 +32,14 @@ class CharTokenizer:
         self.eos_token_id = 2
         self.unk_token_id = 3
 
-        self.char_to_id = {c: i + 4 for i, c in enumerate(UNIVERSAL_VOCAB)}
-        self.id_to_char = {i + 4: c for i, c in enumerate(UNIVERSAL_VOCAB)}
+        self.char_to_id: dict[str, int] = {
+            c: i + 4 for i, c in enumerate(UNIVERSAL_VOCAB)
+        }
+        self.id_to_char: dict[int, str] = {
+            i + 4: c for i, c in enumerate(UNIVERSAL_VOCAB)
+        }
 
-        self.special_tokens = {
+        self.special_tokens: dict[int, str] = {
             self.pad_token_id: "<pad>",
             self.bos_token_id: "<bos>",
             self.eos_token_id: "<eos>",
@@ -52,13 +64,6 @@ class CharTokenizer:
         skip_special_tokens: bool = True,
         ignore_index: int = -100,
     ) -> str:
-        """Convert a list of token IDs back to a string.
-
-        Args:
-            ids: List or tensor of token IDs to decode.
-            skip_special_tokens: If True, skips printing special tokens like <bos> and <eos>.
-            ignore_index: The token ID used for loss masking. These are silently ignored.
-        """
         if isinstance(ids, torch.Tensor):
             ids = ids.tolist()
 
@@ -77,28 +82,30 @@ class CharTokenizer:
 
 
 class StringReverseDataset(Dataset):
+    """Generates unique random strings and their reversals for autoregressive training.
+
+    Each sample is packed as:
+        <bos> seq <eos> reversed_seq <eos>
+
+    With teacher forcing labels that mask the prompt portion (-100).
+    """
+
     def __init__(
         self,
-        size: int,
-        min_seq_len: int,
-        max_seq_len: int,
-        seed: int,
+        per_seq_size: int,
+        min_seq_len: int | None = None,
+        max_seq_len: int | None = None,
         seq_len: int | None = None,
         charset: str | None = None,
+        seed: int = 42,
     ) -> None:
-        self.tokenizer = CharTokenizer()
+        self.tokenizer: CharTokenizer = CharTokenizer()
         self.vocab_size = self.tokenizer.vocab_size
 
-        # If charset is not provided, use the full universal vocab
-        if charset is None or charset == "@universal":
+        if charset is None:
             chars = UNIVERSAL_VOCAB
-        # Map charset presets or raw strings to token IDs
-        elif charset == "@alpha":
-            chars = string.ascii_letters
-        elif charset == "@digits":
-            chars = string.digits
-        elif charset == "@alphanumeric":
-            chars = string.ascii_letters + string.digits
+        elif charset in CHARSET_PRESETS:
+            chars = CHARSET_PRESETS[charset]
         else:
             chars = charset
 
@@ -111,55 +118,81 @@ class StringReverseDataset(Dataset):
         if not self.valid_token_ids:
             raise ValueError(f"Charset '{charset}' resulted in empty token IDs.")
 
+        if seq_len is not None and (min_seq_len is not None or max_seq_len is not None):
+            raise ValueError("Cannot specify both seq_len and min_seq_len/max_seq_len.")
+
+        if seq_len is not None:
+            lengths = [seq_len]
+        elif min_seq_len is None or max_seq_len is None:
+            raise ValueError(
+                "Must specify either seq_len or both min_seq_len and max_seq_len."
+            )
+        else:
+            lengths = list(range(min_seq_len, max_seq_len + 1))
+
         generator = torch.Generator().manual_seed(seed)
         self.valid_token_ids_tensor = torch.tensor(self.valid_token_ids)
+        vocab_size = len(self.valid_token_ids)
 
         self.inputs = []
         self.labels = []
 
-        for _ in range(size):
-            if seq_len is not None and (min_seq_len or max_seq_len):
-                raise ValueError(
-                    "Cannot specify both seq_len and min_seq_len/max_seq_len."
-                )
-            if seq_len is not None:
-                length = seq_len
-            elif min_seq_len is None or max_seq_len is None:
-                raise ValueError(
-                    "Must specify either seq_len or both min_seq_len and max_seq_len."
-                )
-            else:
-                length = torch.randint(
-                    low=min_seq_len,
-                    high=max_seq_len + 1,
-                    size=(1,),
+        # Generate per_seq_size unique sequences for each length bucket
+        for length in lengths:
+            unique_sequences: set[tuple[int, ...]] = set()
+            max_possible_combinations = vocab_size**length
+            target = min(per_seq_size, max_possible_combinations)
+
+            # Safety cap to avoid infinite loops when the space is small
+            max_attempts = target * 20
+
+            while (
+                len(unique_sequences) < target and len(unique_sequences) < max_attempts
+            ):
+                indices = torch.randint(
+                    low=0,
+                    high=len(self.valid_token_ids),
+                    size=(length,),
                     generator=generator,
-                ).item()
+                )
+                seq_tuple = tuple(self.valid_token_ids_tensor[indices].tolist())
+                unique_sequences.add(seq_tuple)
 
-            # Sample from the valid token IDs
-            indices = torch.randint(
-                low=0,
-                high=len(self.valid_token_ids),
-                size=(length,),
-                generator=generator,
-            )
-            seq = self.valid_token_ids_tensor[indices]
+            if len(unique_sequences) < per_seq_size:
+                warnings.warn(
+                    f"Requested {per_seq_size} unique sequences for seq_len={length} "
+                    f"but only {len(unique_sequences)} could be generated "
+                    f"(max possible: {max_possible_combinations}).",
+                    stacklevel=2,
+                )
 
-            reversed_seq = torch.flip(seq, dims=[0])
+            # Pack each unique sequence into the autoregressive format
+            for seq_tuple in unique_sequences:
+                seq = torch.tensor(seq_tuple)
+                reversed_seq = torch.flip(seq, dims=[0])
 
-            bos_t = torch.tensor([self.tokenizer.bos_token_id])
-            eos_t = torch.tensor([self.tokenizer.eos_token_id])
+                bos_t = torch.tensor([self.tokenizer.bos_token_id])
+                eos_t = torch.tensor([self.tokenizer.eos_token_id])
 
-            full_seq = torch.cat([bos_t, seq, eos_t, reversed_seq, eos_t])
+                full_seq = torch.cat([bos_t, seq, eos_t, reversed_seq, eos_t])
 
-            input_ids = full_seq[:-1]
-            target_labels = full_seq[1:].clone()
+                input_ids = full_seq[:-1]
+                target_labels = full_seq[1:].clone()
 
-            prompt_len = len(seq) + 2
-            target_labels[: prompt_len - 1] = -100
+                prompt_len = len(seq) + 2
+                target_labels[: prompt_len - 1] = -100
 
-            self.inputs.append(input_ids)
-            self.labels.append(target_labels)
+                self.inputs.append(input_ids)
+                self.labels.append(target_labels)
+
+        # Shuffle so variable-length samples are evenly distributed across batches
+        final_shuffle_gen = torch.Generator().manual_seed(seed + 1)
+        shuffle_indices = torch.randperm(
+            len(self.inputs), generator=final_shuffle_gen
+        ).tolist()
+
+        self.inputs = [self.inputs[i] for i in shuffle_indices]
+        self.labels = [self.labels[i] for i in shuffle_indices]
 
     def __len__(self) -> int:
         return len(self.inputs)
@@ -195,20 +228,16 @@ def collate_fn(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
 
 
 def build_string_reverse_dataset(
-    size: int = 256,
-    min_seq_len: int = 1,
-    max_seq_len: int = 16,
+    per_seq_size: int = 256,
+    min_seq_len: int | None = None,
+    max_seq_len: int | None = None,
     seq_len: int | None = None,
     charset: str | None = None,
-    seed: int = 7,
+    seed: int = 42,
     **kwargs,
 ) -> StringReverseDataset:
-    # Handle 'alphabet' if passed from old configs for backward compatibility or just ignore
-    if "alphabet" in kwargs and charset is None:
-        charset = kwargs["alphabet"]
-
     return StringReverseDataset(
-        size=size,
+        per_seq_size=per_seq_size,
         min_seq_len=min_seq_len,
         max_seq_len=max_seq_len,
         seed=seed,

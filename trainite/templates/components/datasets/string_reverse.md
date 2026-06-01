@@ -49,8 +49,8 @@ It supports printable ASCII characters by default.
 
 ## Config knobs
 
-### `size`
-How many examples to generate.
+### `per_seq_size`
+How many unique examples to generate per sequence length bucket.
 
 ### `charset`
 Which characters the random strings can use.
@@ -82,7 +82,7 @@ data:
   train:
     dataset:
       _target_: trainite.datasets.string_reverse.build_string_reverse_dataset
-      size: 512
+      per_seq_size: 512
       charset: "@alpha"
       min_seq_len: 2
       max_seq_len: 12
@@ -101,6 +101,6 @@ Edit `trainite/datasets/string_reverse.py` if you want to:
 
 If you only want to test the pipeline, keep the defaults and just change:
 
-- `size`
+- `per_seq_size`
 - `charset`
 - `min_seq_len` / `max_seq_len`

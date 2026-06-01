@@ -9,6 +9,9 @@ class PositionalEncoding(nn.Module):
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
 
+        if d_model % 2 != 0:
+            raise ValueError("d_model must be even for sinusoidal positional encoding.")
+
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
         div_term = torch.exp(
@@ -30,9 +33,8 @@ class Attention(nn.Module):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
-        assert self.num_heads * self.head_dim == self.embed_dim, (
-            "embed_dim must be divisible by num_heads"
-        )
+        if not self.num_heads * self.head_dim == self.embed_dim:
+            raise ValueError("embed_dim must be divisible by num_heads.")
         self.qkv_projection = nn.Linear(embed_dim, embed_dim * 3, bias=False)
         self.out = nn.Linear(embed_dim, embed_dim, bias=False)
         self.dropout = nn.Dropout(p=dropout)
@@ -135,7 +137,7 @@ class TransformerModel(nn.Module):
                 for _ in range(num_layers)
             ]
         )
-        self.proj = nn.Linear(hidden_size, vocab_size + 1)
+        self.proj = nn.Linear(hidden_size, vocab_size)
         self.norm = nn.LayerNorm(hidden_size)
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
