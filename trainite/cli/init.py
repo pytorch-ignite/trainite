@@ -5,6 +5,7 @@ import textwrap
 from pathlib import Path
 from typing import Iterable, Sequence
 
+import questionary
 import tomlkit
 from packaging.requirements import Requirement
 
@@ -49,15 +50,21 @@ def _render_class_source(cls: type) -> str:
 
 
 def _prompt_text(prompt: str, default: str) -> str:
-    value = input(f"{prompt} [{default}]: ").strip()
-    return value or default
+    result = questionary.text(prompt, default=default).ask()
+    if result is None:
+        raise SystemExit(0)
+    return result.strip() or default
 
 
 def _prompt_choice(prompt: str, choices: Sequence[str], default: str) -> str:
-    selected = _prompt_text(f"{prompt} ({' / '.join(choices)})", default)
-    if selected not in choices:
-        raise SystemExit(f"Unsupported choice: {selected}")
-    return selected
+    result = questionary.select(
+        prompt,
+        choices=choices,
+        default=default,
+    ).ask()
+    if result is None:
+        raise SystemExit(0)
+    return result
 
 
 def _project_directory(raw_project_dir: str, force: bool) -> Path:
@@ -359,9 +366,9 @@ def init_project(args: argparse.Namespace) -> None:
     for filename, content in templates.items():
         _write_file(project_dir / filename, content, args.force)
 
-    print(f"Generated starter project in {project_dir}")
-    for filename in ["config.yaml", *templates]:
-        print(f"- {filename}")
+    print("\n✔ Generated config.yaml")
+    for filename in templates:
+        print(f"✔ Generated {filename}")
 
 
 def main(argv: Sequence[str] | None = None) -> None:
