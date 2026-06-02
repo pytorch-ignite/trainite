@@ -10,6 +10,7 @@ dependencies = [
     "omegaconf>=2.3.0",
     "tomlkit>=0.15.0",
     "packaging>=26.2",
+    "questionary>=2.1.1",
 ]
 
 
