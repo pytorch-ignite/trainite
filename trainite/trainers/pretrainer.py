@@ -68,7 +68,7 @@ class PreTrainer:
         # Handle Subset (from random_split) which wraps the original dataset
         if isinstance(train_dataset, torch.utils.data.Subset):
             train_dataset = train_dataset.dataset
-        self.vocab_size: int = getattr(train_dataset, "vocab_size")
+        self.vocab_size: int = getattr(train_dataset, "vocab_size", 0)
         model_params = config.model.model_dump(by_alias=True)
         configured_vocab_size: int | None = model_params.get("vocab_size")
 

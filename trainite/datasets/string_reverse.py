@@ -64,7 +64,7 @@ class CharTokenizer:
         skip_special_tokens: bool = True,
         ignore_index: int = -100,
     ) -> str:
-        """Convert a list of token IDs back to a string.Expand commentComment on line L62
+        """Convert a list of token IDs back to a string.
 
         Args:
             ids: List or tensor of token IDs to decode.
