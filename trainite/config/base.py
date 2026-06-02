@@ -70,10 +70,9 @@ class DataConfig(BaseModel):
                 raise ValueError(
                     r"Cannot provide train/val/test levels when 'dataset' or 'dataloader' is provided at the data level"
                 )
-            else:
-                raise ValueError(
-                    "Cannot provide train_ratio or val_ratio at the data level when explicit splits are used"
-                )
+            raise ValueError(
+                "Cannot provide train_ratio or val_ratio at the data level when explicit splits are used"
+            )
 
         if not present_option1 and not present_option2:
             raise ValueError(
@@ -89,6 +88,20 @@ class DataConfig(BaseModel):
             raise ValueError(
                 "Automatic splitting mode (Option 2) requires the 'dataset' field"
             )
+
+        if self.dataset is not None:
+            train_ratio = self.train_ratio if self.train_ratio is not None else 1.0
+            val_ratio = self.val_ratio if self.val_ratio is not None else 0.0
+
+            if train_ratio <= 0.0 or val_ratio < 0:
+                raise ValueError(
+                    f"train_ratio must be between 0 and 1. Got train_ratio={train_ratio}, val_ratio={val_ratio}"
+                )
+
+            if train_ratio + val_ratio > 1.0:
+                raise ValueError(
+                    f"Sum of train_ratio ({train_ratio}) and val_ratio ({val_ratio}) exceeds 1.0"
+                )
 
         return self
 

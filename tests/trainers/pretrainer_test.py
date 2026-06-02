@@ -309,8 +309,7 @@ def test_pretrainer_dataloader_collate_fn(project_config):
     assert trainer.train_loader.collate_fn is dummy_collate_fn
 
 
-def test_pretrainer_option_1_shuffle(project_config):
-    # Option 1: Explicitly set shuffle to True
+def test_pretrainer_explicit_split_shuffle(project_config):
     project_config.data.train.dataloader.shuffle = True
     trainer = PreTrainer(project_config)
     assert trainer.train_loader is not None
@@ -318,20 +317,19 @@ def test_pretrainer_option_1_shuffle(project_config):
     assert isinstance(trainer.train_loader.sampler, torch.utils.data.RandomSampler)
 
 
-def test_trainer_option_2(tmp_path):
+def test_pretrainer_builds_train_and_val_loaders_from_ratios(tmp_path):
     config = ProjectConfig(
         model=cc(
-            "trainite.models.transformer.build_transformer_model",
+            "tests.trainers.pretrainer_test.SimpleModel",
             vocab_size=100,
-            d_model=32,
-            nhead=2,
-            num_layers=1,
+            hidden_size=32,
         ),
         data=DataConfig(
             dataset=cc(
-                "trainite.datasets.string_reverse.build_string_reverse_dataset",
-                per_seq_size=100,
+                "tests.trainers.pretrainer_test.SimpleDataset",
+                size=100,
                 seq_len=10,
+                vocab_size=100,
             ),
             train_ratio=0.8,
             val_ratio=0.2,
@@ -342,7 +340,6 @@ def test_trainer_option_2(tmp_path):
 
     trainer = PreTrainer(config)
 
-    # Check that loaders were built and split correctly
     assert trainer.train_loader is not None
     assert trainer.val_loader is not None
     assert isinstance(trainer.train_loader.dataset, Sized)
@@ -352,20 +349,19 @@ def test_trainer_option_2(tmp_path):
     assert trainer.test_loader is None
 
 
-def test_pretrainer_option_2_with_test_split(tmp_path):
+def test_pretrainer_builds_train_val_and_test_loaders_from_ratios(tmp_path):
     config = ProjectConfig(
         model=cc(
-            "trainite.models.transformer.build_transformer_model",
+            "tests.trainers.pretrainer_test.SimpleModel",
             vocab_size=100,
-            d_model=32,
-            nhead=2,
-            num_layers=1,
+            hidden_size=32,
         ),
         data=DataConfig(
             dataset=cc(
-                "trainite.datasets.string_reverse.build_string_reverse_dataset",
-                per_seq_size=100,
+                "tests.trainers.pretrainer_test.SimpleDataset",
+                size=100,
                 seq_len=10,
+                vocab_size=100,
             ),
             train_ratio=0.6,
             val_ratio=0.2,
@@ -388,38 +384,9 @@ def test_pretrainer_option_2_with_test_split(tmp_path):
     assert len(trainer.val_loader.dataset) == 20
     assert len(trainer.test_loader.dataset) == 20
 
-    # Check shuffle defaults for Option 2
     assert isinstance(trainer.train_loader.sampler, torch.utils.data.RandomSampler)
     assert isinstance(trainer.val_loader.sampler, torch.utils.data.SequentialSampler)
     assert isinstance(trainer.test_loader.sampler, torch.utils.data.SequentialSampler)
-
-
-def test_pretrainer_invalid_split_ratios(project_config):
-    # Test train_ratio <= 0.0
-    project_config.data = DataConfig.model_construct(
-        dataset=cc("tests.trainers.pretrainer_test.SimpleDataset"),
-        train_ratio=0.0,
-    )
-    with pytest.raises(ValueError, match="train_ratio must be between 0 and 1"):
-        PreTrainer(project_config)
-
-    # Test val_ratio < 0.0
-    project_config.data = DataConfig.model_construct(
-        dataset=cc("tests.trainers.pretrainer_test.SimpleDataset"),
-        train_ratio=0.8,
-        val_ratio=-0.1,
-    )
-    with pytest.raises(ValueError, match="train_ratio must be between 0 and 1"):
-        PreTrainer(project_config)
-
-    # Test train_ratio + val_ratio > 1.0
-    project_config.data = DataConfig.model_construct(
-        dataset=cc("tests.trainers.pretrainer_test.SimpleDataset"),
-        train_ratio=0.8,
-        val_ratio=0.3,
-    )
-    with pytest.raises(ValueError, match="exceeds 1.0"):
-        PreTrainer(project_config)
 
 
 def test_pretrainer_missing_dataset_for_ratios(project_config):

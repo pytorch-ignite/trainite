@@ -64,6 +64,13 @@ class CharTokenizer:
         skip_special_tokens: bool = True,
         ignore_index: int = -100,
     ) -> str:
+        """Convert a list of token IDs back to a string.Expand commentComment on line L62
+
+        Args:
+            ids: List or tensor of token IDs to decode.
+            skip_special_tokens: If True, skips printing special tokens like <bos> and <eos>.
+            ignore_index: The token ID used for loss masking. These are silently ignored.
+        """
         if isinstance(ids, torch.Tensor):
             ids = ids.tolist()
 
@@ -186,7 +193,7 @@ class StringReverseDataset(Dataset):
                 self.labels.append(target_labels)
 
         # Shuffle so variable-length samples are evenly distributed across batches
-        final_shuffle_gen = torch.Generator().manual_seed(seed + 1)
+        final_shuffle_gen = torch.Generator().manual_seed(seed)
         shuffle_indices = torch.randperm(
             len(self.inputs), generator=final_shuffle_gen
         ).tolist()

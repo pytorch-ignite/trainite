@@ -136,16 +136,6 @@ class PreTrainer:
         )
         val_ratio = data_config.val_ratio if data_config.val_ratio is not None else 0.0
 
-        if train_ratio <= 0.0 or val_ratio < 0:
-            raise ValueError(
-                f"train_ratio must be between 0 and 1. Got train_ratio={train_ratio}, val_ratio={val_ratio}"
-            )
-
-        if train_ratio + val_ratio > 1.0:
-            raise ValueError(
-                f"Sum of train_ratio ({train_ratio}) and val_ratio ({val_ratio}) exceeds 1.0"
-            )
-
         train_len = int(total_len * train_ratio)
         val_len = int(total_len * val_ratio)
         test_len = total_len - train_len - val_len

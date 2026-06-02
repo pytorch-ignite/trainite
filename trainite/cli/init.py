@@ -3,7 +3,7 @@ import inspect
 import re
 import textwrap
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Iterable, Sequence
 
 import tomlkit
 from packaging.requirements import Requirement
@@ -280,7 +280,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _update_targets(config: Any, old_prefix: str, new_prefix: str) -> None:
+def _update_targets(
+    config: ComponentConfig
+    | ProjectConfig
+    | DataConfig
+    | SplitConfig
+    | DataLoaderConfig,
+    old_prefix: str,
+    new_prefix: str,
+) -> None:
     if isinstance(config, ComponentConfig):
         if config.target.startswith(old_prefix):
             config.target = config.target.replace(old_prefix, new_prefix, 1)

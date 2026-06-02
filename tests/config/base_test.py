@@ -72,6 +72,36 @@ def test_data_config_mixed_modes_ratios_and_splits():
         )
 
 
+def test_data_config_invalid_ratios():
+    with pytest.raises(
+        ValidationError,
+        match="train_ratio must be between 0 and 1",
+    ):
+        DataConfig(dataset=ComponentConfig(_target_="dataset.all"), train_ratio=0.0)
+
+    with pytest.raises(
+        ValidationError,
+        match="train_ratio must be between 0 and 1",
+    ):
+        DataConfig(dataset=ComponentConfig(_target_="dataset.all"), val_ratio=-0.1)
+
+    with pytest.raises(
+        ValidationError,
+        match="exceeds 1.0",
+    ):
+        DataConfig(
+            dataset=ComponentConfig(_target_="dataset.all"),
+            train_ratio=0.8,
+            val_ratio=0.3,
+        )
+
+    with pytest.raises(
+        ValidationError,
+        match="exceeds 1.0",
+    ):
+        DataConfig(dataset=ComponentConfig(_target_="dataset.all"), val_ratio=0.2)
+
+
 def test_data_config_empty():
     with pytest.raises(
         ValidationError,
