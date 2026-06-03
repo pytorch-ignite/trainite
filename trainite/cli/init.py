@@ -1,6 +1,8 @@
 import argparse
 import inspect
+import os
 import re
+import sys
 import textwrap
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -250,10 +252,7 @@ def _build_templates(
     }
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="trainite")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
+def build_init_subparser(subparsers):
     init_parser = subparsers.add_parser(
         "init", help="Generate a starter training project"
     )
@@ -283,6 +282,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="Use defaults for anything not provided and skip prompts",
     )
     init_parser.set_defaults(func=init_project)
+
+
+def build_interactive_run_subparser(subparsers):
+    irun_parser = subparsers.add_parser(
+        "i_run", help="""
+Run interactive training (debugging). We are using PuDB package to start the training in step by step mode.
+The command we run is: python -m pudb main.py <config-file>
+"""
+    )
+    irun_parser.add_argument(
+        "config", help="Configuration file to run"
+    )
+
+    def start_pudb_run(args: argparse.Namespace) -> None:
+        # TODO: optionally install pudb with pip or uv or put it as a dependency
+        cmd = [sys.executable, "-m", "pudb", "main.py", args.config]
+        os.execv(sys.executable, cmd)
+
+    irun_parser.set_defaults(func=start_pudb_run)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="trainite")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    build_init_subparser(subparsers)
+    build_interactive_run_subparser(subparsers)
 
     return parser
 
