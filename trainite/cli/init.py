@@ -200,7 +200,7 @@ def _build_templates(
             PROJECT_ROOT / model_spec.implementation_path,
             model_spec.template_replacements,
         ),
-        f"dataset/{dataset_spec.name}.py": _render_template(
+        f"datasets/{dataset_spec.name}.py": _render_template(
             PROJECT_ROOT / dataset_spec.implementation_path,
             dataset_spec.template_replacements,
         ),
@@ -367,7 +367,7 @@ def init_project(args: argparse.Namespace) -> None:
     _update_targets(
         data_config,
         f"trainite.datasets.{dataset_spec.name}",
-        f"dataset.{dataset_spec.name}",
+        f"datasets.{dataset_spec.name}",
     )
 
     starter_config = ProjectConfig(

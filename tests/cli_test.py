@@ -42,7 +42,7 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
             "config.yaml",
             "config.py",
             f"models/{model_spec.name}.py",
-            f"dataset/{dataset_spec.name}.py",
+            f"datasets/{dataset_spec.name}.py",
             "trainer.py",
             "utils.py",
             "main.py",
@@ -56,7 +56,7 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
         python_files = [
             "config.py",
             f"models/{model_spec.name}.py",
-            f"dataset/{dataset_spec.name}.py",
+            f"datasets/{dataset_spec.name}.py",
             "trainer.py",
             "utils.py",
             "main.py",
