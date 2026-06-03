@@ -80,22 +80,23 @@ class DataConfig(BaseModel):
             )
 
         if present_option1 and "train" not in present_option1:
-            raise ValueError(
-                "Explicit splits mode (Option 1) requires at least the 'train' split"
-            )
+            raise ValueError("Explicit splits mode requires at least the 'train' split")
 
         if present_option2 and "dataset" not in present_option2:
-            raise ValueError(
-                "Automatic splitting mode (Option 2) requires the 'dataset' field"
-            )
+            raise ValueError("Automatic splitting mode requires the 'dataset' field")
 
         if self.dataset is not None:
             train_ratio = self.train_ratio if self.train_ratio is not None else 1.0
             val_ratio = self.val_ratio if self.val_ratio is not None else 0.0
 
-            if train_ratio <= 0.0 or val_ratio < 0:
+            if train_ratio <= 0.0 or train_ratio > 1.0:
                 raise ValueError(
                     f"train_ratio must be between 0 and 1. Got train_ratio={train_ratio}, val_ratio={val_ratio}"
+                )
+
+            if val_ratio <= 0.0 or val_ratio > 1.0:
+                raise ValueError(
+                    f"val_ratio must be between 0 and 1. Got train_ratio={train_ratio}, val_ratio={val_ratio}"
                 )
 
             if train_ratio + val_ratio > 1.0:

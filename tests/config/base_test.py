@@ -83,7 +83,31 @@ def test_data_config_invalid_ratios():
         ValidationError,
         match="train_ratio must be between 0 and 1",
     ):
-        DataConfig(dataset=ComponentConfig(_target_="dataset.all"), val_ratio=-0.1)
+        DataConfig(dataset=ComponentConfig(_target_="dataset.all"), train_ratio=-1.0)
+
+    with pytest.raises(
+        ValidationError,
+        match="train_ratio must be between 0 and 1",
+    ):
+        DataConfig(dataset=ComponentConfig(_target_="dataset.all"), train_ratio=1.1)
+
+    with pytest.raises(
+        ValidationError,
+        match="val_ratio must be between 0 and 1",
+    ):
+        DataConfig(dataset=ComponentConfig(_target_="dataset.all"), val_ratio=0.0)
+
+    with pytest.raises(
+        ValidationError,
+        match="val_ratio must be between 0 and 1",
+    ):
+        DataConfig(dataset=ComponentConfig(_target_="dataset.all"), val_ratio=-1.0)
+
+    with pytest.raises(
+        ValidationError,
+        match="val_ratio must be between 0 and 1",
+    ):
+        DataConfig(dataset=ComponentConfig(_target_="dataset.all"), val_ratio=1.1)
 
     with pytest.raises(
         ValidationError,
@@ -99,7 +123,10 @@ def test_data_config_invalid_ratios():
         ValidationError,
         match="exceeds 1.0",
     ):
-        DataConfig(dataset=ComponentConfig(_target_="dataset.all"), val_ratio=0.2)
+        DataConfig(
+            dataset=ComponentConfig(_target_="dataset.all"),
+            val_ratio=0.2,
+        )
 
 
 def test_data_config_empty():
