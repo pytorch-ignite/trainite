@@ -407,3 +407,21 @@ def test_pretrainer_dataset_is_empty(project_config):
     )
     with pytest.raises(ValueError, match="Training dataset is empty"):
         PreTrainer(project_config)
+
+
+def test_pretrainer_early_stopping_patience(project_config):
+    project_config.trainer.early_stopping_patience = 0
+    with pytest.raises(
+        ValueError, match="early_stopping_patience must be a positive integer"
+    ):
+        trainer = PreTrainer(project_config)
+        trainer.run()
+    project_config.trainer.early_stopping_patience = 0
+    with pytest.raises(
+        ValueError, match="early_stopping_patience must be a positive integer"
+    ):
+        trainer = PreTrainer(project_config)
+        trainer.run()
+    project_config.trainer.early_stopping_patience = 1
+    trainer = PreTrainer(project_config)
+    trainer.run()

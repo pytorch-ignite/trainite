@@ -25,6 +25,7 @@ class TrainerConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
     log_every_steps: int = 10
     epochs: int = 10
+    early_stopping_patience: int | None = 3
 
 
 class OptimizerConfig(ComponentConfig):

@@ -344,9 +344,14 @@ class PreTrainer:
         self.handlers["checkpoint_last"] = last_checkpoint
 
         # 4. EarlyStopping
-        if self.val_loader:
+        patience = self.config.trainer.early_stopping_patience
+        if self.val_loader and patience is not None:
+            if patience <= 0:
+                raise ValueError(
+                    f"early_stopping_patience must be a positive integer or null, got {patience}"
+                )
             early_stopping = EarlyStopping(
-                patience=3,
+                patience=patience,
                 score_function=lambda engine: -engine.state.metrics["loss"],
                 trainer=self.engine,
                 min_delta=0.0,
