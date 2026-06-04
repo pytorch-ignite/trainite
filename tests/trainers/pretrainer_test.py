@@ -54,6 +54,14 @@ class SimpleDataset(torch.utils.data.Dataset):
         }
 
 
+class EmptyDataset(torch.utils.data.Dataset):
+    def __len__(self):
+        return 0
+
+    def __getitem__(self, index):
+        raise IndexError("This dataset is empty")
+
+
 def dummy_collate_fn(batch):
     return batch
 
@@ -389,13 +397,27 @@ def test_pretrainer_builds_train_val_and_test_loaders_from_ratios(tmp_path):
     assert isinstance(trainer.test_loader.sampler, torch.utils.data.SequentialSampler)
 
 
-def test_pretrainer_missing_dataset_for_ratios(project_config):
-    # Manually trigger _build_loaders_from_ratios with missing dataset
-    # We use model_construct to bypass Pydantic validation
-    data_config = DataConfig.model_construct(
+def test_pretrainer_dataset_is_empty(project_config):
+    project_config.data = DataConfig(
+        dataset=cc(
+            "tests.trainers.pretrainer_test.EmptyDataset",
+        ),
         train_ratio=0.8,
         val_ratio=0.2,
     )
-    trainer = PreTrainer.__new__(PreTrainer)
-    with pytest.raises(ValueError, match="dataset must be provided"):
-        trainer._build_loaders_from_ratios(data_config)
+    with pytest.raises(ValueError, match="Training dataset is empty"):
+        PreTrainer(project_config)
+
+
+def test_pretrainer_early_stopping_patience(project_config):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        project_config.trainer.early_stopping_patience = 0
+
+    with pytest.raises(ValidationError):
+        project_config.trainer.early_stopping_patience = -1
+
+    project_config.trainer.early_stopping_patience = 1
+    trainer = PreTrainer(project_config)
+    trainer.run()

@@ -3,6 +3,13 @@ from datetime import datetime
 from pathlib import Path
 
 import torch
+from config import (
+    DataConfig,
+    DataLoaderConfig,
+    ProjectConfig,
+    SplitConfig,
+    dump_config,
+)
 from ignite.engine import Engine, Events
 from ignite.handlers import (
     EarlyStopping,
@@ -17,14 +24,6 @@ from ignite.utils import setup_logger
 from torch import nn
 from torch.optim.lr_scheduler import LinearLR
 from torch.utils.data import DataLoader, Dataset, random_split
-
-from config import (
-    DataConfig,
-    DataLoaderConfig,
-    ProjectConfig,
-    SplitConfig,
-    dump_config,
-)
 from utils import get_target, instantiate
 
 

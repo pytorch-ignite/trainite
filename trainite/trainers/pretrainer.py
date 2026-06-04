@@ -5,8 +5,9 @@ from pathlib import Path
 import torch
 from ignite.engine import Engine, Events
 from ignite.handlers import (
+    Checkpoint,
+    DiskSaver,
     EarlyStopping,
-    ModelCheckpoint,
     create_lr_scheduler_with_warmup,
 )
 from ignite.handlers.fbresearch_logger import FBResearchLogger
@@ -16,7 +17,7 @@ from ignite.metrics import Accuracy, Loss, RunningAverage
 from ignite.utils import setup_logger
 from torch import nn
 from torch.optim.lr_scheduler import LinearLR
-from torch.utils.data import DataLoader, Dataset, random_split
+from torch.utils.data import DataLoader, Dataset, Subset, random_split
 
 from trainite.config import (
     DataConfig,
@@ -29,77 +30,70 @@ from trainite.utils import get_target, instantiate
 
 
 class PreTrainer:
-    def __init__(
-        self,
-        config: ProjectConfig,
-        device: str | torch.device | None = None,
-        lr: float | None = None,
-        epochs: int | None = None,
-        log_every_steps: int | None = None,
-        grad_clip_norm: float | None = None,
-        model: nn.Module | None = None,
-        train_loader=None,
-        val_loader=None,
-        test_loader=None,
-        **kwargs,
-    ) -> None:
+    def __init__(self, config: ProjectConfig) -> None:
         self.logger: logging.Logger = setup_logger("trainer", level=logging.INFO)
         torch.manual_seed(config.seed)
-        self.train_loader: DataLoader | None = None
+        self.config: ProjectConfig = config
+
+        self.train_loader: DataLoader
         self.val_loader: DataLoader | None = None
         self.test_loader: DataLoader | None = None
 
-        self.config: ProjectConfig = config
-        resolved_device = config.device
-        if resolved_device == "auto":
-            resolved_device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.device: str | torch.device = device or resolved_device
-        self.epochs: int = epochs or config.trainer.epochs
-        self.log_every_steps: int = log_every_steps or config.trainer.log_every_steps
-        self.grad_clip_norm: float | None = grad_clip_norm or getattr(
+        self.device: str | torch.device = self._resolve_device()
+        self.epochs: int = config.trainer.epochs
+        self.log_every_steps: int = config.trainer.log_every_steps
+        self.grad_clip_norm: float | None = getattr(
             config.trainer, "grad_clip_norm", None
         )
-        self.set_loaders(config, train_loader, val_loader, test_loader)
-        if self.train_loader is None:
-            raise ValueError(
-                "At least a training loader must be provided either directly or via config"
-            )
-        train_dataset = self.train_loader.dataset
-        # Handle Subset (from random_split) which wraps the original dataset
-        if isinstance(train_dataset, torch.utils.data.Subset):
-            train_dataset = train_dataset.dataset
-        self.vocab_size: int = getattr(train_dataset, "vocab_size", 0)
-        model_params = config.model.model_dump(by_alias=True)
-        configured_vocab_size: int | None = model_params.get("vocab_size")
-
-        if configured_vocab_size is not None:
-            if configured_vocab_size < self.vocab_size:
-                raise ValueError(
-                    f"Configured model vocab_size ({configured_vocab_size}) is smaller than "
-                    f"the dataset vocabulary size ({self.vocab_size}). "
-                    f"Please increase model vocab_size or remove it from config.yaml "
-                    f"to let it resolve automatically."
-                )
-            self.vocab_size = configured_vocab_size
-
-        self.model: nn.Module = model or instantiate(
-            config.model, vocab_size=self.vocab_size
-        )
-        self.model.to(self.device)
+        self.set_loaders()
+        self.vocab_size: int = self._resolve_vocab_size()
+        self.model: nn.Module = self._build_model()
         self.loss_fn: nn.CrossEntropyLoss = nn.CrossEntropyLoss()
-        self.optimizer: torch.optim.Optimizer = instantiate(
-            config.optimizer, params=self.model.parameters()
-        )
-        self.lr: float = lr or config.optimizer.lr
+        self.optimizer: torch.optim.Optimizer = self._build_optimizer()
+        self.lr: float = config.optimizer.lr
         self.total_iters: int = len(self.train_loader) * self.epochs
         self.run_dir: Path | None = None
         self.handlers: dict = {}
-        self.engine: Engine = Engine(self._train_step)
-        self.train_evaluator: Engine = Engine(self._eval_step)
-        self.val_evaluator: Engine = Engine(self._eval_step)
-        self.test_evaluator: Engine = Engine(self._eval_step)
-        self.metrics: dict = {}
+        self.engine = Engine(self._train_step)
+        self.train_evaluator = Engine(self._eval_step)
+        self.val_evaluator = Engine(self._eval_step)
+        self.test_evaluator = Engine(self._eval_step)
+        self.metrics = {}
         self._attach_metrics()
+
+    def _resolve_device(self) -> str | torch.device:
+        resolved = self.config.device
+        if resolved == "auto":
+            resolved = "cuda" if torch.cuda.is_available() else "cpu"
+        return resolved
+
+    def _resolve_vocab_size(self) -> int:
+        train_dataset = (
+            self.train_loader.dataset.dataset
+            if isinstance(self.train_loader.dataset, Subset)
+            else self.train_loader.dataset
+        )
+        vocab_size = getattr(train_dataset, "vocab_size", 0)
+        model_params = self.config.model.model_dump(by_alias=True)
+        configured_vocab_size: int | None = model_params.get("vocab_size")
+        if configured_vocab_size is not None:
+            if configured_vocab_size < vocab_size:
+                raise ValueError(
+                    f"Configured model vocab_size ({configured_vocab_size}) is smaller than "
+                    f"the dataset vocabulary size ({vocab_size}). "
+                    f"Please increase model vocab_size or remove it from config.yaml "
+                    f"to let it resolve automatically."
+                )
+            vocab_size = configured_vocab_size
+        return vocab_size
+
+    def _build_model(self) -> nn.Module:
+        model = instantiate(self.config.model, vocab_size=self.vocab_size)
+        model.to(self.device)
+        return model
+
+    def _build_optimizer(self) -> torch.optim.Optimizer:
+        return instantiate(self.config.optimizer, params=self.model.parameters())
 
     def _build_dataloader(self, split_config: SplitConfig) -> DataLoader:
         dataset = instantiate(split_config.dataset)
@@ -124,12 +118,13 @@ class PreTrainer:
     def _build_loaders_from_ratios(
         self, data_config: DataConfig
     ) -> tuple[DataLoader, DataLoader | None, DataLoader | None]:
-        if data_config.dataset is None:
-            raise ValueError(
-                "dataset must be provided in data_config for automatic splitting"
-            )
         dataset = instantiate(data_config.dataset)
         total_len = len(dataset)
+
+        if total_len == 0:
+            raise ValueError(
+                "Training dataset is empty. Cannot perform train/val/test split."
+            )
 
         train_ratio = (
             data_config.train_ratio if data_config.train_ratio is not None else 1.0
@@ -162,44 +157,30 @@ class PreTrainer:
 
         return train_loader, val_loader, test_loader
 
-    def set_loaders(
-        self,
-        config: ProjectConfig,
-        train_loader: DataLoader | None,
-        val_loader: DataLoader | None,
-        test_loader: DataLoader | None,
-    ):
-        if train_loader is None:
-            if config.data.train:
-                train_loader = self._build_dataloader(config.data.train)
-                if val_loader is None and config.data.val:
-                    val_loader = self._build_dataloader(config.data.val)
-                if test_loader is None and config.data.test:
-                    test_loader = self._build_dataloader(config.data.test)
-            elif config.data.dataset:
-                self.logger.info(
-                    "Automatic splitting requested with ratios: train=%s, val=%s",
-                    config.data.train_ratio,
-                    config.data.val_ratio,
-                )
-                t_loader, v_loader, te_loader = self._build_loaders_from_ratios(
-                    config.data
-                )
-                train_loader = t_loader
-                if val_loader is None:
-                    val_loader = v_loader
-                if test_loader is None:
-                    test_loader = te_loader
+    def set_loaders(self) -> None:
+        if self.config.data.train:
+            self.train_loader = self._build_dataloader(self.config.data.train)
+            if self.config.data.val:
+                self.val_loader = self._build_dataloader(self.config.data.val)
+            if self.config.data.test:
+                self.test_loader = self._build_dataloader(self.config.data.test)
+        elif self.config.data.dataset:
+            self.logger.info(
+                "Automatic splitting requested with ratios: train=%s, val=%s",
+                self.config.data.train_ratio,
+                self.config.data.val_ratio,
+            )
+            (
+                self.train_loader,
+                self.val_loader,
+                self.test_loader,
+            ) = self._build_loaders_from_ratios(self.config.data)
 
-        if val_loader is None:
+        if self.val_loader is None:
             self.logger.warning(
                 "Validation config not provided. Early stopping and best model checkpointing will be disabled. "
                 "Only the last model will be saved."
             )
-
-        self.train_loader = train_loader
-        self.val_loader = val_loader
-        self.test_loader = test_loader
 
     def _make_run_dir(self) -> Path:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -331,7 +312,7 @@ class PreTrainer:
         # 2. Run evaluations
         self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
 
-        # 3. ModelCheckpoint
+        # 3. Checkpoint
         to_save = {"model": self.model, "optimizer": self.optimizer}
 
         if self.val_loader:
@@ -340,37 +321,39 @@ class PreTrainer:
                 val_acc = engine.state.metrics["exact_accuracy"]
                 return val_acc
 
-            checkpoint = ModelCheckpoint(
-                dirname=str(self.run_dir),
-                n_saved=1,
+            checkpoint = Checkpoint(
+                to_save=to_save,
+                save_handler=DiskSaver(dirname=str(self.run_dir), require_empty=False),
                 filename_prefix="best",
                 score_function=score_function,
                 score_name="val_acc",
-                require_empty=False,
+                n_saved=1,
                 global_step_transform=lambda *_: self.engine.state.epoch,
             )
-            self.val_evaluator.add_event_handler(Events.COMPLETED, checkpoint, to_save)
+            self.val_evaluator.add_event_handler(Events.COMPLETED, checkpoint)
             self.handlers["checkpoint_best"] = checkpoint
 
-        last_checkpoint = ModelCheckpoint(
-            dirname=str(self.run_dir),
-            n_saved=1,
+        last_checkpoint = Checkpoint(
+            to_save=to_save,
+            save_handler=DiskSaver(dirname=str(self.run_dir), require_empty=False),
             filename_prefix="last",
-            require_empty=False,
+            n_saved=1,
             global_step_transform=lambda *_: self.engine.state.epoch,
         )
-        self.engine.add_event_handler(Events.EPOCH_COMPLETED, last_checkpoint, to_save)
+        self.engine.add_event_handler(Events.EPOCH_COMPLETED, last_checkpoint)
 
         self.handlers["checkpoint_last"] = last_checkpoint
 
         # 4. EarlyStopping
-        if self.val_loader:
+        patience = self.config.trainer.early_stopping_patience
+        if self.val_loader and patience is not None:
             early_stopping = EarlyStopping(
-                patience=3,
+                patience=patience,
                 score_function=lambda engine: -engine.state.metrics["loss"],
                 trainer=self.engine,
                 min_delta=0.0,
             )
+
             self.val_evaluator.add_event_handler(Events.COMPLETED, early_stopping)
             self.handlers["early_stopping"] = early_stopping
 
