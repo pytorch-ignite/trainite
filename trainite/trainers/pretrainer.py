@@ -5,8 +5,9 @@ from pathlib import Path
 import torch
 from ignite.engine import Engine, Events
 from ignite.handlers import (
+    Checkpoint,
+    DiskSaver,
     EarlyStopping,
-    ModelCheckpoint,
     create_lr_scheduler_with_warmup,
 )
 from ignite.handlers.fbresearch_logger import FBResearchLogger
@@ -311,7 +312,7 @@ class PreTrainer:
         # 2. Run evaluations
         self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
 
-        # 3. ModelCheckpoint
+        # 3. Checkpoint
         to_save = {"model": self.model, "optimizer": self.optimizer}
 
         if self.val_loader:
@@ -320,42 +321,39 @@ class PreTrainer:
                 val_acc = engine.state.metrics["exact_accuracy"]
                 return val_acc
 
-            checkpoint = ModelCheckpoint(
-                dirname=str(self.run_dir),
-                n_saved=1,
+            checkpoint = Checkpoint(
+                to_save=to_save,
+                save_handler=DiskSaver(dirname=str(self.run_dir), require_empty=False),
                 filename_prefix="best",
                 score_function=score_function,
                 score_name="val_acc",
-                require_empty=False,
+                n_saved=1,
                 global_step_transform=lambda *_: self.engine.state.epoch,
             )
-            self.val_evaluator.add_event_handler(Events.COMPLETED, checkpoint, to_save)
+            self.val_evaluator.add_event_handler(Events.COMPLETED, checkpoint)
             self.handlers["checkpoint_best"] = checkpoint
 
-        last_checkpoint = ModelCheckpoint(
-            dirname=str(self.run_dir),
-            n_saved=1,
+        last_checkpoint = Checkpoint(
+            to_save=to_save,
+            save_handler=DiskSaver(dirname=str(self.run_dir), require_empty=False),
             filename_prefix="last",
-            require_empty=False,
+            n_saved=1,
             global_step_transform=lambda *_: self.engine.state.epoch,
         )
-        self.engine.add_event_handler(Events.EPOCH_COMPLETED, last_checkpoint, to_save)
+        self.engine.add_event_handler(Events.EPOCH_COMPLETED, last_checkpoint)
 
         self.handlers["checkpoint_last"] = last_checkpoint
 
         # 4. EarlyStopping
         patience = self.config.trainer.early_stopping_patience
         if self.val_loader and patience is not None:
-            if patience <= 0:
-                raise ValueError(
-                    f"early_stopping_patience must be a positive integer or null, got {patience}"
-                )
             early_stopping = EarlyStopping(
                 patience=patience,
                 score_function=lambda engine: -engine.state.metrics["loss"],
                 trainer=self.engine,
                 min_delta=0.0,
             )
+
             self.val_evaluator.add_event_handler(Events.COMPLETED, early_stopping)
             self.handlers["early_stopping"] = early_stopping
 

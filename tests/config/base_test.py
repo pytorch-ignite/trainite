@@ -75,37 +75,37 @@ def test_data_config_mixed_modes_ratios_and_splits():
 def test_data_config_invalid_ratios():
     with pytest.raises(
         ValidationError,
-        match="train_ratio must be between 0 and 1",
+        match="Input should be greater than 0",
     ):
         DataConfig(dataset=ComponentConfig(_target_="dataset.all"), train_ratio=0.0)
 
     with pytest.raises(
         ValidationError,
-        match="train_ratio must be between 0 and 1",
+        match="Input should be greater than 0",
     ):
         DataConfig(dataset=ComponentConfig(_target_="dataset.all"), train_ratio=-1.0)
 
     with pytest.raises(
         ValidationError,
-        match="train_ratio must be between 0 and 1",
+        match="Input should be less than or equal to 1",
     ):
         DataConfig(dataset=ComponentConfig(_target_="dataset.all"), train_ratio=1.1)
 
     with pytest.raises(
         ValidationError,
-        match="val_ratio must be between 0 and 1",
-    ):
-        DataConfig(dataset=ComponentConfig(_target_="dataset.all"), val_ratio=0.0)
-
-    with pytest.raises(
-        ValidationError,
-        match="val_ratio must be between 0 and 1",
+        match="Input should be greater than or equal to 0",
     ):
         DataConfig(dataset=ComponentConfig(_target_="dataset.all"), val_ratio=-1.0)
 
     with pytest.raises(
         ValidationError,
-        match="val_ratio must be between 0 and 1",
+        match="Input should be less than 1",
+    ):
+        DataConfig(dataset=ComponentConfig(_target_="dataset.all"), val_ratio=1.0)
+
+    with pytest.raises(
+        ValidationError,
+        match="Input should be less than 1",
     ):
         DataConfig(dataset=ComponentConfig(_target_="dataset.all"), val_ratio=1.1)
 
