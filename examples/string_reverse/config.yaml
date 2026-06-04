@@ -1,5 +1,5 @@
 model:
-  _target_: models.transformer.build_transformer_model
+  _target_: models.transformer.TransformerModel
   hidden_size: 64
   num_layers: 2
   num_heads: 2
@@ -14,7 +14,7 @@ data:
   val: null
   test: null
   dataset:
-    _target_: dataset.string_reverse.build_string_reverse_dataset
+    _target_: dataset.string_reverse.StringReverseDataset
     per_seq_size: 256
     charset: "@alpha"
     min_seq_len: 1

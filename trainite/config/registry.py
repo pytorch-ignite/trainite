@@ -37,7 +37,7 @@ MODEL_SPECS = {
         implementation_path=Path("trainite/models/transformer.py"),
         config_cls=TransformerModelConfig,
         implementation_symbol="TransformerModel",
-        builder_symbol="build_transformer_model",
+        builder_symbol="TransformerModel",
         readme_template_path=Path(
             "trainite/templates/components/models/transformer.md"
         ),
@@ -50,7 +50,7 @@ DATASET_SPECS = {
         implementation_path=Path("trainite/datasets/string_reverse.py"),
         config_cls=StringReverseDataConfig,
         implementation_symbol="StringReverseDataset",
-        builder_symbol="build_string_reverse_dataset",
+        builder_symbol="StringReverseDataset",
         collate_fn_symbol="collate_fn",
         readme_template_path=Path(
             "trainite/templates/components/datasets/string_reverse.md"

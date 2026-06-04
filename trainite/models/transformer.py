@@ -152,24 +152,3 @@ class TransformerModel(nn.Module):
             x = block(x, padding_mask=padding_mask)
         x = self.norm(x)
         return self.proj(x)
-
-
-def build_transformer_model(
-    vocab_size: int = 32,
-    hidden_size: int = 64,
-    num_layers: int = 2,
-    num_heads: int = 2,
-    feedforward_dim: int = 128,
-    dropout: float = 0.1,
-    max_seq_len: int = 128,
-    **kwargs,
-) -> TransformerModel:
-    return TransformerModel(
-        vocab_size=vocab_size,
-        hidden_size=hidden_size,
-        num_layers=num_layers,
-        num_heads=num_heads,
-        feedforward_dim=feedforward_dim,
-        dropout=dropout,
-        max_seq_len=max_seq_len,
-    )

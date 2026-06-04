@@ -5,7 +5,7 @@ from trainite.config.base import ComponentConfig
 
 class TransformerModelConfig(ComponentConfig):
     target: str = Field(
-        default="trainite.models.transformer.build_transformer_model", alias="_target_"
+        default="trainite.models.transformer.TransformerModel", alias="_target_"
     )
     hidden_size: int = 64
     num_layers: int = 2

@@ -16,21 +16,67 @@ Trainite is a toolbox for training language models with PyTorch-Ignite. This pro
 
 ## Getting Started
 
-1. **Install Dependencies**:
-   Ensure you have PyTorch, PyTorch-Ignite, and Pydantic installed.
+You can set up and run this project using either **uv** (recommended for speed) or standard **pip**.
+
+### Option A: Using uv (Recommended)
+
+[uv](https://github.com/astral-sh/uv) is an extremely fast Python package installer and resolver.
+
+1. **Install uv** (if you don't have it):
+   * **macOS/Linux**:
+     ```bash
+     curl -LsSf https://astral.sh/uv/install.sh | sh
+     ```
+   * **Windows**:
+     ```powershell
+     powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+     ```
+   * Or via pip: `pip install uv`
+
+2. **Install Dependencies & Set Up Virtual Environment**:
    ```bash
    uv sync
    ```
 
-2. **Run Training**:
+3. **Run Training**:
    ```bash
    uv run python main.py config.yaml
    ```
 
-3. **Monitor Progress**:
-   Training logs and checkpoints are saved to the directory specified in `config.yaml` (default: `outputs/`). You can use TensorBoard to visualize metrics:
+4. **Monitor Progress**:
    ```bash
    uv run tensorboard --logdir outputs
+   ```
+
+### Option B: Using standard pip & venv
+
+If you prefer standard Python tools, you can create a virtual environment and use `pip`:
+
+1. **Create and Activate a Virtual Environment**:
+   * **macOS/Linux**:
+     ```bash
+     python3 -m venv .venv
+     source .venv/bin/activate
+     ```
+   * **Windows**:
+     ```cmd
+     python -m venv .venv
+     .venv\Scripts\activate
+     ```
+
+2. **Install Dependencies**:
+   ```bash
+   pip install -e .
+   ```
+
+3. **Run Training**:
+   ```bash
+   python main.py config.yaml
+   ```
+
+4. **Monitor Progress**:
+   ```bash
+   tensorboard --logdir outputs
    ```
 
 ## Components
