@@ -49,18 +49,21 @@ def _render_class_source(cls: type) -> str:
     return textwrap.dedent(inspect.getsource(cls)).strip()
 
 
-def _prompt_text(prompt: str, default: str) -> str:
-    result = questionary.text(prompt, default=default).ask()
+def _prompt_text(prompt: str, default: str, instruction: str | None = None) -> str:
+    result = questionary.text(prompt, default=default, instruction=instruction).ask()
     if result is None:
         raise SystemExit(0)
     return result.strip() or default
 
 
-def _prompt_choice(prompt: str, choices: Sequence[str], default: str) -> str:
+def _prompt_choice(
+    prompt: str, choices: Sequence[str], default: str, instruction: str | None = None
+) -> str:
     result = questionary.select(
         prompt,
         choices=choices,
         default=default,
+        instruction=instruction,
     ).ask()
     if result is None:
         raise SystemExit(0)
@@ -123,6 +126,11 @@ def generate_uv_project(name: str, version: str, dependencies: list[str]) -> str
     project.add("dependencies", deps_arr)
     project.add("requires-python", ">=3.10")
     doc.add("project", project)
+
+    build_system = tomlkit.table()
+    build_system.add("requires", ["setuptools>=61.0"])
+    build_system.add("build-backend", "setuptools.build_meta")
+    doc.add("build-system", build_system)
 
     return tomlkit.dumps(doc)
 
@@ -242,7 +250,7 @@ def _build_templates(
             PROJECT_ROOT / model_spec.implementation_path,
             model_spec.template_replacements,
         ),
-        f"dataset/{dataset_spec.name}.py": _render_template(
+        f"datasets/{dataset_spec.name}.py": _render_template(
             PROJECT_ROOT / dataset_spec.implementation_path,
             dataset_spec.template_replacements,
         ),
@@ -408,20 +416,32 @@ def init_project(args: argparse.Namespace) -> None:
         enable_sweep = args.sweep
     else:
         project_dir = args.project_dir or _prompt_text(
-            "Project directory", "my-cool-experiment"
+            "Project directory:",
+            "my-cool-experiment",
+            "Directory to create the starter project in \n",
         )
         model_name = args.model or _prompt_choice(
-            "Model", MODEL_CHOICES, MODEL_CHOICES[0]
+            "Model:", MODEL_CHOICES, MODEL_CHOICES[0], "Starter model template to use"
         )
         dataset_name = args.dataset or _prompt_choice(
-            "Dataset", DATASET_CHOICES, DATASET_CHOICES[0]
+            "Dataset:",
+            DATASET_CHOICES,
+            DATASET_CHOICES[0],
+            "Starter dataset template to use",
         )
         trainer_name = args.trainer or _prompt_choice(
-            "Trainer", TRAINER_CHOICES, TRAINER_CHOICES[0]
+            "Trainer:",
+            TRAINER_CHOICES,
+            TRAINER_CHOICES[0],
+            "Starter trainer template to use",
         )
-        output_root = args.output_root or _prompt_text("Output directory", "outputs")
+        output_root = args.output_root or _prompt_text(
+            "Output directory:", "outputs", "Output directory for generated files \n"
+        )
         run_name = args.run_name or _prompt_text(
-            "Run name", f"{model_name}__{dataset_name}"
+            "Run name:",
+            f"{model_name}__{dataset_name}",
+            "Run name for generated config (used in output paths and logging) \n",
         )
         if args.sweep:
             enable_sweep = True
@@ -461,7 +481,7 @@ def init_project(args: argparse.Namespace) -> None:
     _update_targets(
         data_config,
         f"trainite.datasets.{dataset_spec.name}",
-        f"dataset.{dataset_spec.name}",
+        f"datasets.{dataset_spec.name}",
     )
 
     starter_config = ProjectConfig(

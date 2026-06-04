@@ -6,7 +6,7 @@ from trainite.config.base import ComponentConfig, DataConfig, DataLoaderConfig
 class StringReverseDatasetConfig(ComponentConfig):
     model_config = ConfigDict(validate_assignment=True)
     target: str = Field(
-        default="trainite.datasets.string_reverse.build_string_reverse_dataset",
+        default="trainite.datasets.string_reverse.StringReverseDataset",
         alias="_target_",
     )
     per_seq_size: int = Field(default=256, gt=0)

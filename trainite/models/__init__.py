@@ -1,6 +1,5 @@
-from trainite.models.transformer import TransformerModel, build_transformer_model
+from trainite.models.transformer import TransformerModel
 
 __all__ = [
     "TransformerModel",
-    "build_transformer_model",
 ]

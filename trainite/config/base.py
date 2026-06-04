@@ -7,6 +7,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    model_serializer,
     model_validator,
 )
 
@@ -60,6 +61,13 @@ class DataConfig(BaseModel):
     dataloader: DataLoaderConfig | None = None
     train_ratio: float | None = Field(default=None, gt=0.0, le=1.0)
     val_ratio: float | None = Field(default=None, ge=0.0, lt=1.0)
+
+    @model_serializer(mode="wrap")
+    def serialize_model(self, handler: Any) -> dict[str, Any]:
+        res = handler(self)
+        if isinstance(res, dict):
+            return {k: v for k, v in res.items() if v is not None}
+        return res
 
     @model_validator(mode="after")
     def validate_options(self) -> "DataConfig":

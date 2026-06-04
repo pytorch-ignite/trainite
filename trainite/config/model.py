@@ -6,7 +6,7 @@ from trainite.config.base import ComponentConfig
 class TransformerModelConfig(ComponentConfig):
     model_config = ConfigDict(validate_assignment=True)
     target: str = Field(
-        default="trainite.models.transformer.build_transformer_model", alias="_target_"
+        default="trainite.models.transformer.TransformerModel", alias="_target_"
     )
     hidden_size: int = Field(default=64, gt=0)
     num_layers: int = Field(default=2, gt=0)

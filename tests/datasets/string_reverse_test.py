@@ -8,7 +8,6 @@ from trainite.datasets.string_reverse import (
     UNIVERSAL_VOCAB,
     CharTokenizer,
     StringReverseDataset,
-    build_string_reverse_dataset,
     collate_fn,
 )
 from trainite.utils import get_target, instantiate
@@ -131,11 +130,11 @@ def test_collate_fn():
 
 
 def test_build_string_reverse_dataset():
-    dataset = build_string_reverse_dataset(per_seq_size=5, seq_len=3)
+    dataset = StringReverseDataset(per_seq_size=5, seq_len=3)
     assert isinstance(dataset, StringReverseDataset)
     assert len(dataset) == 5
 
-    dataset = build_string_reverse_dataset(per_seq_size=5, min_seq_len=1, max_seq_len=5)
+    dataset = StringReverseDataset(per_seq_size=5, min_seq_len=1, max_seq_len=5)
     assert isinstance(dataset, StringReverseDataset)
     assert len(dataset) == 5 * 5  # 5 per length, 5 lengths (1..5)
 
@@ -143,27 +142,25 @@ def test_build_string_reverse_dataset():
         ValueError,
         match="Cannot specify both seq_len and min_seq_len/max_seq_len.",
     ):
-        build_string_reverse_dataset(
-            per_seq_size=5, seq_len=3, min_seq_len=1, max_seq_len=5
-        )
+        StringReverseDataset(per_seq_size=5, seq_len=3, min_seq_len=1, max_seq_len=5)
 
     with pytest.raises(
         ValueError,
         match="Must specify either seq_len or both min_seq_len and max_seq_len.",
     ):
-        build_string_reverse_dataset(per_seq_size=5)
+        StringReverseDataset(per_seq_size=5)
 
     with pytest.raises(
         ValueError,
         match="Must specify either seq_len or both min_seq_len and max_seq_len.",
     ):
-        build_string_reverse_dataset(per_seq_size=5, min_seq_len=1)
+        StringReverseDataset(per_seq_size=5, min_seq_len=1)
 
     with pytest.raises(
         ValueError,
         match="Must specify either seq_len or both min_seq_len and max_seq_len.",
     ):
-        build_string_reverse_dataset(per_seq_size=5, max_seq_len=1)
+        StringReverseDataset(per_seq_size=5, max_seq_len=1)
 
 
 def test_config_build_string_reverse_dataset():

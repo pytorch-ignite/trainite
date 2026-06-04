@@ -232,22 +232,3 @@ def collate_fn(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
         "input_ids": padded_input_ids,
         "labels": padded_labels,
     }
-
-
-def build_string_reverse_dataset(
-    per_seq_size: int = 256,
-    min_seq_len: int | None = None,
-    max_seq_len: int | None = None,
-    seq_len: int | None = None,
-    charset: str | None = None,
-    seed: int = 42,
-    **kwargs,
-) -> StringReverseDataset:
-    return StringReverseDataset(
-        per_seq_size=per_seq_size,
-        min_seq_len=min_seq_len,
-        max_seq_len=max_seq_len,
-        seed=seed,
-        seq_len=seq_len,
-        charset=charset,
-    )

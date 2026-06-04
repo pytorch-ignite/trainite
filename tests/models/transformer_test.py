@@ -7,7 +7,6 @@ from trainite.models.transformer import (
     PositionalEncoding,
     TransformerBlock,
     TransformerModel,
-    build_transformer_model,
 )
 from trainite.utils import instantiate
 
@@ -109,7 +108,7 @@ def test_transformer_model():
 
 
 def test_build_transformer_model():
-    model = build_transformer_model(vocab_size=10, hidden_size=16)
+    model = TransformerModel(vocab_size=10, hidden_size=16)
     assert isinstance(model, TransformerModel)
 
 
