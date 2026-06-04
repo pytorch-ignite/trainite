@@ -161,8 +161,27 @@ def parse_dependencies(
     return dep_map, other_dep_map
 
 
+def _generate_sweep_yaml(default_params: dict[str, list]) -> str:
+    params_lines = []
+    for key, values in default_params.items():
+        params_lines.append(f"  {key}: {values}")
+    params_section = "\n".join(params_lines)
+
+    return f"""\
+strategy: "grid"
+direction: "maximize"
+metric: "exact_accuracy"
+parameters:
+{params_section}
+"""
+
+
 def _build_templates(
-    model_name: str, dataset_name: str, trainer_name: str, project_name: str
+    model_name: str,
+    dataset_name: str,
+    trainer_name: str,
+    project_name: str,
+    sweep: bool = False,
 ) -> dict[str, str]:
     model_spec = get_model_spec(model_name)
     dataset_spec = get_dataset_spec(dataset_name)
@@ -179,6 +198,15 @@ def _build_templates(
             )
         val = required_deps[dep] if dep in required_deps else other_deps[dep]
         final_deps.add(val)
+
+    if sweep:
+        optuna_dep = required_deps.get("optuna") or other_deps.get("optuna")
+        if not optuna_dep:
+            raise ValueError(
+                "Dependency 'optuna' is required when sweep is enabled but is not listed in pyproject.toml"
+            )
+        final_deps.add(optuna_dep)
+
     model_docs = ""
     if model_spec.readme_template_path:
         model_docs = _render_template(PROJECT_ROOT / model_spec.readme_template_path)
@@ -195,7 +223,21 @@ def _build_templates(
             PROJECT_ROOT / trainer_spec.readme_template_path
         )
 
-    return {
+    sweep_docs = ""
+    if sweep:
+        sweep_docs = _render_template(
+            PROJECT_ROOT / "trainite/templates/project/sweep.md"
+        )
+    sweep_project_structure = ""
+    if sweep:
+        sweep_project_structure = (
+            "- `sweep.py`: The entrypoint for hyperparameter sweeps. Run it with `python sweep.py`.\n"
+            "- `sweep.yaml`: Configuration for hyperparameter sweeps.\n"
+            "- `sweep_config.py`: Validation schema for `sweep.yaml`.\n"
+            "- `sweep_utils.py`: Utilities for applying sweeps and suggestions."
+        )
+
+    templates = {
         f"models/{model_spec.name}.py": _render_template(
             PROJECT_ROOT / model_spec.implementation_path,
             model_spec.template_replacements,
@@ -240,6 +282,8 @@ def _build_templates(
                 ("{{dataset_docs}}", dataset_docs),
                 ("{{trainer_name}}", trainer_spec.name),
                 ("{{trainer_docs}}", trainer_docs),
+                ("{{sweep_docs}}", sweep_docs),
+                ("{{sweep_project_structure}}", sweep_project_structure),
             ],
         ),
         "pyproject.toml": generate_uv_project(
@@ -248,6 +292,40 @@ def _build_templates(
             dependencies=sorted(final_deps),
         ),
     }
+
+    if sweep:
+        sweep_replacements = [
+            ("trainite.config.sweep", "sweep_config"),
+            ("trainite.config", "config"),
+            ("trainite.sweep_utils", "sweep_utils"),
+            (
+                "from trainite.trainers import PreTrainer",
+                f"from trainer import {trainer_spec.implementation_symbol}",
+            ),
+            (
+                "PreTrainer(run_config)",
+                f"{trainer_spec.implementation_symbol}(run_config)",
+            ),
+        ]
+        sweep_utils_replacements = [
+            ("trainite.config.sweep", "sweep_config"),
+            ("trainite.config.base", "config"),
+        ]
+
+        templates["sweep.py"] = _render_template(
+            PROJECT_ROOT / "trainite/sweep.py",
+            sweep_replacements,
+        )
+        templates["sweep_utils.py"] = _render_template(
+            PROJECT_ROOT / "trainite/sweep_utils.py",
+            sweep_utils_replacements,
+        )
+        templates["sweep_config.py"] = _render_template(
+            PROJECT_ROOT / "trainite/config/sweep.py", []
+        )
+        templates["sweep.yaml"] = _generate_sweep_yaml(model_spec.default_sweep_params)
+
+    return templates
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -275,6 +353,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help="Overwrite existing starter files",
+    )
+    init_parser.add_argument(
+        "--sweep",
+        action="store_true",
+        help="Generate hyperparameter sweep files (sweep.py + sweep.yaml)",
     )
     init_parser.add_argument(
         "--yes",
@@ -322,6 +405,7 @@ def init_project(args: argparse.Namespace) -> None:
         trainer_name = args.trainer or TRAINER_CHOICES[0]
         output_root = args.output_root or "outputs"
         run_name = args.run_name or f"{model_name}__{dataset_name}"
+        enable_sweep = args.sweep
     else:
         project_dir = args.project_dir or _prompt_text(
             "Project directory", "my-cool-experiment"
@@ -339,6 +423,16 @@ def init_project(args: argparse.Namespace) -> None:
         run_name = args.run_name or _prompt_text(
             "Run name", f"{model_name}__{dataset_name}"
         )
+        if args.sweep:
+            enable_sweep = True
+        else:
+            sweep_result = questionary.confirm(
+                "Generate sweep support? (sweep.py + sweep.yaml)",
+                default=False,
+            ).ask()
+            if sweep_result is None:
+                raise SystemExit(0)
+            enable_sweep = sweep_result
 
     project_dir = _project_directory(project_dir, args.force)
 
@@ -346,7 +440,7 @@ def init_project(args: argparse.Namespace) -> None:
 
     # Build templates for the starter project
     templates = _build_templates(
-        model_name, dataset_name, trainer_name, project_dir.name
+        model_name, dataset_name, trainer_name, project_dir.name, sweep=enable_sweep
     )
 
     model_spec = get_model_spec(model_name)
