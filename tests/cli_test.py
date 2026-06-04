@@ -192,7 +192,9 @@ def test_cli_init_with_sweep() -> None:
         with open(pyproject_path, "r") as f:
             data = tomlkit.parse(f.read())
         deps = data["project"]["dependencies"]
-        assert any("optuna" in dep.lower() for dep in deps), "optuna missing from dependencies"
+        assert any("optuna" in dep.lower() for dep in deps), (
+            "optuna missing from dependencies"
+        )
 
         # Check README contains sweep documentation
         readme_path = project_dir / "README.md"
@@ -254,7 +256,9 @@ def test_cli_init_without_sweep() -> None:
         with open(pyproject_path, "r") as f:
             data = tomlkit.parse(f.read())
         deps = data["project"]["dependencies"]
-        assert not any("optuna" in dep.lower() for dep in deps), "optuna should not be in dependencies"
+        assert not any("optuna" in dep.lower() for dep in deps), (
+            "optuna should not be in dependencies"
+        )
 
         # Check README does NOT contain sweep documentation
         readme_path = project_dir / "README.md"
@@ -312,14 +316,14 @@ def test_generated_sweep_is_runnable() -> None:
             "metric": "exact_accuracy",
             "parameters": {
                 "optimizer.lr": [0.01, 0.005]  # 2 combinations/trials
-            }
+            },
         }
         with open(sweep_yaml_path, "w") as f:
             yaml.safe_dump(sweep_config, f)
 
         # 4. Run the generated sweep.py
         try:
-            res = subprocess.run(
+            subprocess.run(
                 [sys.executable, "sweep.py"],
                 cwd=project_dir,
                 check=True,
@@ -346,7 +350,7 @@ def test_generated_sweep_is_runnable() -> None:
         # Verify that trial directories trial_0 and trial_1 were created
         assert (sweep_run_dir / "trial_0").exists()
         assert (sweep_run_dir / "trial_1").exists()
-        
+
         # Verify checkpoint files exist under both trial directories (using recursive glob)
         assert len(list((sweep_run_dir / "trial_0").glob("**/*.pt"))) >= 1
         assert len(list((sweep_run_dir / "trial_1").glob("**/*.pt"))) >= 1

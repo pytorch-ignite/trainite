@@ -6,7 +6,6 @@ from trainite.config.base import (
     ComponentConfig,
     DataConfig,
     SplitConfig,
-    ProjectConfig,
 )
 from trainite.config.sweep import SweepConfig, ParameterRange
 from trainite.sweep_utils import (
@@ -168,7 +167,10 @@ def test_sweep_config_valid_grid():
 
 def test_sweep_config_grid_rejects_range():
     # Grid strategy should not accept ParameterRange
-    with pytest.raises(ValidationError, match="uses a range, but strategy 'grid' requires explicit lists"):
+    with pytest.raises(
+        ValidationError,
+        match="uses a range, but strategy 'grid' requires explicit lists",
+    ):
         SweepConfig(
             strategy="grid",
             parameters={
@@ -182,17 +184,13 @@ def test_sweep_config_random_tpe_requires_n_trials():
     with pytest.raises(ValidationError, match="n_trials is required when strategy is"):
         SweepConfig(
             strategy="random",
-            parameters={
-                "model.num_heads": [2, 4]
-            },
+            parameters={"model.num_heads": [2, 4]},
         )
 
     with pytest.raises(ValidationError, match="n_trials is required when strategy is"):
         SweepConfig(
             strategy="tpe",
-            parameters={
-                "model.num_heads": [2, 4]
-            },
+            parameters={"model.num_heads": [2, 4]},
         )
 
 
@@ -209,7 +207,15 @@ def test_sweep_config_range_validation():
 
 
 def test_validate_sweep_params_invalid_path():
-    from trainite.config.base import ProjectConfig, TrainerConfig, OptimizerConfig, OutputConfig, DataConfig, ComponentConfig
+    from trainite.config.base import (
+        ProjectConfig,
+        TrainerConfig,
+        OptimizerConfig,
+        OutputConfig,
+        DataConfig,
+        ComponentConfig,
+    )
+
     base_config = ProjectConfig(
         project_name="test-project",
         model=ComponentConfig(_target_="trainite.models.TransformerModel"),
@@ -242,12 +248,22 @@ def test_validate_sweep_params_invalid_path():
             "optimizer.nonexistent_field": [0.01, 0.001],
         },
     )
-    with pytest.raises(ValueError, match="nonexistent_field.*not found on OptimizerConfig"):
+    with pytest.raises(
+        ValueError, match="nonexistent_field.*not found on OptimizerConfig"
+    ):
         validate_sweep_params(base_config, sweep_invalid_path)
 
 
 def test_validate_sweep_params_type_mismatch():
-    from trainite.config.base import ProjectConfig, TrainerConfig, OptimizerConfig, OutputConfig, DataConfig, ComponentConfig
+    from trainite.config.base import (
+        ProjectConfig,
+        TrainerConfig,
+        OptimizerConfig,
+        OutputConfig,
+        DataConfig,
+        ComponentConfig,
+    )
+
     base_config = ProjectConfig(
         project_name="test-project",
         model=ComponentConfig(_target_="trainite.models.TransformerModel"),
@@ -269,12 +285,22 @@ def test_validate_sweep_params_type_mismatch():
             "trainer.epochs": ["five", "ten"],
         },
     )
-    with pytest.raises(ValueError, match="Invalid value 'five' for parameter 'trainer.epochs'"):
+    with pytest.raises(
+        ValueError, match="Invalid value 'five' for parameter 'trainer.epochs'"
+    ):
         validate_sweep_params(base_config, sweep_invalid_type)
 
 
 def test_apply_overrides():
-    from trainite.config.base import ProjectConfig, TrainerConfig, OptimizerConfig, OutputConfig, DataConfig, ComponentConfig
+    from trainite.config.base import (
+        ProjectConfig,
+        TrainerConfig,
+        OptimizerConfig,
+        OutputConfig,
+        DataConfig,
+        ComponentConfig,
+    )
+
     base_config = ProjectConfig(
         project_name="test-project",
         model=ComponentConfig(_target_="trainite.models.TransformerModel"),
