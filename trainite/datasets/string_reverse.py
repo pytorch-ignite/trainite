@@ -220,6 +220,15 @@ class StringReverseDataset(Dataset):
             ids, skip_special_tokens=skip_special_tokens, ignore_index=ignore_index
         )
 
+    def extract_prompt(
+        self, input_ids: torch.Tensor, labels: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        non_masked = torch.nonzero(labels != -100)
+        if len(non_masked) > 0:
+            split_idx = non_masked[0].item()
+            return input_ids[: split_idx + 1], labels[split_idx:]
+        return input_ids, labels
+
 
 def collate_fn(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     input_ids = [item["input_ids"] for item in batch]

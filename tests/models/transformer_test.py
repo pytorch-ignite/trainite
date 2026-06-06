@@ -1,3 +1,5 @@
+from unittest import mock
+
 import pytest
 import torch
 
@@ -120,8 +122,6 @@ def test_build_transformer_model_from_spec():
 
 
 def test_transformer_model_generate():
-    from unittest import mock
-
     vocab_size = 10
     hidden_size = 16
     model = TransformerModel(vocab_size=vocab_size, hidden_size=hidden_size)

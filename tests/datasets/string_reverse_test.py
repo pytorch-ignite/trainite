@@ -183,3 +183,11 @@ def test_config_build_string_reverse_dataset():
     assert "labels" in batch
     assert batch["input_ids"].shape[0] == dataloader_conf.batch_size
     assert batch["input_ids"].shape == batch["labels"].shape
+
+
+def test_extract_prompt():
+    input_ids = torch.tensor([1, 4, 5, 6, 7, 8, 2, 8, 7, 6, 5, 4])
+    labels = torch.tensor([-100, -100, -100, -100, -100, -100, 2, 8, 7, 6, 5, 4])
+
+    dataset = StringReverseDataset(per_seq_size=10, seq_len=5)
+    prompt, target = dataset.extract_prompt(input_ids, labels)

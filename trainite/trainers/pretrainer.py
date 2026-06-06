@@ -469,6 +469,10 @@ class PreTrainer:
             raise ValueError(
                 "Dataset must implement 'decode' method for inference logging."
             )
+        if not hasattr(train_dataset, "extract_prompt"):
+            raise ValueError(
+                "Dataset must implement 'extract_prompt' method for inference logging."
+            )
 
     def _log_inference(self, engine: Engine, loader: DataLoader, name: str) -> None:
         if (
@@ -482,11 +486,6 @@ class PreTrainer:
         )
 
         batch = next(iter(loader))
-        input_ids_batch = batch["input_ids"][: self.inference_num_samples].to(
-            self.device
-        )
-        labels_batch = batch["labels"][: self.inference_num_samples].to(self.device)
-
         dataset = (
             loader.dataset.dataset
             if isinstance(loader.dataset, Subset)
@@ -498,16 +497,18 @@ class PreTrainer:
 
         from torch.nn.utils.rnn import pad_sequence
 
+        batch_size = next(iter(batch.values())).size(0)
+        num_samples = min(self.inference_num_samples, batch_size)
+
         prompts = []
         targets = []
-        for idx in range(input_ids_batch.size(0)):
-            labels = labels_batch[idx]
-            non_masked = torch.nonzero(labels != -100)
-            if len(non_masked) == 0:
-                continue
-            split_idx = non_masked[0].item()
-            prompts.append(input_ids_batch[idx, : split_idx + 1])
-            targets.append(labels[split_idx:])
+        for i in range(num_samples):
+            sample = {k: v[i].to(self.device) for k, v in batch.items()}
+            prompt, target = dataset.extract_prompt(
+                sample["input_ids"], sample["labels"]
+            )
+            prompts.append(prompt)
+            targets.append(target)
 
         if not prompts:
             return
@@ -527,9 +528,9 @@ class PreTrainer:
             target = targets[idx]
             completion_ids = generated[idx, prompt.size(0) :]
 
-            decoded_prompt = dataset.decode(prompt[prompt != -100])
-            decoded_target = dataset.decode(target[target != -100])
-            decoded_pred = dataset.decode(completion_ids[completion_ids != -100])
+            decoded_prompt = dataset.decode(prompt)
+            decoded_target = dataset.decode(target)
+            decoded_pred = dataset.decode(completion_ids)
 
             self.logger.info(
                 "    Sample %d | Prompt: %r | Target: %r | Prediction: %r",

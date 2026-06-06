@@ -59,6 +59,17 @@ class SimpleDatasetWithDecode(SimpleDataset):
         ids_clean = ids[ids != ignore_index]
         return "".join(str(i.item()) for i in ids_clean)
 
+    def extract_prompt(self, sample):
+        input_ids = sample["input_ids"]
+        labels = sample["labels"]
+        split_idx = input_ids.size(0) // 2
+        return input_ids[:split_idx], labels[split_idx:]
+
+
+class SimpleDatasetWithDecodeOnly(SimpleDataset):
+    def decode(self, ids, skip_special_tokens=True, ignore_index=-100):
+        return ""
+
 
 class SimpleModelWithGenerate(SimpleModel):
     def generate(self, input_ids, max_new_tokens, eos_token_id=None):
@@ -456,6 +467,18 @@ def test_pretrainer_log_inference_validation(project_config):
         hidden_size=8,
     )
     with pytest.raises(ValueError, match="Dataset must implement 'decode' method"):
+        PreTrainer(project_config)
+
+    # Fix decode, but missing extract_prompt, should raise ValueError
+    project_config.data.train.dataset = cc(
+        "tests.trainers.pretrainer_test.SimpleDatasetWithDecodeOnly",
+        size=16,
+        seq_len=4,
+        vocab_size=10,
+    )
+    with pytest.raises(
+        ValueError, match="Dataset must implement 'extract_prompt' method"
+    ):
         PreTrainer(project_config)
 
 
