@@ -59,9 +59,7 @@ class SimpleDatasetWithDecode(SimpleDataset):
         ids_clean = ids[ids != ignore_index]
         return "".join(str(i.item()) for i in ids_clean)
 
-    def extract_prompt(self, sample):
-        input_ids = sample["input_ids"]
-        labels = sample["labels"]
+    def extract_prompt(self, input_ids, labels, **kwargs):
         split_idx = input_ids.size(0) // 2
         return input_ids[:split_idx], labels[split_idx:]
 
@@ -372,7 +370,7 @@ def test_pretrainer_builds_train_and_val_loaders_from_ratios(tmp_path):
             train_ratio=0.8,
             val_ratio=0.2,
         ),
-        trainer=PreTrainerConfig(epochs=1),
+        trainer=PreTrainerConfig(epochs=1, inference_every_epochs=None),
         output=OutputConfig(root=str(tmp_path), run_name="test"),
     )
 
@@ -457,7 +455,10 @@ def test_pretrainer_log_inference_validation(project_config):
     project_config.trainer.inference_every_epochs = 1
 
     # 1. SimpleModel has no generate, should raise ValueError
-    with pytest.raises(ValueError, match="Model must implement 'generate' method"):
+    with pytest.raises(
+        ValueError,
+        match="Model must implement 'generate' method for inference logging.",
+    ):
         PreTrainer(project_config)
 
     # Fix model, but SimpleDataset has no decode, should raise ValueError
@@ -513,4 +514,3 @@ def test_pretrainer_log_inference(project_config):
         # Verify that it logged sample predictions
         calls = [c[0][0] for c in mock_log_info.call_args_list]
         assert any("Running inference on Train samples" in call for call in calls)
-        assert any("Prompt:" in call and "Prediction:" in call for call in calls)

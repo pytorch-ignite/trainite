@@ -221,7 +221,7 @@ class StringReverseDataset(Dataset):
         )
 
     def extract_prompt(
-        self, input_ids: torch.Tensor, labels: torch.Tensor
+        self, input_ids: torch.Tensor, labels: torch.Tensor, **kwargs
     ) -> tuple[torch.Tensor, torch.Tensor]:
         non_masked = torch.nonzero(labels != -100)
         if len(non_masked) > 0:

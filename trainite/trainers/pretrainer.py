@@ -46,7 +46,7 @@ class PreTrainer:
             config.trainer, "grad_clip_norm", None
         )
         self.inference_every_epochs: int | None = getattr(
-            config.trainer, "inference_every_epochs", 0
+            config.trainer, "inference_every_epochs", None
         )
         self.inference_num_samples: int = getattr(
             config.trainer, "inference_num_samples", 5
@@ -453,7 +453,7 @@ class PreTrainer:
             )
 
     def _setup_inference(self) -> None:
-        if self.inference_every_epochs is None:
+        if not self.inference_every_epochs:
             return
 
         if not hasattr(self.model, "generate"):
@@ -476,13 +476,13 @@ class PreTrainer:
 
     def _log_inference(self, engine: Engine, loader: DataLoader, name: str) -> None:
         if (
-            self.inference_every_epochs is None
+            not self.inference_every_epochs
             or engine.state.epoch % self.inference_every_epochs != 0
         ):
             return
 
         self.logger.info(
-            "Epoch %d: Running inference on %s samples...", engine.state.epoch, name
+            f"Epoch {engine.state.epoch}: Running inference on {name} samples..."
         )
 
         batch = next(iter(loader))
@@ -504,9 +504,7 @@ class PreTrainer:
         targets = []
         for i in range(num_samples):
             sample = {k: v[i].to(self.device) for k, v in batch.items()}
-            prompt, target = dataset.extract_prompt(
-                sample["input_ids"], sample["labels"]
-            )
+            prompt, target = dataset.extract_prompt(**sample)
             prompts.append(prompt)
             targets.append(target)
 
