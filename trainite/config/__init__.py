@@ -23,6 +23,7 @@ from trainite.config.registry import (
     get_model_spec,
     get_trainer_spec,
 )
+from trainite.config.sweep import ParameterRange, SweepConfig, load_sweep_config
 from trainite.config.trainer import PreTrainerConfig
 
 __all__ = [
@@ -37,12 +38,15 @@ __all__ = [
     "DataConfig",
     "SplitConfig",
     "DataLoaderConfig",
+    "SweepConfig",
+    "ParameterRange",
     "dump_config",
     "dump_yaml",
     "get_dataset_spec",
     "get_model_spec",
     "get_trainer_spec",
     "load_config",
+    "load_sweep_config",
     "load_yaml",
     "DATASET_CONFIGS",
     "MODEL_CONFIGS",

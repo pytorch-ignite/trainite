@@ -24,6 +24,7 @@ class TrainerSpec(ComponentSpec):
 
 class ModelSpec(ComponentSpec):
     builder_symbol: str
+    default_sweep_params: dict[str, list] = {}
 
 
 class DatasetSpec(ComponentSpec):
@@ -41,6 +42,10 @@ MODEL_SPECS = {
         readme_template_path=Path(
             "trainite/templates/components/models/transformer.md"
         ),
+        default_sweep_params={
+            "model.num_heads": [1, 2, 4],
+            "model.num_layers": [1, 2, 4],
+        },
     ),
 }
 
