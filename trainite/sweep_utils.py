@@ -1,22 +1,23 @@
+import gc
+import queue
+from contextlib import contextmanager
 from typing import Any
 
 import optuna
+import torch
+from omegaconf import OmegaConf
 from pydantic import BaseModel
 
 from trainite.config.base import ProjectConfig
-from trainite.config.sweep import ParameterRange, SweepConfig
+from trainite.config.sweep import ParameterRange, PruningConfig, SweepConfig
 
 
-def _resolve_path(config: BaseModel, path: str) -> tuple[BaseModel, str]:
-    """Walk a dot-notated path on a Pydantic model to find the parent and field name.
+def _validate_path(config: BaseModel, path: str) -> None:
+    """Walk a dot-notated path on a Pydantic model to verify it exists.
 
     Args:
         config: The root Pydantic model to traverse.
         path: Dot-notated path like "model.num_heads".
-
-    Returns:
-        A tuple of (parent_model, field_name) where parent_model is the
-        Pydantic model containing the target field.
 
     Raises:
         ValueError: If any segment of the path does not exist.
@@ -37,8 +38,6 @@ def _resolve_path(config: BaseModel, path: str) -> tuple[BaseModel, str]:
             )
     field_name = parts[-1]
     if field_name not in current.model_fields:
-        # If the model allows extra fields (like ComponentConfig), we also accept
-        # fields that are already present on the instance.
         is_extra_allowed = current.model_config.get("extra") == "allow"
         if not is_extra_allowed or not hasattr(current, field_name):
             available = list(current.model_fields.keys())
@@ -54,7 +53,6 @@ def _resolve_path(config: BaseModel, path: str) -> tuple[BaseModel, str]:
                 f"'{field_name}' not found on {type(current).__name__}. "
                 f"Available fields: {available}"
             )
-    return current, field_name
 
 
 def validate_sweep_params(
@@ -64,7 +62,7 @@ def validate_sweep_params(
 
     For each parameter in the sweep config, this function:
     1. Verifies the dot-notated path exists in the ProjectConfig model tree
-    2. Attempts to set each candidate value to catch type/validation errors
+    2. Attempts to set each candidate value and construct a full ProjectConfig to catch cross-field validation errors
 
     This runs BEFORE any training starts, so typos and invalid values are caught
     immediately rather than crashing mid-sweep.
@@ -72,8 +70,17 @@ def validate_sweep_params(
     Raises:
         ValueError: If any parameter path is invalid or any value fails validation.
     """
+    if sweep_config.pruning.enabled and sweep_config.pruning.type == "nop":
+        import logging
+
+        logging.getLogger("sweep").warning(
+            "WARNING: Pruning is enabled ('enabled: true') but type is set to 'nop' "
+            "(or not specified). No trials will be pruned. To enable actual early "
+            "stopping, please specify a pruner type in sweep.yaml (e.g., type: 'median')."
+        )
+
     for param_path, param_values in sweep_config.parameters.items():
-        parent, field_name = _resolve_path(base_config, param_path)
+        _validate_path(base_config, param_path)
 
         if isinstance(param_values, list):
             values_to_check = param_values
@@ -89,9 +96,8 @@ def validate_sweep_params(
             )
 
         for val in values_to_check:
-            test_parent = parent.model_copy(deep=True)
             try:
-                setattr(test_parent, field_name, val)
+                apply_overrides(base_config, {param_path: val})
             except Exception as e:
                 raise ValueError(
                     f"Invalid value {val!r} for parameter '{param_path}': {e}"
@@ -108,11 +114,124 @@ def apply_overrides(config: ProjectConfig, overrides: dict[str, Any]) -> Project
     Returns:
         A new ProjectConfig with the overrides applied.
     """
-    new_config = config.model_copy(deep=True)
+    config_dict = OmegaConf.create(config.model_dump(by_alias=True))
     for path, value in overrides.items():
-        parent, field_name = _resolve_path(new_config, path)
-        setattr(parent, field_name, value)
-    return new_config
+        OmegaConf.update(config_dict, path, value)
+    return ProjectConfig.model_validate(OmegaConf.to_container(config_dict))
+
+
+def cleanup_trial() -> None:
+    """Release GPU memory and trigger garbage collection between trials."""
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+def build_pruner(pruning_config: PruningConfig) -> optuna.pruners.BasePruner:
+    """Create the appropriate Optuna pruner from PruningConfig."""
+    if not pruning_config.enabled:
+        return optuna.pruners.NopPruner()
+    return _build_raw_pruner(pruning_config.type, pruning_config)
+
+
+def _build_raw_pruner(
+    pruner_type: str, pruning_config: PruningConfig
+) -> optuna.pruners.BasePruner:
+    if pruner_type == "nop":
+        return optuna.pruners.NopPruner()
+    elif pruner_type == "median":
+        return optuna.pruners.MedianPruner(
+            n_startup_trials=pruning_config.n_startup_trials,
+            n_warmup_steps=pruning_config.n_warmup_steps,
+            interval_steps=pruning_config.interval_steps,
+            n_min_trials=pruning_config.n_min_trials,
+        )
+    elif pruner_type == "percentile":
+        return optuna.pruners.PercentilePruner(
+            percentile=pruning_config.percentile,
+            n_startup_trials=pruning_config.n_startup_trials,
+            n_warmup_steps=pruning_config.n_warmup_steps,
+            interval_steps=pruning_config.interval_steps,
+            n_min_trials=pruning_config.n_min_trials,
+        )
+    elif pruner_type == "hyperband":
+        min_res = pruning_config.min_resource
+        if isinstance(min_res, str) and min_res.isdigit():
+            min_res = int(min_res)
+        max_res = pruning_config.max_resource
+        if isinstance(max_res, str) and max_res.isdigit():
+            max_res = int(max_res)
+
+        return optuna.pruners.HyperbandPruner(
+            min_resource=min_res if min_res == "auto" else int(min_res),
+            max_resource=max_res if max_res == "auto" else int(max_res),
+            reduction_factor=pruning_config.reduction_factor,
+            bootstrap_count=pruning_config.bootstrap_count,
+        )
+    elif pruner_type == "successive_halving":
+        min_res = pruning_config.min_resource
+        if isinstance(min_res, str) and min_res.isdigit():
+            min_res = int(min_res)
+        return optuna.pruners.SuccessiveHalvingPruner(
+            min_resource=min_res if min_res == "auto" else int(min_res),
+            reduction_factor=pruning_config.reduction_factor,
+            min_early_stopping_rate=pruning_config.min_early_stopping_rate,
+            bootstrap_count=pruning_config.bootstrap_count,
+        )
+    elif pruner_type == "threshold":
+        return optuna.pruners.ThresholdPruner(
+            lower=pruning_config.lower,
+            upper=pruning_config.upper,
+            n_warmup_steps=pruning_config.n_warmup_steps,
+            interval_steps=pruning_config.interval_steps,
+        )
+    elif pruner_type == "wilcoxon":
+        return optuna.pruners.WilcoxonPruner(
+            p_threshold=pruning_config.p_threshold,
+            n_startup_steps=pruning_config.n_startup_steps,
+        )
+    elif pruner_type == "patient":
+        wrapped_t = pruning_config.wrapped_type
+        if wrapped_t == "patient":
+            wrapped_t = "median"
+        inner = _build_raw_pruner(wrapped_t, pruning_config)
+        return optuna.pruners.PatientPruner(
+            wrapped_pruner=inner,
+            patience=pruning_config.patience,
+            min_delta=pruning_config.min_delta,
+        )
+    else:
+        raise ValueError(f"Unknown pruner type: {pruner_type}")
+
+
+def build_gpu_queue(gpu_str: str | None) -> queue.Queue:
+    """Create a queue of GPU device indices from a comma-separated string."""
+    gpu_queue = queue.Queue()
+    if gpu_str:
+        for g in gpu_str.split(","):
+            gpu_queue.put(g.strip())
+    return gpu_queue
+
+
+@contextmanager
+def allocate_gpu(gpu_queue: queue.Queue):
+    """Context manager that checks out a GPU from the queue and returns it when done."""
+    gpu = gpu_queue.get() if not gpu_queue.empty() else None
+    try:
+        if gpu is not None:
+            torch.cuda.set_device(f"cuda:{gpu}")
+        yield gpu
+    finally:
+        if gpu is not None:
+            gpu_queue.put(gpu)
+
+
+def build_trial_name(trial_number: int, overrides: dict[str, Any]) -> str:
+    """Build a descriptive trial directory name like 'trial_0__lr=0.01_num_heads=2'."""
+    if not overrides:
+        return f"trial_{trial_number}"
+    suffix = "_".join(f"{k.split('.')[-1]}={v}" for k, v in overrides.items())
+    return f"trial_{trial_number}__{suffix}"
 
 
 def build_sampler(
@@ -141,6 +260,16 @@ def build_sampler(
         return optuna.samplers.RandomSampler(seed=seed)
     elif sweep_config.strategy == "tpe":
         return optuna.samplers.TPESampler(seed=seed)
+    elif sweep_config.strategy == "brute_force":
+        return optuna.samplers.BruteForceSampler(seed=seed)
+    elif sweep_config.strategy == "cmaes":
+        return optuna.samplers.CmaEsSampler(seed=seed)
+    elif sweep_config.strategy == "gp":
+        return optuna.samplers.GPSampler(seed=seed)
+    elif sweep_config.strategy == "nsgaii":
+        return optuna.samplers.NSGAIISampler(seed=seed)
+    elif sweep_config.strategy == "qmc":
+        return optuna.samplers.QMCSampler(seed=seed)
     else:
         raise ValueError(f"Unknown strategy: {sweep_config.strategy}")
 
