@@ -4,8 +4,10 @@ import pytest
 import torch
 
 from trainite.config import get_model_spec
+from trainite.datasets.string_reverse import CharTokenizer
 from trainite.models.transformer import (
     Attention,
+    CausalLMCollateFn,
     PositionalEncoding,
     TransformerBlock,
     TransformerModel,
@@ -122,26 +124,64 @@ def test_build_transformer_model_from_spec():
 
 
 def test_transformer_model_generate():
-    vocab_size = 10
+    tokenizer = CharTokenizer()
     hidden_size = 16
-    model = TransformerModel(vocab_size=vocab_size, hidden_size=hidden_size)
+    model = TransformerModel(vocab_size=tokenizer.vocab_size, hidden_size=hidden_size)
     model.eval()
 
-    prompt = torch.randint(1, vocab_size, (5,))
-    generated = model.generate(prompt, max_new_tokens=4)
-    assert generated.shape == (1, 9)
+    # Test with string prompt and tokenizer
+    with mock.patch.object(model, "forward") as mock_forward:
 
-    prompt_batch = torch.randint(1, vocab_size, (2, 5))
-    generated_batch = model.generate(prompt_batch, max_new_tokens=3)
-    assert generated_batch.shape == (2, 8)
+        def mock_forward_fn(x):
+            logits = torch.zeros(1, x.shape[1], tokenizer.vocab_size)
+            logits[0, -1, 6] = 10.0
+            return logits
+
+        mock_forward.side_effect = mock_forward_fn
+
+        generated_str = model.generate("ab", max_new_tokens=1, tokenizer=tokenizer)
+        assert isinstance(generated_str, str)
+        assert generated_str == "c"
 
     # Test with eos_token_id early exit
     with mock.patch.object(model, "forward") as mock_forward:
-        dummy_logits = torch.zeros(1, 6, vocab_size)
-        dummy_logits[0, -1, 2] = 10.0
-        mock_forward.return_value = dummy_logits
 
-        prompt_eos = torch.tensor([1, 3, 4, 5, 6])
-        generated_eos = model.generate(prompt_eos, max_new_tokens=10, eos_token_id=2)
-        assert generated_eos.shape == (1, 6)
-        assert generated_eos[0, -1].item() == 2
+        def mock_forward_fn(x):
+            logits = torch.zeros(1, x.shape[1], tokenizer.vocab_size)
+            logits[0, -1, tokenizer.eos_token_id] = 10.0
+            return logits
+
+        mock_forward.side_effect = mock_forward_fn
+
+        generated_eos = model.generate(
+            "ab",
+            max_new_tokens=10,
+            tokenizer=tokenizer,
+            eos_token_id=tokenizer.eos_token_id,
+        )
+        assert generated_eos == ""
+
+
+def test_causal_lm_collate_fn():
+    tokenizer = CharTokenizer()
+    collate = CausalLMCollateFn(tokenizer=tokenizer, pad_token_id=0, ignore_index=-100)
+
+    data1 = {"source_text": "abc", "target_text": "cba"}
+    data2 = {"source_text": "d", "target_text": "d"}
+
+    batch = [data1, data2]
+
+    collated = collate(batch)
+    assert "input_ids" in collated
+    assert "labels" in collated
+
+    assert collated["input_ids"].ndim == 2
+    assert collated["labels"].ndim == 2
+    assert collated["input_ids"].shape == collated["labels"].shape
+
+    # Max sequence length:
+    # "abc" (3) -> src is <bos> abc <eos> (5 tokens). target is cba <eos> (4 tokens). total full_seq = 9. input_ids = 8. labels = 8.
+    # "d" (1) -> src is <bos> d <eos> (3 tokens). target is d <eos> (2 tokens). total full_seq = 5. input_ids = 4. labels = 4.
+    # So max length is 8.
+    assert collated["input_ids"].shape == (2, 8)
+    assert (collated["input_ids"][1, 4:] == 0).all()

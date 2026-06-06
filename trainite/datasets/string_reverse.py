@@ -1,8 +1,8 @@
+import random
 import string
 import warnings
 
 import torch
-from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset
 
 # Hardcoded universal vocabulary: all printable ASCII characters
@@ -137,16 +137,15 @@ class StringReverseDataset(Dataset):
         else:
             lengths = list(range(min_seq_len, max_seq_len + 1))
 
-        generator = torch.Generator().manual_seed(seed)
-        self.valid_token_ids_tensor = torch.tensor(self.valid_token_ids)
+        rng = random.Random(seed)
         vocab_size = len(self.valid_token_ids)
 
-        self.inputs = []
-        self.labels = []
+        self.source_texts = []
+        self.target_texts = []
 
         # Generate per_seq_size unique sequences for each length bucket
         for length in lengths:
-            unique_sequences: set[tuple[int, ...]] = set()
+            unique_sequences: set[str] = set()
             max_possible_combinations = vocab_size**length
             target = min(per_seq_size, max_possible_combinations)
 
@@ -156,14 +155,8 @@ class StringReverseDataset(Dataset):
             while (
                 len(unique_sequences) < target and len(unique_sequences) < max_attempts
             ):
-                indices = torch.randint(
-                    low=0,
-                    high=len(self.valid_token_ids),
-                    size=(length,),
-                    generator=generator,
-                )
-                seq_tuple = tuple(self.valid_token_ids_tensor[indices].tolist())
-                unique_sequences.add(seq_tuple)
+                seq = "".join(rng.choices(chars, k=length))
+                unique_sequences.add(seq)
 
             if len(unique_sequences) < per_seq_size:
                 warnings.warn(
@@ -173,41 +166,27 @@ class StringReverseDataset(Dataset):
                     stacklevel=2,
                 )
 
-            # Pack each unique sequence into the autoregressive format
-            for seq_tuple in unique_sequences:
-                seq = torch.tensor(seq_tuple)
-                reversed_seq = torch.flip(seq, dims=[0])
-
-                bos_t = torch.tensor([self.tokenizer.bos_token_id])
-                eos_t = torch.tensor([self.tokenizer.eos_token_id])
-
-                full_seq = torch.cat([bos_t, seq, eos_t, reversed_seq, eos_t])
-
-                input_ids = full_seq[:-1]
-                target_labels = full_seq[1:].clone()
-
-                prompt_len = len(seq) + 2
-                target_labels[: prompt_len - 1] = -100
-
-                self.inputs.append(input_ids)
-                self.labels.append(target_labels)
+            # Pack each unique sequence into source and target formats
+            for seq in unique_sequences:
+                reversed_seq = seq[::-1]
+                self.source_texts.append(seq)
+                self.target_texts.append(reversed_seq)
 
         # Shuffle so variable-length samples are evenly distributed across batches
-        final_shuffle_gen = torch.Generator().manual_seed(seed)
-        shuffle_indices = torch.randperm(
-            len(self.inputs), generator=final_shuffle_gen
-        ).tolist()
+        final_shuffle_gen = random.Random(seed)
+        shuffle_indices = list(range(len(self.source_texts)))
+        final_shuffle_gen.shuffle(shuffle_indices)
 
-        self.inputs = [self.inputs[i] for i in shuffle_indices]
-        self.labels = [self.labels[i] for i in shuffle_indices]
+        self.source_texts = [self.source_texts[i] for i in shuffle_indices]
+        self.target_texts = [self.target_texts[i] for i in shuffle_indices]
 
     def __len__(self) -> int:
-        return len(self.inputs)
+        return len(self.source_texts)
 
-    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
+    def __getitem__(self, index: int) -> dict[str, str]:
         return {
-            "input_ids": self.inputs[index],
-            "labels": self.labels[index],
+            "source_text": self.source_texts[index],
+            "target_text": self.target_texts[index],
         }
 
     def decode(
@@ -219,25 +198,3 @@ class StringReverseDataset(Dataset):
         return self.tokenizer.decode(
             ids, skip_special_tokens=skip_special_tokens, ignore_index=ignore_index
         )
-
-    def extract_prompt(
-        self, input_ids: torch.Tensor, labels: torch.Tensor, **kwargs
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        non_masked = torch.nonzero(labels != -100)
-        if len(non_masked) > 0:
-            split_idx = non_masked[0].item()
-            return input_ids[: split_idx + 1], labels[split_idx:]
-        return input_ids, labels
-
-
-def collate_fn(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
-    input_ids = [item["input_ids"] for item in batch]
-    labels = [item["labels"] for item in batch]
-
-    padded_input_ids = pad_sequence(input_ids, batch_first=True, padding_value=0)
-    padded_labels = pad_sequence(labels, batch_first=True, padding_value=-100)
-
-    return {
-        "input_ids": padded_input_ids,
-        "labels": padded_labels,
-    }

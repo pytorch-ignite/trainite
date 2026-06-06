@@ -123,7 +123,15 @@ class PreTrainer:
 
         collate_fn = None
         if dl_config.collate_fn:
-            collate_fn = get_target(dl_config.collate_fn.target)
+            target_symbol = get_target(dl_config.collate_fn.target)
+            if isinstance(target_symbol, type):
+                underlying_dataset = (
+                    dataset.dataset if isinstance(dataset, Subset) else dataset
+                )
+                tokenizer = getattr(underlying_dataset, "tokenizer", None)
+                collate_fn = instantiate(dl_config.collate_fn, tokenizer=tokenizer)
+            else:
+                collate_fn = target_symbol
 
         return DataLoader(dataset, shuffle=shuffle, collate_fn=collate_fn, **dl_kwargs)
 
@@ -460,19 +468,6 @@ class PreTrainer:
             raise ValueError(
                 "Model must implement 'generate' method for inference logging."
             )
-        train_dataset = (
-            self.train_loader.dataset.dataset
-            if isinstance(self.train_loader.dataset, Subset)
-            else self.train_loader.dataset
-        )
-        if not hasattr(train_dataset, "decode"):
-            raise ValueError(
-                "Dataset must implement 'decode' method for inference logging."
-            )
-        if not hasattr(train_dataset, "extract_prompt"):
-            raise ValueError(
-                "Dataset must implement 'extract_prompt' method for inference logging."
-            )
 
     def _log_inference(self, engine: Engine, loader: DataLoader, name: str) -> None:
         if (
@@ -485,56 +480,36 @@ class PreTrainer:
             f"Epoch {engine.state.epoch}: Running inference on {name} samples..."
         )
 
-        batch = next(iter(loader))
         dataset = (
             loader.dataset.dataset
             if isinstance(loader.dataset, Subset)
             else loader.dataset
         )
-        eos_token_id = getattr(
-            getattr(dataset, "tokenizer", None), "eos_token_id", None
-        )
+        tokenizer = getattr(dataset, "tokenizer", None)
+        eos_token_id = getattr(tokenizer, "eos_token_id", None)
 
-        from torch.nn.utils.rnn import pad_sequence
-
-        batch_size = next(iter(batch.values())).size(0)
-        num_samples = min(self.inference_num_samples, batch_size)
-
-        prompts = []
-        targets = []
-        for i in range(num_samples):
-            sample = {k: v[i].to(self.device) for k, v in batch.items()}
-            prompt, target = dataset.extract_prompt(**sample)
-            prompts.append(prompt)
-            targets.append(target)
-
-        if not prompts:
-            return
-
-        padded_prompts = pad_sequence(prompts, batch_first=True, padding_value=0)
+        total_samples = len(loader.dataset)
+        num_samples = min(self.inference_num_samples, total_samples)
 
         self.model.eval()
-        with torch.no_grad():
-            generated = self.model.generate(
-                padded_prompts,
+        for idx in range(num_samples):
+            sample = loader.dataset[idx]
+
+            prompt = sample["source_text"]
+            target = sample["target_text"]
+
+            decoded_pred = self.model.generate(
+                prompt,
                 max_new_tokens=self.max_inference_steps,
+                tokenizer=tokenizer,
                 eos_token_id=eos_token_id,
             )
-
-        for idx in range(len(prompts)):
-            prompt = prompts[idx]
-            target = targets[idx]
-            completion_ids = generated[idx, prompt.size(0) :]
-
-            decoded_prompt = dataset.decode(prompt)
-            decoded_target = dataset.decode(target)
-            decoded_pred = dataset.decode(completion_ids)
 
             self.logger.info(
                 "    Sample %d | Prompt: %r | Target: %r | Prediction: %r",
                 idx + 1,
-                decoded_prompt,
-                decoded_target,
+                prompt,
+                target,
                 decoded_pred,
             )
 

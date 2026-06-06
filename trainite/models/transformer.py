@@ -156,25 +156,37 @@ class TransformerModel(nn.Module):
     @torch.no_grad()
     def generate(
         self,
-        input_ids: torch.Tensor,
+        prompt: str,
         max_new_tokens: int,
+        tokenizer,
         eos_token_id: int | None = None,
-    ) -> torch.Tensor:
-        """Generate tokens autoregressively.
+    ) -> str:
+        """Generate text from a raw text prompt.
 
         Args:
-            input_ids: Prompt token IDs of shape (batch_size, sequence_length) or (sequence_length,).
+            prompt: Prompt text (str).
             max_new_tokens: Maximum number of new tokens to generate.
+            tokenizer: Tokenizer to use for encoding/decoding.
             eos_token_id: Optional token ID that signals end-of-sequence.
 
         Returns:
-            The generated token IDs (including the prompt prefix) of shape (batch_size, sequence_length + generated).
+            The generated text (str).
         """
         self.eval()
-        if input_ids.dim() == 1:
-            input_ids = input_ids.unsqueeze(0)
+        bos_id = getattr(tokenizer, "bos_token_id", None)
+        eos_id = getattr(tokenizer, "eos_token_id", None)
+        if bos_id is None or eos_id is None:
+            raise ValueError(
+                "Tokenizer must have bos_token_id and eos_token_id attributes."
+            )
+        encoded = tokenizer.encode(prompt)
+        encoded = [bos_id] + encoded
+        encoded = encoded + [eos_id]
+        device = next(self.parameters()).device
+        input_ids = torch.tensor([encoded], dtype=torch.long, device=device)
 
         generated = input_ids.clone()
+        prompt_len = input_ids.size(1)
 
         for _ in range(max_new_tokens):
             logits = self(generated)
@@ -188,4 +200,63 @@ class TransformerModel(nn.Module):
             ):
                 break
 
-        return generated
+        new_tokens = generated[0, prompt_len:].tolist()
+        return tokenizer.decode(new_tokens)
+
+
+class CausalLMCollateFn:
+    """Collate sequences for decoder-only autoregressive training."""
+
+    def __init__(
+        self, tokenizer, pad_token_id: int | None = None, ignore_index: int = -100
+    ) -> None:
+        self.tokenizer = tokenizer
+        self.pad_token_id = (
+            pad_token_id if pad_token_id is not None else tokenizer.pad_token_id
+        )
+        self.ignore_index = ignore_index
+
+    def __call__(self, batch: list[dict[str, str]]) -> dict[str, torch.Tensor]:
+        from torch.nn.utils.rnn import pad_sequence
+
+        input_ids_list = []
+        labels_list = []
+        for item in batch:
+            source_text = item["source_text"]
+            target_text = item["target_text"]
+
+            # Tokenize using the tokenizer
+            source_ids = self.tokenizer.encode(source_text)
+            target_ids = self.tokenizer.encode(target_text)
+
+            # Format sequence: <bos> source <eos> target <eos>
+            bos_t = torch.tensor([self.tokenizer.bos_token_id])
+            eos_t = torch.tensor([self.tokenizer.eos_token_id])
+            src_t = torch.tensor(source_ids)
+            tgt_t = torch.tensor(target_ids)
+
+            src = torch.cat([bos_t, src_t, eos_t])
+            tgt = torch.cat([tgt_t, eos_t])
+
+            full_seq = torch.cat([src, tgt])
+
+            input_ids = full_seq[:-1]
+            labels = full_seq[1:].clone()
+
+            # Mask the prompt portion in target labels
+            labels[: len(src) - 1] = self.ignore_index
+
+            input_ids_list.append(input_ids)
+            labels_list.append(labels)
+
+        padded_input_ids = pad_sequence(
+            input_ids_list, batch_first=True, padding_value=self.pad_token_id
+        )
+        padded_labels = pad_sequence(
+            labels_list, batch_first=True, padding_value=self.ignore_index
+        )
+
+        return {
+            "input_ids": padded_input_ids,
+            "labels": padded_labels,
+        }

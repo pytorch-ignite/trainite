@@ -24,11 +24,11 @@ class TrainerSpec(ComponentSpec):
 
 class ModelSpec(ComponentSpec):
     builder_symbol: str
+    collate_fn_target: str | None = None
 
 
 class DatasetSpec(ComponentSpec):
     builder_symbol: str
-    collate_fn_symbol: str | None = None
 
 
 MODEL_SPECS = {
@@ -38,6 +38,7 @@ MODEL_SPECS = {
         config_cls=TransformerModelConfig,
         implementation_symbol="TransformerModel",
         builder_symbol="TransformerModel",
+        collate_fn_target="trainite.models.transformer.CausalLMCollateFn",
         readme_template_path=Path(
             "trainite/templates/components/models/transformer.md"
         ),
@@ -51,7 +52,6 @@ DATASET_SPECS = {
         config_cls=StringReverseDataConfig,
         implementation_symbol="StringReverseDataset",
         builder_symbol="StringReverseDataset",
-        collate_fn_symbol="collate_fn",
         readme_template_path=Path(
             "trainite/templates/components/datasets/string_reverse.md"
         ),

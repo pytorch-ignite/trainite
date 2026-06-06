@@ -38,46 +38,98 @@ class SimpleModel(nn.Module):
         return self.fc(self.embedding(x))
 
 
+class MockTokenizer:
+    def __init__(self):
+        self.pad_token_id = 0
+        self.bos_token_id = 1
+        self.eos_token_id = 2
+        self.unk_token_id = 3
+
+    def encode(self, text: str) -> list[int]:
+        return [int(c) + 4 for c in text if c.isdigit()]
+
+    def decode(
+        self, ids: list[int] | torch.Tensor, skip_special_tokens=True, ignore_index=-100
+    ) -> str:
+        if isinstance(ids, torch.Tensor):
+            ids = ids.tolist()
+        return "".join(str(i - 4) for i in ids if i >= 4)
+
+
 class SimpleDataset(torch.utils.data.Dataset):
     def __init__(self, size=16, seq_len=4, vocab_size=10):
         self.size = size
         self.seq_len = seq_len
         self.vocab_size = vocab_size
+        self.tokenizer = MockTokenizer()
 
     def __len__(self):
         return self.size
 
     def __getitem__(self, index):
+        src = "".join(
+            str(x)
+            for x in torch.randint(0, self.vocab_size - 4, (self.seq_len,)).tolist()
+        )
+        tgt = src[::-1]
         return {
-            "input_ids": torch.randint(0, self.vocab_size, (self.seq_len,)),
-            "labels": torch.randint(0, self.vocab_size, (self.seq_len,)),
+            "source_text": src,
+            "target_text": tgt,
+        }
+
+
+class PreTrainerTestCollateFn:
+    def __init__(self, tokenizer):
+        self.tokenizer = tokenizer
+
+    def __call__(self, batch):
+        import torch
+        from torch.nn.utils.rnn import pad_sequence
+
+        input_ids_list = []
+        labels_list = []
+        for item in batch:
+            src_ids = self.tokenizer.encode(item["source_text"])
+            tgt_ids = self.tokenizer.encode(item["target_text"])
+
+            bos_t = torch.tensor([self.tokenizer.bos_token_id])
+            eos_t = torch.tensor([self.tokenizer.eos_token_id])
+            src_t = torch.tensor(src_ids)
+            tgt_t = torch.tensor(tgt_ids)
+
+            src = torch.cat([bos_t, src_t, eos_t])
+            tgt = torch.cat([tgt_t, eos_t])
+
+            full_seq = torch.cat([src, tgt])
+
+            input_ids = full_seq[:-1]
+            labels = full_seq[1:].clone()
+            labels[: len(src) - 1] = -100
+
+            input_ids_list.append(input_ids)
+            labels_list.append(labels)
+
+        padded_input_ids = pad_sequence(
+            input_ids_list, batch_first=True, padding_value=self.tokenizer.pad_token_id
+        )
+        padded_labels = pad_sequence(labels_list, batch_first=True, padding_value=-100)
+
+        return {
+            "input_ids": padded_input_ids,
+            "labels": padded_labels,
         }
 
 
 class SimpleDatasetWithDecode(SimpleDataset):
     def decode(self, ids, skip_special_tokens=True, ignore_index=-100):
-        ids_clean = ids[ids != ignore_index]
-        return "".join(str(i.item()) for i in ids_clean)
-
-    def extract_prompt(self, input_ids, labels, **kwargs):
-        split_idx = input_ids.size(0) // 2
-        return input_ids[:split_idx], labels[split_idx:]
-
-
-class SimpleDatasetWithDecodeOnly(SimpleDataset):
-    def decode(self, ids, skip_special_tokens=True, ignore_index=-100):
-        return ""
+        return self.tokenizer.decode(
+            ids, skip_special_tokens=skip_special_tokens, ignore_index=ignore_index
+        )
 
 
 class SimpleModelWithGenerate(SimpleModel):
-    def generate(self, input_ids, max_new_tokens, eos_token_id=None):
-        if input_ids.dim() == 1:
-            input_ids = input_ids.unsqueeze(0)
-        B, S = input_ids.shape
-        dummy_tokens = torch.zeros(
-            B, max_new_tokens, dtype=input_ids.dtype, device=input_ids.device
-        )
-        return torch.cat([input_ids, dummy_tokens], dim=-1)
+    def generate(self, prompt: str, max_new_tokens: int, tokenizer, eos_token_id=None):
+        return "generated_output"
 
 
 class EmptyDataset(torch.utils.data.Dataset):
@@ -116,7 +168,12 @@ def project_config(temp_run_dir):
                     seq_len=4,
                     vocab_size=10,
                 ),
-                dataloader=DataLoaderConfig(batch_size=4),
+                dataloader=DataLoaderConfig(
+                    batch_size=4,
+                    collate_fn=cc(
+                        "tests.trainers.pretrainer_test.PreTrainerTestCollateFn"
+                    ),
+                ),
             ),
             val=SplitConfig(
                 dataset=cc(
@@ -125,7 +182,12 @@ def project_config(temp_run_dir):
                     seq_len=4,
                     vocab_size=10,
                 ),
-                dataloader=DataLoaderConfig(batch_size=4),
+                dataloader=DataLoaderConfig(
+                    batch_size=4,
+                    collate_fn=cc(
+                        "tests.trainers.pretrainer_test.PreTrainerTestCollateFn"
+                    ),
+                ),
             ),
         ),
         trainer=PreTrainerConfig(
@@ -293,7 +355,10 @@ def test_pretrainer_test_method(project_config, temp_run_dir):
             seq_len=4,
             vocab_size=10,
         ),
-        dataloader=DataLoaderConfig(batch_size=4),
+        dataloader=DataLoaderConfig(
+            batch_size=4,
+            collate_fn=cc("tests.trainers.pretrainer_test.PreTrainerTestCollateFn"),
+        ),
     )
 
     trainer = PreTrainer(project_config)
@@ -316,7 +381,10 @@ def test_pretrainer_test_without_val(project_config, temp_run_dir):
             seq_len=4,
             vocab_size=10,
         ),
-        dataloader=DataLoaderConfig(batch_size=4),
+        dataloader=DataLoaderConfig(
+            batch_size=4,
+            collate_fn=cc("tests.trainers.pretrainer_test.PreTrainerTestCollateFn"),
+        ),
     )
 
     trainer = PreTrainer(project_config)
@@ -458,27 +526,6 @@ def test_pretrainer_log_inference_validation(project_config):
     with pytest.raises(
         ValueError,
         match="Model must implement 'generate' method for inference logging.",
-    ):
-        PreTrainer(project_config)
-
-    # Fix model, but SimpleDataset has no decode, should raise ValueError
-    project_config.model = cc(
-        "tests.trainers.pretrainer_test.SimpleModelWithGenerate",
-        vocab_size=10,
-        hidden_size=8,
-    )
-    with pytest.raises(ValueError, match="Dataset must implement 'decode' method"):
-        PreTrainer(project_config)
-
-    # Fix decode, but missing extract_prompt, should raise ValueError
-    project_config.data.train.dataset = cc(
-        "tests.trainers.pretrainer_test.SimpleDatasetWithDecodeOnly",
-        size=16,
-        seq_len=4,
-        vocab_size=10,
-    )
-    with pytest.raises(
-        ValueError, match="Dataset must implement 'extract_prompt' method"
     ):
         PreTrainer(project_config)
 
