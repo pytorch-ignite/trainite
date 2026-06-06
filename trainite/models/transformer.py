@@ -152,3 +152,40 @@ class TransformerModel(nn.Module):
             x = block(x, padding_mask=padding_mask)
         x = self.norm(x)
         return self.proj(x)
+
+    @torch.no_grad()
+    def generate(
+        self,
+        input_ids: torch.Tensor,
+        max_new_tokens: int,
+        eos_token_id: int | None = None,
+    ) -> torch.Tensor:
+        """Generate tokens autoregressively.
+
+        Args:
+            input_ids: Prompt token IDs of shape (batch_size, sequence_length) or (sequence_length,).
+            max_new_tokens: Maximum number of new tokens to generate.
+            eos_token_id: Optional token ID that signals end-of-sequence.
+
+        Returns:
+            The generated token IDs (including the prompt prefix) of shape (batch_size, sequence_length + generated).
+        """
+        self.eval()
+        if input_ids.dim() == 1:
+            input_ids = input_ids.unsqueeze(0)
+
+        generated = input_ids.clone()
+
+        for _ in range(max_new_tokens):
+            logits = self(generated)
+            next_token_logits = logits[:, -1, :]
+            next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+            generated = torch.cat([generated, next_token], dim=-1)
+
+            if (
+                eos_token_id is not None
+                and next_token.squeeze(-1).eq(eos_token_id).all()
+            ):
+                break
+
+        return generated

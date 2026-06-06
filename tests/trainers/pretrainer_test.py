@@ -54,6 +54,23 @@ class SimpleDataset(torch.utils.data.Dataset):
         }
 
 
+class SimpleDatasetWithDecode(SimpleDataset):
+    def decode(self, ids, skip_special_tokens=True, ignore_index=-100):
+        ids_clean = ids[ids != ignore_index]
+        return "".join(str(i.item()) for i in ids_clean)
+
+
+class SimpleModelWithGenerate(SimpleModel):
+    def generate(self, input_ids, max_new_tokens, eos_token_id=None):
+        if input_ids.dim() == 1:
+            input_ids = input_ids.unsqueeze(0)
+        B, S = input_ids.shape
+        dummy_tokens = torch.zeros(
+            B, max_new_tokens, dtype=input_ids.dtype, device=input_ids.device
+        )
+        return torch.cat([input_ids, dummy_tokens], dim=-1)
+
+
 class EmptyDataset(torch.utils.data.Dataset):
     def __len__(self):
         return 0
@@ -102,7 +119,9 @@ def project_config(temp_run_dir):
                 dataloader=DataLoaderConfig(batch_size=4),
             ),
         ),
-        trainer=PreTrainerConfig(epochs=1, log_every_steps=1),
+        trainer=PreTrainerConfig(
+            epochs=1, log_every_steps=1, inference_every_epochs=None
+        ),
         output=OutputConfig(root=str(temp_run_dir), run_name="test_run"),
         device="auto",
     )
@@ -421,3 +440,54 @@ def test_pretrainer_early_stopping_patience(project_config):
     project_config.trainer.early_stopping_patience = 1
     trainer = PreTrainer(project_config)
     trainer.run()
+
+
+def test_pretrainer_log_inference_validation(project_config):
+    project_config.trainer.inference_every_epochs = 1
+
+    # 1. SimpleModel has no generate, should raise ValueError
+    with pytest.raises(ValueError, match="Model must implement 'generate' method"):
+        PreTrainer(project_config)
+
+    # Fix model, but SimpleDataset has no decode, should raise ValueError
+    project_config.model = cc(
+        "tests.trainers.pretrainer_test.SimpleModelWithGenerate",
+        vocab_size=10,
+        hidden_size=8,
+    )
+    with pytest.raises(ValueError, match="Dataset must implement 'decode' method"):
+        PreTrainer(project_config)
+
+
+def test_pretrainer_log_inference(project_config):
+    project_config.trainer.inference_every_epochs = 1
+    project_config.trainer.inference_num_samples = 2
+    project_config.trainer.max_inference_steps = 3
+
+    project_config.model = cc(
+        "tests.trainers.pretrainer_test.SimpleModelWithGenerate",
+        vocab_size=10,
+        hidden_size=8,
+    )
+    project_config.data.train.dataset = cc(
+        "tests.trainers.pretrainer_test.SimpleDatasetWithDecode",
+        size=16,
+        seq_len=4,
+        vocab_size=10,
+    )
+    project_config.data.val.dataset = cc(
+        "tests.trainers.pretrainer_test.SimpleDatasetWithDecode",
+        size=8,
+        seq_len=4,
+        vocab_size=10,
+    )
+
+    trainer = PreTrainer(project_config)
+
+    with mock.patch.object(trainer.logger, "info") as mock_log_info:
+        trainer._log_inference(trainer.engine, trainer.train_loader, "Train")
+
+        # Verify that it logged sample predictions
+        calls = [c[0][0] for c in mock_log_info.call_args_list]
+        assert any("Running inference on Train samples" in call for call in calls)
+        assert any("Prompt:" in call and "Prediction:" in call for call in calls)

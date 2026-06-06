@@ -45,9 +45,21 @@ class PreTrainer:
         self.grad_clip_norm: float | None = getattr(
             config.trainer, "grad_clip_norm", None
         )
+        self.inference_every_epochs: int | None = getattr(
+            config.trainer, "inference_every_epochs", 0
+        )
+        self.inference_num_samples: int = getattr(
+            config.trainer, "inference_num_samples", 5
+        )
+        self.max_inference_steps: int = getattr(
+            config.trainer, "max_inference_steps", 16
+        )
         self.set_loaders()
         self.vocab_size: int = self._resolve_vocab_size()
         self.model: nn.Module = self._build_model()
+
+        self._setup_inference()
+
         self.loss_fn: nn.CrossEntropyLoss = nn.CrossEntropyLoss()
         self.optimizer: torch.optim.Optimizer = self._build_optimizer()
         self.lr: float = config.optimizer.lr
@@ -311,6 +323,21 @@ class PreTrainer:
 
         # 2. Run evaluations
         self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
+        if self.inference_every_epochs is not None:
+            self.engine.add_event_handler(
+                Events.EPOCH_COMPLETED, self._log_inference, self.train_loader, "Train"
+            )
+            if self.val_loader is not None:
+                self.engine.add_event_handler(
+                    Events.EPOCH_COMPLETED, self._log_inference, self.val_loader, "Val"
+                )
+            if self.test_loader is not None:
+                self.engine.add_event_handler(
+                    Events.EPOCH_COMPLETED,
+                    self._log_inference,
+                    self.test_loader,
+                    "Test",
+                )
 
         # 3. Checkpoint
         to_save = {"model": self.model, "optimizer": self.optimizer}
@@ -423,6 +450,93 @@ class PreTrainer:
                 epoch,
                 train_metrics["loss"],
                 train_metrics["exact_accuracy"],
+            )
+
+    def _setup_inference(self) -> None:
+        if self.inference_every_epochs is None:
+            return
+
+        if not hasattr(self.model, "generate"):
+            raise ValueError(
+                "Model must implement 'generate' method for inference logging."
+            )
+        train_dataset = (
+            self.train_loader.dataset.dataset
+            if isinstance(self.train_loader.dataset, Subset)
+            else self.train_loader.dataset
+        )
+        if not hasattr(train_dataset, "decode"):
+            raise ValueError(
+                "Dataset must implement 'decode' method for inference logging."
+            )
+
+    def _log_inference(self, engine: Engine, loader: DataLoader, name: str) -> None:
+        if (
+            self.inference_every_epochs is None
+            or engine.state.epoch % self.inference_every_epochs != 0
+        ):
+            return
+
+        self.logger.info(
+            "Epoch %d: Running inference on %s samples...", engine.state.epoch, name
+        )
+
+        batch = next(iter(loader))
+        input_ids_batch = batch["input_ids"][: self.inference_num_samples].to(
+            self.device
+        )
+        labels_batch = batch["labels"][: self.inference_num_samples].to(self.device)
+
+        dataset = (
+            loader.dataset.dataset
+            if isinstance(loader.dataset, Subset)
+            else loader.dataset
+        )
+        eos_token_id = getattr(
+            getattr(dataset, "tokenizer", None), "eos_token_id", None
+        )
+
+        from torch.nn.utils.rnn import pad_sequence
+
+        prompts = []
+        targets = []
+        for idx in range(input_ids_batch.size(0)):
+            labels = labels_batch[idx]
+            non_masked = torch.nonzero(labels != -100)
+            if len(non_masked) == 0:
+                continue
+            split_idx = non_masked[0].item()
+            prompts.append(input_ids_batch[idx, : split_idx + 1])
+            targets.append(labels[split_idx:])
+
+        if not prompts:
+            return
+
+        padded_prompts = pad_sequence(prompts, batch_first=True, padding_value=0)
+
+        self.model.eval()
+        with torch.no_grad():
+            generated = self.model.generate(
+                padded_prompts,
+                max_new_tokens=self.max_inference_steps,
+                eos_token_id=eos_token_id,
+            )
+
+        for idx in range(len(prompts)):
+            prompt = prompts[idx]
+            target = targets[idx]
+            completion_ids = generated[idx, prompt.size(0) :]
+
+            decoded_prompt = dataset.decode(prompt[prompt != -100])
+            decoded_target = dataset.decode(target[target != -100])
+            decoded_pred = dataset.decode(completion_ids[completion_ids != -100])
+
+            self.logger.info(
+                "    Sample %d | Prompt: %r | Target: %r | Prediction: %r",
+                idx + 1,
+                decoded_prompt,
+                decoded_target,
+                decoded_pred,
             )
 
     def test(self, test_loader: DataLoader | None = None) -> None:

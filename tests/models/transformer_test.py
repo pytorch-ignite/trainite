@@ -117,3 +117,31 @@ def test_build_transformer_model_from_spec():
     model_conf = spec.config_cls()
     model = instantiate(model_conf)
     assert isinstance(model, TransformerModel)
+
+
+def test_transformer_model_generate():
+    from unittest import mock
+
+    vocab_size = 10
+    hidden_size = 16
+    model = TransformerModel(vocab_size=vocab_size, hidden_size=hidden_size)
+    model.eval()
+
+    prompt = torch.randint(1, vocab_size, (5,))
+    generated = model.generate(prompt, max_new_tokens=4)
+    assert generated.shape == (1, 9)
+
+    prompt_batch = torch.randint(1, vocab_size, (2, 5))
+    generated_batch = model.generate(prompt_batch, max_new_tokens=3)
+    assert generated_batch.shape == (2, 8)
+
+    # Test with eos_token_id early exit
+    with mock.patch.object(model, "forward") as mock_forward:
+        dummy_logits = torch.zeros(1, 6, vocab_size)
+        dummy_logits[0, -1, 2] = 10.0
+        mock_forward.return_value = dummy_logits
+
+        prompt_eos = torch.tensor([1, 3, 4, 5, 6])
+        generated_eos = model.generate(prompt_eos, max_new_tokens=10, eos_token_id=2)
+        assert generated_eos.shape == (1, 6)
+        assert generated_eos[0, -1].item() == 2
