@@ -1,6 +1,8 @@
 import logging
+from collections.abc import Sized
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Protocol, cast
 
 import torch
 from ignite.engine import Engine, Events
@@ -17,7 +19,7 @@ from ignite.metrics import Accuracy, Loss, RunningAverage
 from ignite.utils import setup_logger
 from torch import nn
 from torch.optim.lr_scheduler import LinearLR
-from torch.utils.data import DataLoader, Dataset, Subset, random_split
+from torch.utils.data import DataLoader, Dataset, random_split
 
 from trainite.config import (
     DataConfig,
@@ -29,6 +31,16 @@ from trainite.config import (
 from trainite.utils import get_target, instantiate
 
 
+class GenerativeModel(Protocol):
+    def generate(
+        self,
+        prompt: str,
+        max_new_tokens: int,
+        tokenizer: Any,
+        eos_token_id: int | None = None,
+    ) -> str: ...
+
+
 class PreTrainer:
     def __init__(self, config: ProjectConfig) -> None:
         self.logger: logging.Logger = setup_logger("trainer", level=logging.INFO)
@@ -38,6 +50,7 @@ class PreTrainer:
         self.train_loader: DataLoader
         self.val_loader: DataLoader | None = None
         self.test_loader: DataLoader | None = None
+        self.inference_tokenizer: Any = None
 
         self.device: str | torch.device = self._resolve_device()
         self.epochs: int = config.trainer.epochs
@@ -79,12 +92,13 @@ class PreTrainer:
             resolved = "cuda" if torch.cuda.is_available() else "cpu"
         return resolved
 
+    def _get_underlying_dataset(self, dataset: Dataset) -> Dataset:
+        while hasattr(dataset, "dataset"):
+            dataset = getattr(dataset, "dataset")
+        return dataset
+
     def _resolve_vocab_size(self) -> int:
-        train_dataset = (
-            self.train_loader.dataset.dataset
-            if isinstance(self.train_loader.dataset, Subset)
-            else self.train_loader.dataset
-        )
+        train_dataset = self._get_underlying_dataset(self.train_loader.dataset)
         vocab_size = getattr(train_dataset, "vocab_size", 0)
         model_params = self.config.model.model_dump(by_alias=True)
         configured_vocab_size: int | None = model_params.get("vocab_size")
@@ -122,14 +136,13 @@ class PreTrainer:
             shuffle = getattr(dl_config, "shuffle", False)
 
         collate_fn = None
-        if dl_config.collate_fn:
-            target_symbol = get_target(dl_config.collate_fn.target)
+        collate_config = dl_config.collate_fn
+        if collate_config:
+            target_symbol = get_target(collate_config.target)
             if isinstance(target_symbol, type):
-                underlying_dataset = (
-                    dataset.dataset if isinstance(dataset, Subset) else dataset
-                )
+                underlying_dataset = self._get_underlying_dataset(dataset)
                 tokenizer = getattr(underlying_dataset, "tokenizer", None)
-                collate_fn = instantiate(dl_config.collate_fn, tokenizer=tokenizer)
+                collate_fn = instantiate(collate_config, tokenizer=tokenizer)
             else:
                 collate_fn = target_symbol
 
@@ -138,6 +151,10 @@ class PreTrainer:
     def _build_loaders_from_ratios(
         self, data_config: DataConfig
     ) -> tuple[DataLoader, DataLoader | None, DataLoader | None]:
+        if data_config.dataset is None:
+            raise ValueError(
+                "Dataset config must not be None for automatic ratio splitting."
+            )
         dataset = instantiate(data_config.dataset)
         total_len = len(dataset)
 
@@ -460,6 +477,21 @@ class PreTrainer:
                 train_metrics["exact_accuracy"],
             )
 
+    def _validate_dataloader_for_inference(self, loader: DataLoader, name: str) -> None:
+        dataset = loader.dataset
+        if not isinstance(dataset, Sized) or len(dataset) == 0:
+            return
+
+        item = dataset[0]
+        if not isinstance(item, dict):
+            raise ValueError(
+                f"{name} dataset items must be dictionaries containing 'source_text' and 'target_text' keys for inference logging."
+            )
+        if not all(key in item for key in ["source_text", "target_text"]):
+            raise ValueError(
+                f"{name} dataset items must contain 'source_text' and 'target_text' keys for inference logging."
+            )
+
     def _setup_inference(self) -> None:
         if not self.inference_every_epochs:
             return
@@ -469,6 +501,21 @@ class PreTrainer:
                 "Model must implement 'generate' method for inference logging."
             )
 
+        # Retrieve and check training tokenizer
+        train_ds = self._get_underlying_dataset(self.train_loader.dataset)
+        if not hasattr(train_ds, "tokenizer"):
+            raise ValueError(
+                "Dataset must have a 'tokenizer' attribute for inference logging."
+            )
+        self.inference_tokenizer = getattr(train_ds, "tokenizer")
+
+        # Validate active loaders
+        self._validate_dataloader_for_inference(self.train_loader, "Train")
+        if self.val_loader is not None:
+            self._validate_dataloader_for_inference(self.val_loader, "Val")
+        if self.test_loader is not None:
+            self._validate_dataloader_for_inference(self.test_loader, "Test")
+
     def _log_inference(self, engine: Engine, loader: DataLoader, name: str) -> None:
         if (
             not self.inference_every_epochs
@@ -476,29 +523,31 @@ class PreTrainer:
         ):
             return
 
+        tokenizer = self.inference_tokenizer
+        if tokenizer is None:
+            return
+
         self.logger.info(
             f"Epoch {engine.state.epoch}: Running inference on {name} samples..."
         )
 
-        dataset = (
-            loader.dataset.dataset
-            if isinstance(loader.dataset, Subset)
-            else loader.dataset
-        )
-        tokenizer = getattr(dataset, "tokenizer", None)
         eos_token_id = getattr(tokenizer, "eos_token_id", None)
 
-        total_samples = len(loader.dataset)
+        dataset = loader.dataset
+        if not isinstance(dataset, Sized):
+            raise TypeError(f"{name} dataset must be Sized to run inference logging.")
+        total_samples = len(dataset)
         num_samples = min(self.inference_num_samples, total_samples)
 
         self.model.eval()
+        generative_model = cast(GenerativeModel, self.model)
         for idx in range(num_samples):
-            sample = loader.dataset[idx]
+            sample = dataset[idx]
 
             prompt = sample["source_text"]
             target = sample["target_text"]
 
-            decoded_pred = self.model.generate(
+            decoded_pred = generative_model.generate(
                 prompt,
                 max_new_tokens=self.max_inference_steps,
                 tokenizer=tokenizer,

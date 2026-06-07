@@ -1,7 +1,24 @@
 import math
+from typing import Protocol
 
 import torch
 from torch import nn
+from torch.nn.utils.rnn import pad_sequence
+
+
+class Tokenizer(Protocol):
+    @property
+    def bos_token_id(self) -> int | None: ...
+
+    @property
+    def eos_token_id(self) -> int | None: ...
+
+    @property
+    def pad_token_id(self) -> int | None: ...
+
+    def encode(self, text: str) -> list[int]: ...
+
+    def decode(self, ids: list[int]) -> str: ...
 
 
 class PositionalEncoding(nn.Module):
@@ -158,7 +175,7 @@ class TransformerModel(nn.Module):
         self,
         prompt: str,
         max_new_tokens: int,
-        tokenizer,
+        tokenizer: Tokenizer,
         eos_token_id: int | None = None,
     ) -> str:
         """Generate text from a raw text prompt.
@@ -182,7 +199,8 @@ class TransformerModel(nn.Module):
         encoded = tokenizer.encode(prompt)
         encoded = [bos_id] + encoded
         encoded = encoded + [eos_id]
-        device = next(self.parameters()).device
+        param = next(self.parameters(), None)
+        device = param.device if param is not None else "cpu"
         input_ids = torch.tensor([encoded], dtype=torch.long, device=device)
 
         generated = input_ids.clone()
@@ -208,7 +226,10 @@ class CausalLMCollateFn:
     """Collate sequences for decoder-only autoregressive training."""
 
     def __init__(
-        self, tokenizer, pad_token_id: int | None = None, ignore_index: int = -100
+        self,
+        tokenizer: Tokenizer,
+        pad_token_id: int | None = None,
+        ignore_index: int = -100,
     ) -> None:
         self.tokenizer = tokenizer
         self.pad_token_id = (
@@ -217,8 +238,6 @@ class CausalLMCollateFn:
         self.ignore_index = ignore_index
 
     def __call__(self, batch: list[dict[str, str]]) -> dict[str, torch.Tensor]:
-        from torch.nn.utils.rnn import pad_sequence
-
         input_ids_list = []
         labels_list = []
         for item in batch:
@@ -250,7 +269,9 @@ class CausalLMCollateFn:
             labels_list.append(labels)
 
         padded_input_ids = pad_sequence(
-            input_ids_list, batch_first=True, padding_value=self.pad_token_id
+            input_ids_list,
+            batch_first=True,
+            padding_value=self.pad_token_id if self.pad_token_id is not None else 0,
         )
         padded_labels = pad_sequence(
             labels_list, batch_first=True, padding_value=self.ignore_index

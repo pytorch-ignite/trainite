@@ -140,6 +140,36 @@ class EmptyDataset(torch.utils.data.Dataset):
         raise IndexError("This dataset is empty")
 
 
+class DatasetWithInvalidType(torch.utils.data.Dataset):
+    def __init__(self, tokenizer: object = None) -> None:
+        self.tokenizer = MockTokenizer()
+
+    def __len__(self) -> int:
+        return 4
+
+    def __getitem__(self, index: int) -> str:
+        return "not_a_dict"
+
+
+class DatasetWithMissingKeys(torch.utils.data.Dataset):
+    def __init__(self, tokenizer: object = None) -> None:
+        self.tokenizer = MockTokenizer()
+
+    def __len__(self) -> int:
+        return 4
+
+    def __getitem__(self, index: int) -> dict[str, str]:
+        return {"source_text": "hello"}
+
+
+class SimpleDatasetWithoutTokenizer(torch.utils.data.Dataset):
+    def __len__(self) -> int:
+        return 4
+
+    def __getitem__(self, index: int) -> dict[str, str]:
+        return {"source_text": "hello", "target_text": "world"}
+
+
 def dummy_collate_fn(batch):
     return batch
 
@@ -529,6 +559,24 @@ def test_pretrainer_log_inference_validation(project_config):
     ):
         PreTrainer(project_config)
 
+    # Use a model with generate method
+    project_config.model = cc(
+        "tests.trainers.pretrainer_test.SimpleModelWithGenerate",
+        vocab_size=10,
+        hidden_size=8,
+    )
+
+    # Use a dataset without tokenizer
+    project_config.data.train.dataset = cc(
+        "tests.trainers.pretrainer_test.SimpleDatasetWithoutTokenizer",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Dataset must have a 'tokenizer' attribute for inference logging.",
+    ):
+        PreTrainer(project_config)
+
 
 def test_pretrainer_log_inference(project_config):
     project_config.trainer.inference_every_epochs = 1
@@ -561,3 +609,66 @@ def test_pretrainer_log_inference(project_config):
         # Verify that it logged sample predictions
         calls = [c[0][0] for c in mock_log_info.call_args_list]
         assert any("Running inference on Train samples" in call for call in calls)
+
+
+def test_pretrainer_log_inference_validation_formats(project_config):
+    project_config.trainer.inference_every_epochs = 1
+    project_config.model = cc(
+        "tests.trainers.pretrainer_test.SimpleModelWithGenerate",
+        vocab_size=10,
+        hidden_size=8,
+    )
+
+    # 1. Invalid item type (not a dict)
+    project_config.data.train.dataset = cc(
+        "tests.trainers.pretrainer_test.DatasetWithInvalidType",
+    )
+    with pytest.raises(
+        ValueError,
+        match="Train dataset items must be dictionaries",
+    ):
+        PreTrainer(project_config)
+
+    # 2. Missing keys in training dataset items
+    project_config.data.train.dataset = cc(
+        "tests.trainers.pretrainer_test.DatasetWithMissingKeys",
+    )
+    with pytest.raises(
+        ValueError,
+        match="Train dataset items must contain 'source_text' and 'target_text' keys",
+    ):
+        PreTrainer(project_config)
+
+
+def test_pretrainer_log_inference_tokenizer_fallback(project_config):
+    project_config.trainer.inference_every_epochs = 1
+    project_config.trainer.inference_num_samples = 2
+    project_config.trainer.max_inference_steps = 3
+
+    project_config.model = cc(
+        "tests.trainers.pretrainer_test.SimpleModelWithGenerate",
+        vocab_size=10,
+        hidden_size=8,
+    )
+    # Training dataset has tokenizer
+    project_config.data.train.dataset = cc(
+        "tests.trainers.pretrainer_test.SimpleDatasetWithDecode",
+        size=16,
+        seq_len=4,
+        vocab_size=10,
+    )
+    # Validation dataset does NOT have tokenizer
+    project_config.data.val.dataset = cc(
+        "tests.trainers.pretrainer_test.SimpleDatasetWithoutTokenizer",
+    )
+
+    # PreTrainer initialization should not raise any tokenizer error because of fallback
+    trainer = PreTrainer(project_config)
+
+    with mock.patch.object(trainer.logger, "info") as mock_log_info:
+        assert trainer.val_loader is not None
+        trainer._log_inference(trainer.engine, trainer.val_loader, "Val")
+
+        # Verify that it ran inference on Val samples successfully without raising error
+        calls = [c[0][0] for c in mock_log_info.call_args_list]
+        assert any("Running inference on Val samples" in call for call in calls)
