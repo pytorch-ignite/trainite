@@ -128,8 +128,10 @@ class SimpleDatasetWithDecode(SimpleDataset):
 
 
 class SimpleModelWithGenerate(SimpleModel):
-    def generate(self, prompt: str, max_new_tokens: int, tokenizer, eos_token_id=None):
-        return "generated_output"
+    def generate(
+        self, prompt: list[str], max_new_tokens: int, tokenizer, eos_token_id=None
+    ) -> list[str]:
+        return ["generated_output"] * len(prompt)
 
 
 class EmptyDataset(torch.utils.data.Dataset):
@@ -602,6 +604,8 @@ def test_pretrainer_log_inference(project_config):
     )
 
     trainer = PreTrainer(project_config)
+    mock_tb = mock.MagicMock()
+    trainer.handlers["tensorboard"] = mock_tb
 
     with mock.patch.object(trainer.logger, "info") as mock_log_info:
         trainer._log_inference(trainer.engine, trainer.train_loader, "Train")
@@ -609,6 +613,12 @@ def test_pretrainer_log_inference(project_config):
         # Verify that it logged sample predictions
         calls = [c[0][0] for c in mock_log_info.call_args_list]
         assert any("Running inference on Train samples" in call for call in calls)
+
+        # Verify Tensorboard logging
+        mock_tb.writer.add_text.assert_called_once()
+        args, kwargs = mock_tb.writer.add_text.call_args
+        assert args[0] == "inference/training"
+        assert "| Sample | Prompt | Target | Prediction |" in args[1]
 
 
 def test_pretrainer_log_inference_validation_formats(project_config):

@@ -34,11 +34,11 @@ from trainite.utils import get_target, instantiate
 class GenerativeModel(Protocol):
     def generate(
         self,
-        prompt: str,
+        prompt: list[str],
         max_new_tokens: int,
         tokenizer: Any,
         eos_token_id: int | None = None,
-    ) -> str: ...
+    ) -> list[str]: ...
 
 
 class PreTrainer:
@@ -538,28 +538,46 @@ class PreTrainer:
             raise TypeError(f"{name} dataset must be Sized to run inference logging.")
         total_samples = len(dataset)
         num_samples = min(self.inference_num_samples, total_samples)
+        samples = [dataset[i] for i in range(num_samples)]
+        prompts = [sample["source_text"] for sample in samples]
+        targets = [sample["target_text"] for sample in samples]
 
         self.model.eval()
         generative_model = cast(GenerativeModel, self.model)
+        decoded_strs = generative_model.generate(
+            prompts,
+            max_new_tokens=self.max_inference_steps,
+            tokenizer=tokenizer,
+            eos_token_id=eos_token_id,
+        )
         for idx in range(num_samples):
-            sample = dataset[idx]
-
-            prompt = sample["source_text"]
-            target = sample["target_text"]
-
-            decoded_pred = generative_model.generate(
-                prompt,
-                max_new_tokens=self.max_inference_steps,
-                tokenizer=tokenizer,
-                eos_token_id=eos_token_id,
-            )
-
             self.logger.info(
                 "    Sample %d | Prompt: %r | Target: %r | Prediction: %r",
                 idx + 1,
-                prompt,
-                target,
-                decoded_pred,
+                prompts[idx],
+                targets[idx],
+                decoded_strs[idx],
+            )
+
+        if "tensorboard" in self.handlers:
+            tb_writer = self.handlers["tensorboard"].writer
+            tb_table = [
+                "| Sample | Prompt | Target | Prediction |",
+                "|---|---|---|---|",
+            ]
+            for idx in range(num_samples):
+                prompt_escaped = prompts[idx].replace("|", "\\|").replace("\n", "<br>")
+                target_escaped = targets[idx].replace("|", "\\|").replace("\n", "<br>")
+                pred_escaped = (
+                    decoded_strs[idx].replace("|", "\\|").replace("\n", "<br>")
+                )
+                tb_table.append(
+                    f"| {idx + 1} | {prompt_escaped} | {target_escaped} | {pred_escaped} |"
+                )
+            name_map = {"Train": "training", "Val": "validation", "Test": "testing"}
+            tb_tag = f"inference/{name_map.get(name, name.lower())}"
+            tb_writer.add_text(
+                tb_tag, "\n".join(tb_table), global_step=engine.state.epoch
             )
 
     def test(self, test_loader: DataLoader | None = None) -> None:

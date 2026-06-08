@@ -173,35 +173,46 @@ class TransformerModel(nn.Module):
     @torch.no_grad()
     def generate(
         self,
-        prompt: str,
+        prompt: str | list[str],
         max_new_tokens: int,
         tokenizer: Tokenizer,
         eos_token_id: int | None = None,
-    ) -> str:
+    ) -> str | list[str]:
         """Generate text from a raw text prompt.
 
         Args:
-            prompt: Prompt text (str).
+            prompt: Prompt text (str or list of str).
             max_new_tokens: Maximum number of new tokens to generate.
             tokenizer: Tokenizer to use for encoding/decoding.
             eos_token_id: Optional token ID that signals end-of-sequence.
 
         Returns:
-            The generated text (str).
+            The generated text (str or list of str).
         """
         self.eval()
         bos_id = getattr(tokenizer, "bos_token_id", None)
         eos_id = getattr(tokenizer, "eos_token_id", None)
+        pad_id = getattr(tokenizer, "pad_token_id", 0)
         if bos_id is None or eos_id is None:
             raise ValueError(
                 "Tokenizer must have bos_token_id and eos_token_id attributes."
             )
-        encoded = tokenizer.encode(prompt)
-        encoded = [bos_id] + encoded
-        encoded = encoded + [eos_id]
+        is_str = isinstance(prompt, str)
+        prompts = [prompt] if is_str else prompt
+
+        encoded = []
+        for text in prompts:
+            ids = tokenizer.encode(text)
+            ids = torch.tensor([bos_id] + ids + [eos_id], dtype=torch.long)
+            encoded.append(ids.flip(0))
+
         param = next(self.parameters(), None)
         device = param.device if param is not None else "cpu"
-        input_ids = torch.tensor([encoded], dtype=torch.long, device=device)
+        input_ids = (
+            pad_sequence(encoded, batch_first=True, padding_value=pad_id)
+            .flip(1)
+            .to(device)
+        )
 
         generated = input_ids.clone()
         prompt_len = input_ids.size(1)
@@ -210,6 +221,11 @@ class TransformerModel(nn.Module):
             logits = self(generated)
             next_token_logits = logits[:, -1, :]
             next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+            if eos_token_id is not None:
+                eos_mask = generated[:, -1].eq(eos_token_id)
+                next_token = torch.where(
+                    eos_mask, torch.tensor(eos_token_id, device=device), next_token
+                )
             generated = torch.cat([generated, next_token], dim=-1)
 
             if (
@@ -218,8 +234,9 @@ class TransformerModel(nn.Module):
             ):
                 break
 
-        new_tokens = generated[0, prompt_len:].tolist()
-        return tokenizer.decode(new_tokens)
+        new_tokens = generated[:, prompt_len:].tolist()
+        decoded = [tokenizer.decode(tokens) for tokens in new_tokens]
+        return decoded[0] if is_str else decoded
 
 
 class CausalLMCollateFn:
@@ -265,17 +282,19 @@ class CausalLMCollateFn:
             # Mask the prompt portion in target labels
             labels[: len(src) - 1] = self.ignore_index
 
-            input_ids_list.append(input_ids)
-            labels_list.append(labels)
+            input_ids_list.append(
+                input_ids.flip(0)
+            )  # Reverse input for better memory locality
+            labels_list.append(labels.flip(0))
 
         padded_input_ids = pad_sequence(
             input_ids_list,
             batch_first=True,
             padding_value=self.pad_token_id if self.pad_token_id is not None else 0,
-        )
+        ).flip(1)
         padded_labels = pad_sequence(
             labels_list, batch_first=True, padding_value=self.ignore_index
-        )
+        ).flip(1)
 
         return {
             "input_ids": padded_input_ids,

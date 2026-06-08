@@ -184,4 +184,4 @@ def test_causal_lm_collate_fn():
     # "d" (1) -> src is <bos> d <eos> (3 tokens). target is d <eos> (2 tokens). total full_seq = 5. input_ids = 4. labels = 4.
     # So max length is 8.
     assert collated["input_ids"].shape == (2, 8)
-    assert (collated["input_ids"][1, 4:] == 0).all()
+    assert (collated["input_ids"][1, :4] == 0).all()
