@@ -24,7 +24,15 @@ class CharTokenizer:
     ID 1 is reserved as the BOS token.
     ID 2 is reserved as the EOS token.
     ID 3 is reserved as the UNK token.
-    """
+"""A simple character-level tokenizer with a hardcoded universal vocabulary.
+
+   Maps each character in UNIVERSAL_VOCAB to a unique integer ID.
+   ID 0 is reserved as the <PAD> token.
+   ID 1 is reserved as the <BOS> token.
+   ID 2 is reserved as the <SEP> token.
+   ID 3 is reserved as the <EOS> token.
+   ID 4 is reserved as the <UNK> token.
+   """
 
     def __init__(self) -> None:
         self.pad_token_id = 0
@@ -97,7 +105,12 @@ class StringReverseDataset(Dataset):
         <bos> seq <eos> reversed_seq <eos>
 
     With teacher forcing labels that mask the prompt portion (-100).
-    """
+"""Generates unique random strings and their reversals.
+
+   Each sample is returned as a dictionary containing:
+       - 'source_text': the original random string
+       - 'target_text': the reversed string
+"""
 
     def __init__(
         self,

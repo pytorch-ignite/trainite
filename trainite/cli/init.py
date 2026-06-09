@@ -378,11 +378,13 @@ def init_project(args: argparse.Namespace) -> None:
         collate_target = model_spec.collate_fn_target
 
         def _inject_collate(config):
-            if hasattr(config, "dataloader") and config.dataloader is not None:
-                config.dataloader.collate_fn = ComponentConfig(_target_=collate_target)
+            dataloader = getattr(config, "dataloader", None)
+            if dataloader is not None:
+                dataloader.collate_fn = ComponentConfig(_target_=collate_target)
             for split in ["train", "val", "test"]:
-                if hasattr(config, split) and getattr(config, split) is not None:
-                    _inject_collate(getattr(config, split))
+                split_config = getattr(config, split, None)
+                if split_config is not None:
+                    _inject_collate(split_config)
 
         _inject_collate(data_config)
 
