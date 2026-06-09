@@ -14,6 +14,9 @@ class Tokenizer(Protocol):
     def eos_token_id(self) -> int | None: ...
 
     @property
+    def sep_token_id(self) -> int | None: ...
+
+    @property
     def pad_token_id(self) -> int | None: ...
 
     def encode(self, text: str) -> list[int]: ...
@@ -176,8 +179,9 @@ class TransformerModel(nn.Module):
         prompts: list[str],
         max_new_tokens: int,
         tokenizer: Tokenizer,
-        eos_token_id: int | None = None,
         bos_token_id: int | None = None,
+        sep_token_id: int | None = None,
+        eos_token_id: int | None = None,
         pad_token_id: int | None = None,
     ) -> list[str]:
         """Generate text from a raw text prompts.
@@ -186,24 +190,28 @@ class TransformerModel(nn.Module):
             prompt: Prompt text (list of str).
             max_new_tokens: Maximum number of new tokens to generate.
             tokenizer: Tokenizer to use for encoding/decoding.
+            bos_token_id: Optional token ID that signals beginning-of-sequence.
+            sep_token_id: Optional token ID that signals separation between prompt and generated text.
             eos_token_id: Optional token ID that signals end-of-sequence.
+            pad_token_id: Optional token ID used for padding sequences.
 
         Returns:
             The generated text (str or list of str).
         """
         self.eval()
         bos_id = bos_token_id or getattr(tokenizer, "bos_token_id", None)
+        sep_id = sep_token_id or getattr(tokenizer, "sep_token_id", None)
         eos_id = eos_token_id or getattr(tokenizer, "eos_token_id", None)
         pad_id = pad_token_id or getattr(tokenizer, "pad_token_id", 0)
-        if bos_id is None or eos_id is None:
+        if bos_id is None or eos_id is None or sep_id is None:
             raise ValueError(
-                "Tokenizer must have bos_token_id and eos_token_id attributes."
+                "Tokenizer must have bos_token_id, sep_token_id, and eos_token_id defined, or they must be provided explicitly to the generate method."
             )
 
         encoded = []
         for text in prompts:
             ids = tokenizer.encode(text)
-            ids = torch.tensor([bos_id] + ids + [eos_id], dtype=torch.long)
+            ids = torch.tensor([bos_id] + ids + [sep_id], dtype=torch.long)
             encoded.append(ids.flip(0))
 
         param = next(self.parameters(), None)
@@ -267,10 +275,11 @@ class CausalLMCollateFn:
             # Format sequence: <bos> source <eos> target <eos>
             bos_t = torch.tensor([self.tokenizer.bos_token_id])
             eos_t = torch.tensor([self.tokenizer.eos_token_id])
+            sep_t = torch.tensor([self.tokenizer.sep_token_id])
             src_t = torch.tensor(source_ids)
             tgt_t = torch.tensor(target_ids)
 
-            src = torch.cat([bos_t, src_t, eos_t])
+            src = torch.cat([bos_t, src_t, sep_t])
             tgt = torch.cat([tgt_t, eos_t])
 
             full_seq = torch.cat([src, tgt])

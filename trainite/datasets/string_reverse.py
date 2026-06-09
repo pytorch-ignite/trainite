@@ -29,21 +29,23 @@ class CharTokenizer:
     def __init__(self) -> None:
         self.pad_token_id = 0
         self.bos_token_id = 1
-        self.eos_token_id = 2
-        self.unk_token_id = 3
+        self.sep_token_id = 2
+        self.eos_token_id = 3
+        self.unk_token_id = 4
 
         self.char_to_id: dict[str, int] = {
-            c: i + 4 for i, c in enumerate(UNIVERSAL_VOCAB)
+            c: i + 5 for i, c in enumerate(UNIVERSAL_VOCAB)
         }
         self.id_to_char: dict[int, str] = {
-            i + 4: c for i, c in enumerate(UNIVERSAL_VOCAB)
+            i + 5: c for i, c in enumerate(UNIVERSAL_VOCAB)
         }
 
         self.special_tokens: dict[int, str] = {
-            self.pad_token_id: "<pad>",
-            self.bos_token_id: "<bos>",
-            self.eos_token_id: "<eos>",
-            self.unk_token_id: "<unk>",
+            self.pad_token_id: "<PAD>",
+            self.bos_token_id: "<BOS>",
+            self.sep_token_id: "<SEP>",
+            self.eos_token_id: "<EOS>",
+            self.unk_token_id: "<UNK>",
         }
 
         for k, v in self.special_tokens.items():
@@ -52,7 +54,7 @@ class CharTokenizer:
     @property
     def vocab_size(self) -> int:
         """Number of unique tokens in the vocabulary (includes special tokens)."""
-        return len(UNIVERSAL_VOCAB) + 4
+        return len(UNIVERSAL_VOCAB) + len(self.special_tokens)
 
     def encode(self, text: str) -> list[int]:
         """Convert a string to a list of token IDs, mapping unrecognized characters to UNK."""

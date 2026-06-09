@@ -134,14 +134,14 @@ def test_transformer_model_generate():
 
         def mock_forward_fn(x):
             logits = torch.zeros(1, x.shape[1], tokenizer.vocab_size)
-            logits[0, -1, 6] = 10.0
+            logits[0, -1, 7] = 10.0
             return logits
 
         mock_forward.side_effect = mock_forward_fn
 
-        generated_str = model.generate("ab", max_new_tokens=1, tokenizer=tokenizer)
-        assert isinstance(generated_str, str)
-        assert generated_str == "c"
+        generated = model.generate(["ab"], max_new_tokens=1, tokenizer=tokenizer)
+        assert isinstance(generated, list)
+        assert generated[0] == "c"
 
     # Test with eos_token_id early exit
     with mock.patch.object(model, "forward") as mock_forward:
@@ -153,13 +153,13 @@ def test_transformer_model_generate():
 
         mock_forward.side_effect = mock_forward_fn
 
-        generated_eos = model.generate(
-            "ab",
+        generated = model.generate(
+            ["ab"],
             max_new_tokens=10,
             tokenizer=tokenizer,
             eos_token_id=tokenizer.eos_token_id,
         )
-        assert generated_eos == ""
+        assert generated[0] == ""
 
 
 def test_causal_lm_collate_fn():

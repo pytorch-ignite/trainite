@@ -13,26 +13,26 @@ from trainite.utils import get_target, instantiate
 
 def test_char_tokenizer():
     tokenizer = CharTokenizer()
-    assert tokenizer.vocab_size == len(UNIVERSAL_VOCAB) + 4  # +4 for special tokens
+    assert tokenizer.vocab_size == len(UNIVERSAL_VOCAB) + len(tokenizer.special_tokens)
 
     encoded = tokenizer.encode("abc")
-    assert encoded == [4, 5, 6]
+    assert encoded == [5, 6, 7]
 
     decoded = tokenizer.decode(encoded)
     assert decoded == "abc"
 
     # Test special tokens
     assert (
-        tokenizer.decode([0, 1, 2, 3], skip_special_tokens=False)
-        == "<pad><bos><eos><unk>"
+        tokenizer.decode([0, 1, 2, 3, 4], skip_special_tokens=False)
+        == "<PAD><BOS><SEP><EOS><UNK>"
     )
-    assert tokenizer.decode([0, 1, 2, 3], skip_special_tokens=True) == "<unk>"
+    assert tokenizer.decode([0, 1, 2, 3, 4], skip_special_tokens=True) == "<UNK>"
 
     # Test unk
     assert tokenizer.encode("Δ") == [
-        3
+        4
     ]  # Δ is not in the universal vocab, should map to UNK token ID 3
-    assert tokenizer.decode([3]) == "<unk>"
+    assert tokenizer.decode([4]) == "<UNK>"
 
 
 def test_string_reverse_dataset():
