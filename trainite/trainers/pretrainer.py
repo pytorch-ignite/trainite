@@ -64,7 +64,7 @@ class PreTrainer:
         self.inference_num_samples: int = getattr(
             config.trainer, "inference_num_samples", 5
         )
-        self.max_inference_steps: int = getattr(
+        self.max_inference_new_tokens: int = getattr(
             config.trainer, "max_inference_steps", 16
         )
         self.set_loaders()
@@ -546,7 +546,7 @@ class PreTrainer:
         generative_model = cast(GenerativeModel, self.model)
         decoded_strs = generative_model.generate(
             prompts,
-            max_new_tokens=self.max_inference_steps,
+            max_new_tokens=self.max_inference_new_tokens,
             tokenizer=tokenizer,
             eos_token_id=eos_token_id,
         )

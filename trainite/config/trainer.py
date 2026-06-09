@@ -8,5 +8,5 @@ class PreTrainerConfig(TrainerConfig):
     log_every_steps: int = Field(default=10, gt=0)
     inference_every_epochs: int | None = Field(default=None, gt=0)
     inference_num_samples: int = Field(default=5, gt=0)
-    max_inference_steps: int = Field(default=16, gt=0)
+    max_inference_new_tokens_: int = Field(default=16, gt=0)
     grad_clip_norm: float | None = Field(default=None, gt=0.0)
