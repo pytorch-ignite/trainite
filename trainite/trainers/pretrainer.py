@@ -1,6 +1,8 @@
 import logging
+from collections.abc import Sized
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Protocol, cast
 
 import torch
 from ignite.engine import Engine, Events
@@ -17,7 +19,7 @@ from ignite.metrics import Accuracy, Loss, RunningAverage
 from ignite.utils import setup_logger
 from torch import nn
 from torch.optim.lr_scheduler import LinearLR
-from torch.utils.data import DataLoader, Dataset, Subset, random_split
+from torch.utils.data import DataLoader, Dataset, random_split
 
 from trainite.config import (
     DataConfig,
@@ -29,6 +31,16 @@ from trainite.config import (
 from trainite.utils import get_target, instantiate
 
 
+class GenerativeModel(Protocol):
+    def generate(
+        self,
+        prompt: list[str],
+        max_new_tokens: int,
+        tokenizer: Any,
+        eos_token_id: int | None = None,
+    ) -> list[str]: ...
+
+
 class PreTrainer:
     def __init__(self, config: ProjectConfig) -> None:
         self.logger: logging.Logger = setup_logger("trainer", level=logging.INFO)
@@ -38,6 +50,7 @@ class PreTrainer:
         self.train_loader: DataLoader
         self.val_loader: DataLoader | None = None
         self.test_loader: DataLoader | None = None
+        self.inference_tokenizer: Any = None
 
         self.device: str | torch.device = self._resolve_device()
         self.epochs: int = config.trainer.epochs
@@ -45,9 +58,21 @@ class PreTrainer:
         self.grad_clip_norm: float | None = getattr(
             config.trainer, "grad_clip_norm", None
         )
+        self.inference_every_epochs: int | None = getattr(
+            config.trainer, "inference_every_epochs", None
+        )
+        self.inference_num_samples: int = getattr(
+            config.trainer, "inference_num_samples", 5
+        )
+        self.max_inference_new_tokens: int = getattr(
+            config.trainer, "max_inference_new_tokens", 16
+        )
         self.set_loaders()
         self.vocab_size: int = self._resolve_vocab_size()
         self.model: nn.Module = self._build_model()
+
+        self._setup_inference()
+
         self.loss_fn: nn.CrossEntropyLoss = nn.CrossEntropyLoss()
         self.optimizer: torch.optim.Optimizer = self._build_optimizer()
         self.lr: float = config.optimizer.lr
@@ -67,12 +92,13 @@ class PreTrainer:
             resolved = "cuda" if torch.cuda.is_available() else "cpu"
         return resolved
 
+    def _get_underlying_dataset(self, dataset: Dataset) -> Dataset:
+        while hasattr(dataset, "dataset"):
+            dataset = getattr(dataset, "dataset")
+        return dataset
+
     def _resolve_vocab_size(self) -> int:
-        train_dataset = (
-            self.train_loader.dataset.dataset
-            if isinstance(self.train_loader.dataset, Subset)
-            else self.train_loader.dataset
-        )
+        train_dataset = self._get_underlying_dataset(self.train_loader.dataset)
         vocab_size = getattr(train_dataset, "vocab_size", 0)
         model_params = self.config.model.model_dump(by_alias=True)
         configured_vocab_size: int | None = model_params.get("vocab_size")
@@ -110,14 +136,25 @@ class PreTrainer:
             shuffle = getattr(dl_config, "shuffle", False)
 
         collate_fn = None
-        if dl_config.collate_fn:
-            collate_fn = get_target(dl_config.collate_fn.target)
+        collate_config = dl_config.collate_fn
+        if collate_config:
+            target_symbol = get_target(collate_config.target)
+            if isinstance(target_symbol, type):
+                underlying_dataset = self._get_underlying_dataset(dataset)
+                tokenizer = getattr(underlying_dataset, "tokenizer", None)
+                collate_fn = instantiate(collate_config, tokenizer=tokenizer)
+            else:
+                collate_fn = target_symbol
 
         return DataLoader(dataset, shuffle=shuffle, collate_fn=collate_fn, **dl_kwargs)
 
     def _build_loaders_from_ratios(
         self, data_config: DataConfig
     ) -> tuple[DataLoader, DataLoader | None, DataLoader | None]:
+        if data_config.dataset is None:
+            raise ValueError(
+                "Dataset config must not be None for automatic ratio splitting."
+            )
         dataset = instantiate(data_config.dataset)
         total_len = len(dataset)
 
@@ -311,6 +348,21 @@ class PreTrainer:
 
         # 2. Run evaluations
         self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
+        if self.inference_every_epochs is not None:
+            self.engine.add_event_handler(
+                Events.EPOCH_COMPLETED, self._log_inference, self.train_loader, "Train"
+            )
+            if self.val_loader is not None:
+                self.engine.add_event_handler(
+                    Events.EPOCH_COMPLETED, self._log_inference, self.val_loader, "Val"
+                )
+            if self.test_loader is not None:
+                self.engine.add_event_handler(
+                    Events.EPOCH_COMPLETED,
+                    self._log_inference,
+                    self.test_loader,
+                    "Test",
+                )
 
         # 3. Checkpoint
         to_save = {"model": self.model, "optimizer": self.optimizer}
@@ -423,6 +475,109 @@ class PreTrainer:
                 epoch,
                 train_metrics["loss"],
                 train_metrics["exact_accuracy"],
+            )
+
+    def _validate_dataloader_for_inference(self, loader: DataLoader, name: str) -> None:
+        dataset = loader.dataset
+        if not isinstance(dataset, Sized) or len(dataset) == 0:
+            return
+
+        item = dataset[0]
+        if not isinstance(item, dict):
+            raise ValueError(
+                f"{name} dataset items must be dictionaries containing 'source_text' and 'target_text' keys for inference logging."
+            )
+        if not all(key in item for key in ["source_text", "target_text"]):
+            raise ValueError(
+                f"{name} dataset items must contain 'source_text' and 'target_text' keys for inference logging."
+            )
+
+    def _setup_inference(self) -> None:
+        if not self.inference_every_epochs:
+            return
+
+        if not hasattr(self.model, "generate"):
+            raise ValueError(
+                "Model must implement 'generate' method for inference logging."
+            )
+
+        # Retrieve and check training tokenizer
+        train_ds = self._get_underlying_dataset(self.train_loader.dataset)
+        if not hasattr(train_ds, "tokenizer"):
+            raise ValueError(
+                "Dataset must have a 'tokenizer' attribute for inference logging."
+            )
+        self.inference_tokenizer = getattr(train_ds, "tokenizer")
+
+        # Validate active loaders
+        self._validate_dataloader_for_inference(self.train_loader, "Train")
+        if self.val_loader is not None:
+            self._validate_dataloader_for_inference(self.val_loader, "Val")
+        if self.test_loader is not None:
+            self._validate_dataloader_for_inference(self.test_loader, "Test")
+
+    def _log_inference(self, engine: Engine, loader: DataLoader, name: str) -> None:
+        if (
+            not self.inference_every_epochs
+            or engine.state.epoch % self.inference_every_epochs != 0
+        ):
+            return
+
+        tokenizer = self.inference_tokenizer
+        if tokenizer is None:
+            return
+
+        self.logger.info(
+            f"Epoch {engine.state.epoch}: Running inference on {name} samples..."
+        )
+
+        eos_token_id = getattr(tokenizer, "eos_token_id", None)
+
+        dataset = loader.dataset
+        if not isinstance(dataset, Sized):
+            raise TypeError(f"{name} dataset must be Sized to run inference logging.")
+        total_samples = len(dataset)
+        num_samples = min(self.inference_num_samples, total_samples)
+        samples = [dataset[i] for i in range(num_samples)]
+        prompts = [sample["source_text"] for sample in samples]
+        targets = [sample["target_text"] for sample in samples]
+
+        self.model.eval()
+        generative_model = cast(GenerativeModel, self.model)
+        decoded_strs = generative_model.generate(
+            prompts,
+            max_new_tokens=self.max_inference_new_tokens,
+            tokenizer=tokenizer,
+            eos_token_id=eos_token_id,
+        )
+        for idx in range(num_samples):
+            self.logger.info(
+                "    Sample %d | Prompt: %r | Target: %r | Prediction: %r",
+                idx + 1,
+                prompts[idx],
+                targets[idx],
+                decoded_strs[idx],
+            )
+
+        if "tensorboard" in self.handlers:
+            tb_writer = self.handlers["tensorboard"].writer
+            tb_table = [
+                "| Sample | Prompt | Target | Prediction |",
+                "|---|---|---|---|",
+            ]
+            for idx in range(num_samples):
+                prompt_escaped = prompts[idx].replace("|", "\\|").replace("\n", "<br>")
+                target_escaped = targets[idx].replace("|", "\\|").replace("\n", "<br>")
+                pred_escaped = (
+                    decoded_strs[idx].replace("|", "\\|").replace("\n", "<br>")
+                )
+                tb_table.append(
+                    f"| {idx + 1} | {prompt_escaped} | {target_escaped} | {pred_escaped} |"
+                )
+            name_map = {"Train": "training", "Val": "validation", "Test": "testing"}
+            tb_tag = f"inference/{name_map.get(name, name.lower())}"
+            tb_writer.add_text(
+                tb_tag, "\n".join(tb_table), global_step=engine.state.epoch
             )
 
     def test(self, test_loader: DataLoader | None = None) -> None:

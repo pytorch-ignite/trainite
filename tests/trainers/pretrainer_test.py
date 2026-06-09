@@ -62,6 +62,42 @@ class EmptyDataset(torch.utils.data.Dataset):
         raise IndexError("This dataset is empty")
 
 
+class DummyClassCollateFn:
+    def __init__(self, tokenizer=None):
+        self.tokenizer = tokenizer
+
+    def __call__(self, batch):
+        return batch
+
+
+class SimpleDatasetWithTokenizer(SimpleDataset):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.tokenizer = "mock_tokenizer"
+
+
+class NonDictDataset(SimpleDatasetWithTokenizer):
+    def __getitem__(self, index):  # type: ignore[override]
+        return [1, 2, 3]
+
+
+class GenerativeModel(SimpleModel):
+    def generate(self, prompt, max_new_tokens, tokenizer, eos_token_id=None):
+        return [f"pred_{p}" for p in prompt]
+
+
+class GenerativeDataset(SimpleDataset):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.tokenizer = mock.Mock()
+
+    def __getitem__(self, index):
+        item = super().__getitem__(index)
+        item["source_text"] = f"source_{index}"  # type: ignore[assignment]
+        item["target_text"] = f"target_{index}"  # type: ignore[assignment]
+        return item
+
+
 def dummy_collate_fn(batch):
     return batch
 
@@ -421,3 +457,109 @@ def test_pretrainer_early_stopping_patience(project_config):
     project_config.trainer.early_stopping_patience = 1
     trainer = PreTrainer(project_config)
     trainer.run()
+
+
+def test_pretrainer_dataloader_class_collate_fn(project_config):
+    project_config.data.train.dataset = cc(
+        "tests.trainers.pretrainer_test.SimpleDatasetWithTokenizer",
+        size=16,
+        seq_len=4,
+        vocab_size=10,
+    )
+    project_config.data.train.dataloader.collate_fn = cc(
+        "tests.trainers.pretrainer_test.DummyClassCollateFn"
+    )
+    trainer = PreTrainer(project_config)
+    assert trainer.train_loader is not None
+    assert isinstance(trainer.train_loader.collate_fn, DummyClassCollateFn)
+    assert trainer.train_loader.collate_fn.tokenizer == "mock_tokenizer"
+
+
+def test_setup_inference_missing_generate(project_config):
+    project_config.trainer.inference_every_epochs = 1
+    with pytest.raises(ValueError, match="Model must implement 'generate' method"):
+        PreTrainer(project_config)
+
+
+def test_setup_inference_missing_tokenizer(project_config):
+    project_config.trainer.inference_every_epochs = 1
+    project_config.model = cc(
+        "tests.trainers.pretrainer_test.GenerativeModel",
+        vocab_size=10,
+        hidden_size=8,
+    )
+    with pytest.raises(ValueError, match="Dataset must have a 'tokenizer' attribute"):
+        PreTrainer(project_config)
+
+
+def test_setup_inference_invalid_dataset_items(project_config):
+    project_config.trainer.inference_every_epochs = 1
+    project_config.model = cc(
+        "tests.trainers.pretrainer_test.GenerativeModel",
+        vocab_size=10,
+        hidden_size=8,
+    )
+    project_config.data.train.dataset = cc(
+        "tests.trainers.pretrainer_test.SimpleDatasetWithTokenizer",
+        size=16,
+        seq_len=4,
+        vocab_size=10,
+    )
+    with pytest.raises(
+        ValueError,
+        match="dataset items must contain 'source_text' and 'target_text' keys",
+    ):
+        PreTrainer(project_config)
+
+
+def test_setup_inference_non_dict_dataset_items(project_config):
+    project_config.trainer.inference_every_epochs = 1
+    project_config.model = cc(
+        "tests.trainers.pretrainer_test.GenerativeModel",
+        vocab_size=10,
+        hidden_size=8,
+    )
+    project_config.data.train.dataset = cc(
+        "tests.trainers.pretrainer_test.NonDictDataset",
+        size=16,
+        seq_len=4,
+        vocab_size=10,
+    )
+    with pytest.raises(
+        ValueError,
+        match="dataset items must be dictionaries containing",
+    ):
+        PreTrainer(project_config)
+
+
+def test_setup_inference_and_log_success(project_config, temp_run_dir):
+    project_config.trainer.inference_every_epochs = 1
+    project_config.trainer.max_inference_new_tokens = 32
+    project_config.model = cc(
+        "tests.trainers.pretrainer_test.GenerativeModel",
+        vocab_size=10,
+        hidden_size=8,
+    )
+    project_config.data.train.dataset = cc(
+        "tests.trainers.pretrainer_test.GenerativeDataset",
+        size=16,
+        seq_len=4,
+        vocab_size=10,
+    )
+    project_config.data.val.dataset = cc(
+        "tests.trainers.pretrainer_test.GenerativeDataset",
+        size=8,
+        seq_len=4,
+        vocab_size=10,
+    )
+    trainer = PreTrainer(project_config)
+    assert trainer.max_inference_new_tokens == 32
+    trainer.run()
+
+
+def test_pretrainer_grad_clip_norm(project_config):
+    project_config.trainer.grad_clip_norm = 1.0
+    trainer = PreTrainer(project_config)
+    with mock.patch("torch.nn.utils.clip_grad_norm_") as mock_clip:
+        trainer.run()
+    assert mock_clip.called

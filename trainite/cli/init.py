@@ -373,23 +373,38 @@ def init_project(args: argparse.Namespace) -> None:
     data_config = dataset_spec.config_cls()
     trainer_component = trainer_spec.config_cls()
 
-    # Update targets to point to the local project structure
-    _update_targets(
-        model_component,
-        f"trainite.models.{model_spec.name}",
-        f"models.{model_spec.name}",
-    )
-    _update_targets(
-        data_config,
-        f"trainite.datasets.{dataset_spec.name}",
-        f"datasets.{dataset_spec.name}",
-    )
+    # Inject model collator into data config dataloaders
+    if model_spec.collate_fn_target:
+        collate_target = model_spec.collate_fn_target
+
+        def _inject_collate(config):
+            dataloader = getattr(config, "dataloader", None)
+            if dataloader is not None:
+                dataloader.collate_fn = ComponentConfig(_target_=collate_target)
+            for split in ["train", "val", "test"]:
+                split_config = getattr(config, split, None)
+                if split_config is not None:
+                    _inject_collate(split_config)
+
+        _inject_collate(data_config)
 
     starter_config = ProjectConfig(
         model=model_component,
         data=data_config,
         trainer=trainer_component,
         output=output_config,
+    )
+
+    # Update targets to point to the local project structure
+    _update_targets(
+        starter_config,
+        f"trainite.models.{model_spec.name}",
+        f"models.{model_spec.name}",
+    )
+    _update_targets(
+        starter_config,
+        f"trainite.datasets.{dataset_spec.name}",
+        f"datasets.{dataset_spec.name}",
     )
 
     dump_config(starter_config, project_dir / "config.yaml")

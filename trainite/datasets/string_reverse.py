@@ -1,8 +1,8 @@
+import random
 import string
 import warnings
 
 import torch
-from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset
 
 # Hardcoded universal vocabulary: all printable ASCII characters
@@ -20,30 +20,33 @@ class CharTokenizer:
     """A simple character-level tokenizer with a hardcoded universal vocabulary.
 
     Maps each character in UNIVERSAL_VOCAB to a unique integer ID.
-    ID 0 is reserved as the padding token.
-    ID 1 is reserved as the BOS token.
-    ID 2 is reserved as the EOS token.
-    ID 3 is reserved as the UNK token.
+    ID 0 is reserved as the <PAD> token.
+    ID 1 is reserved as the <BOS> token.
+    ID 2 is reserved as the <SEP> token.
+    ID 3 is reserved as the <EOS> token.
+    ID 4 is reserved as the <UNK> token.
     """
 
     def __init__(self) -> None:
         self.pad_token_id = 0
         self.bos_token_id = 1
-        self.eos_token_id = 2
-        self.unk_token_id = 3
+        self.sep_token_id = 2
+        self.eos_token_id = 3
+        self.unk_token_id = 4
 
         self.char_to_id: dict[str, int] = {
-            c: i + 4 for i, c in enumerate(UNIVERSAL_VOCAB)
+            c: i + 5 for i, c in enumerate(UNIVERSAL_VOCAB)
         }
         self.id_to_char: dict[int, str] = {
-            i + 4: c for i, c in enumerate(UNIVERSAL_VOCAB)
+            i + 5: c for i, c in enumerate(UNIVERSAL_VOCAB)
         }
 
         self.special_tokens: dict[int, str] = {
-            self.pad_token_id: "<pad>",
-            self.bos_token_id: "<bos>",
-            self.eos_token_id: "<eos>",
-            self.unk_token_id: "<unk>",
+            self.pad_token_id: "<PAD>",
+            self.bos_token_id: "<BOS>",
+            self.sep_token_id: "<SEP>",
+            self.eos_token_id: "<EOS>",
+            self.unk_token_id: "<UNK>",
         }
 
         for k, v in self.special_tokens.items():
@@ -52,7 +55,7 @@ class CharTokenizer:
     @property
     def vocab_size(self) -> int:
         """Number of unique tokens in the vocabulary (includes special tokens)."""
-        return len(UNIVERSAL_VOCAB) + 4
+        return len(UNIVERSAL_VOCAB) + len(self.special_tokens)
 
     def encode(self, text: str) -> list[int]:
         """Convert a string to a list of token IDs, mapping unrecognized characters to UNK."""
@@ -89,12 +92,11 @@ class CharTokenizer:
 
 
 class StringReverseDataset(Dataset):
-    """Generates unique random strings and their reversals for autoregressive training.
+    """Generates unique random strings and their reversals.
 
-    Each sample is packed as:
-        <bos> seq <eos> reversed_seq <eos>
-
-    With teacher forcing labels that mask the prompt portion (-100).
+    Each sample is returned as a dictionary containing:
+        - 'source_text': the original random string
+        - 'target_text': the reversed string
     """
 
     def __init__(
@@ -137,16 +139,15 @@ class StringReverseDataset(Dataset):
         else:
             lengths = list(range(min_seq_len, max_seq_len + 1))
 
-        generator = torch.Generator().manual_seed(seed)
-        self.valid_token_ids_tensor = torch.tensor(self.valid_token_ids)
+        rng = random.Random(seed)
         vocab_size = len(self.valid_token_ids)
 
-        self.inputs = []
-        self.labels = []
+        self.source_texts = []
+        self.target_texts = []
 
         # Generate per_seq_size unique sequences for each length bucket
         for length in lengths:
-            unique_sequences: set[tuple[int, ...]] = set()
+            unique_sequences: set[str] = set()
             max_possible_combinations = vocab_size**length
             target = min(per_seq_size, max_possible_combinations)
 
@@ -155,14 +156,8 @@ class StringReverseDataset(Dataset):
             max_attempts = target * 20
 
             while len(unique_sequences) < target and attempts < max_attempts:
-                indices = torch.randint(
-                    low=0,
-                    high=len(self.valid_token_ids),
-                    size=(length,),
-                    generator=generator,
-                )
-                seq_tuple = tuple(self.valid_token_ids_tensor[indices].tolist())
-                unique_sequences.add(seq_tuple)
+                seq = "".join(rng.choices(chars, k=length))
+                unique_sequences.add(seq)
                 attempts += 1
 
             if len(unique_sequences) < per_seq_size:
@@ -173,41 +168,27 @@ class StringReverseDataset(Dataset):
                     stacklevel=2,
                 )
 
-            # Pack each unique sequence into the autoregressive format
-            for seq_tuple in unique_sequences:
-                seq = torch.tensor(seq_tuple)
-                reversed_seq = torch.flip(seq, dims=[0])
-
-                bos_t = torch.tensor([self.tokenizer.bos_token_id])
-                eos_t = torch.tensor([self.tokenizer.eos_token_id])
-
-                full_seq = torch.cat([bos_t, seq, eos_t, reversed_seq, eos_t])
-
-                input_ids = full_seq[:-1]
-                target_labels = full_seq[1:].clone()
-
-                prompt_len = len(seq) + 2
-                target_labels[: prompt_len - 1] = -100
-
-                self.inputs.append(input_ids)
-                self.labels.append(target_labels)
+            # Pack each unique sequence into source and target formats
+            for seq in unique_sequences:
+                reversed_seq = seq[::-1]
+                self.source_texts.append(seq)
+                self.target_texts.append(reversed_seq)
 
         # Shuffle so variable-length samples are evenly distributed across batches
-        final_shuffle_gen = torch.Generator().manual_seed(seed)
-        shuffle_indices = torch.randperm(
-            len(self.inputs), generator=final_shuffle_gen
-        ).tolist()
+        final_shuffle_gen = random.Random(seed)
+        shuffle_indices = list(range(len(self.source_texts)))
+        final_shuffle_gen.shuffle(shuffle_indices)
 
-        self.inputs = [self.inputs[i] for i in shuffle_indices]
-        self.labels = [self.labels[i] for i in shuffle_indices]
+        self.source_texts = [self.source_texts[i] for i in shuffle_indices]
+        self.target_texts = [self.target_texts[i] for i in shuffle_indices]
 
     def __len__(self) -> int:
-        return len(self.inputs)
+        return len(self.source_texts)
 
-    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
+    def __getitem__(self, index: int) -> dict[str, str]:
         return {
-            "input_ids": self.inputs[index],
-            "labels": self.labels[index],
+            "source_text": self.source_texts[index],
+            "target_text": self.target_texts[index],
         }
 
     def decode(
@@ -219,16 +200,3 @@ class StringReverseDataset(Dataset):
         return self.tokenizer.decode(
             ids, skip_special_tokens=skip_special_tokens, ignore_index=ignore_index
         )
-
-
-def collate_fn(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
-    input_ids = [item["input_ids"] for item in batch]
-    labels = [item["labels"] for item in batch]
-
-    padded_input_ids = pad_sequence(input_ids, batch_first=True, padding_value=0)
-    padded_labels = pad_sequence(labels, batch_first=True, padding_value=-100)
-
-    return {
-        "input_ids": padded_input_ids,
-        "labels": padded_labels,
-    }

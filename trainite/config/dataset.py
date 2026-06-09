@@ -43,8 +43,6 @@ class StringReverseDataConfig(DataConfig):
         default_factory=lambda: DataLoaderConfig(
             batch_size=32,
             shuffle=True,
-            collate_fn=ComponentConfig(
-                _target_="trainite.datasets.string_reverse.collate_fn"
-            ),
+            collate_fn=None,
         )
     )

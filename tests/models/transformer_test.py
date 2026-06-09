@@ -1,9 +1,13 @@
+from unittest import mock
+
 import pytest
 import torch
 
 from trainite.config import get_model_spec
+from trainite.datasets.string_reverse import CharTokenizer
 from trainite.models.transformer import (
     Attention,
+    CausalLMCollateFn,
     PositionalEncoding,
     TransformerBlock,
     TransformerModel,
@@ -117,3 +121,67 @@ def test_build_transformer_model_from_spec():
     model_conf = spec.config_cls()
     model = instantiate(model_conf)
     assert isinstance(model, TransformerModel)
+
+
+def test_transformer_model_generate():
+    tokenizer = CharTokenizer()
+    hidden_size = 16
+    model = TransformerModel(vocab_size=tokenizer.vocab_size, hidden_size=hidden_size)
+    model.eval()
+
+    # Test with string prompt and tokenizer
+    with mock.patch.object(model, "forward") as mock_forward:
+
+        def mock_forward_fn(x):
+            logits = torch.zeros(1, x.shape[1], tokenizer.vocab_size)
+            logits[0, -1, 7] = 10.0
+            return logits
+
+        mock_forward.side_effect = mock_forward_fn
+
+        generated = model.generate(["ab"], max_new_tokens=1, tokenizer=tokenizer)
+        assert isinstance(generated, list)
+        assert generated[0] == "c"
+
+    # Test with eos_token_id early exit
+    with mock.patch.object(model, "forward") as mock_forward:
+
+        def mock_forward_fn(x):
+            logits = torch.zeros(1, x.shape[1], tokenizer.vocab_size)
+            logits[0, -1, tokenizer.eos_token_id] = 10.0
+            return logits
+
+        mock_forward.side_effect = mock_forward_fn
+
+        generated = model.generate(
+            ["ab"],
+            max_new_tokens=10,
+            tokenizer=tokenizer,
+            eos_token_id=tokenizer.eos_token_id,
+        )
+        assert generated[0] == ""
+
+
+def test_causal_lm_collate_fn():
+    tokenizer = CharTokenizer()
+    collate = CausalLMCollateFn(tokenizer=tokenizer, pad_token_id=0, ignore_index=-100)
+
+    data1 = {"source_text": "abc", "target_text": "cba"}
+    data2 = {"source_text": "d", "target_text": "d"}
+
+    batch = [data1, data2]
+
+    collated = collate(batch)
+    assert "input_ids" in collated
+    assert "labels" in collated
+
+    assert collated["input_ids"].ndim == 2
+    assert collated["labels"].ndim == 2
+    assert collated["input_ids"].shape == collated["labels"].shape
+
+    # Max sequence length:
+    # "abc" (3) -> src is <bos> abc <eos> (5 tokens). target is cba <eos> (4 tokens). total full_seq = 9. input_ids = 8. labels = 8.
+    # "d" (1) -> src is <bos> d <eos> (3 tokens). target is d <eos> (2 tokens). total full_seq = 5. input_ids = 4. labels = 4.
+    # So max length is 8.
+    assert collated["input_ids"].shape == (2, 8)
+    assert (collated["input_ids"][1, :4] == 0).all()
