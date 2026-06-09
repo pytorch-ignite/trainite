@@ -183,3 +183,16 @@ def test_config_build_string_reverse_dataset():
     assert "labels" in batch
     assert batch["input_ids"].shape[0] == dataloader_conf.batch_size
     assert batch["input_ids"].shape == batch["labels"].shape
+
+
+def test_string_reverse_dataset_size_capping_and_warning():
+    # Vocab size is 3 ('a', 'b', 'c'), max possible for length 1 is 3.
+    # Requesting per_seq_size=10 should trigger a warning and cap the size at 3.
+    with pytest.warns(
+        UserWarning,
+        match="Requested 10 unique sequences for seq_len=1 but only 3 could be generated",
+    ):
+        dataset = StringReverseDataset(
+            per_seq_size=10, min_seq_len=1, max_seq_len=1, charset="abc", seed=42
+        )
+    assert len(dataset) == 3
