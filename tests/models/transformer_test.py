@@ -18,7 +18,7 @@ from trainite.utils import instantiate
 def test_rotary_embedding():
     dim = 8
     max_seq_len = 16
-    rope = RotaryEmbedding(dim, max_seq_len=max_seq_len)
+    rope = RotaryEmbedding(dim, max_seq_len)
 
     # Test inside cache boundary
     seq_len = 10
@@ -37,6 +37,10 @@ def test_rotary_embedding():
     assert sin_l.shape == (1, 1, seq_len_large, dim)
     assert cos_l.abs().max() <= 1.0
     assert sin_l.abs().max() <= 1.0
+
+    # Test odd dimension throws ValueError
+    with pytest.raises(ValueError, match="RotaryEmbedding dimension.*must be even"):
+        RotaryEmbedding(7, max_seq_len)
 
 
 def test_attention():

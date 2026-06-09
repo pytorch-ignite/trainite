@@ -25,8 +25,12 @@ class Tokenizer(Protocol):
 
 
 class RotaryEmbedding(nn.Module):
-    def __init__(self, dim: int, max_seq_len: int = 2048) -> None:
+    def __init__(self, dim: int, max_seq_len: int) -> None:
         super().__init__()
+        if dim % 2 != 0:
+            raise ValueError(
+                f"RotaryEmbedding dimension (head_dim) must be even, got {dim}."
+            )
         self.dim = dim
         self.max_seq_len = max_seq_len
         inv_freq = 1.0 / (10000.0 ** (torch.arange(0, dim, 2).float() / dim))
