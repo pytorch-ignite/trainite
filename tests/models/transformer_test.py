@@ -8,28 +8,24 @@ from trainite.datasets.string_reverse import CharTokenizer
 from trainite.models.transformer import (
     Attention,
     CausalLMCollateFn,
-    PositionalEncoding,
+    RotaryEmbedding,
     TransformerBlock,
     TransformerModel,
 )
 from trainite.utils import instantiate
 
 
-def test_positional_encoding():
-    d_model = 16
-    max_len = 32
-    pe = PositionalEncoding(d_model, max_len)
-    x = torch.zeros(1, 10, d_model)
-    output = pe(x)
-    assert output.shape == x.shape
-    assert not torch.allclose(output, x)
-
-    d_model = 15
-    max_len = 32
-    with pytest.raises(
-        ValueError, match="d_model must be even for sinusoidal positional encoding."
-    ):
-        PositionalEncoding(d_model, max_len)
+def test_rotary_embedding():
+    dim = 8
+    seq_len = 10
+    rope = RotaryEmbedding(dim)
+    x = torch.zeros(1, 2, seq_len, dim)
+    cos, sin = rope(x, seq_len)
+    assert cos.shape == (1, 1, seq_len, dim)
+    assert sin.shape == (1, 1, seq_len, dim)
+    # Ensure cos and sin values are bounded between -1 and 1
+    assert cos.abs().max() <= 1.0
+    assert sin.abs().max() <= 1.0
 
 
 def test_attention():

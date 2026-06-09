@@ -77,8 +77,7 @@ Standard decoder-only Transformer. Sinusoidal positional encoding, multi-head ca
 | `num_layers` | 2 | Transformer block count |
 | `num_heads` | 2 | Must divide `hidden_size` |
 | `feedforward_dim` | 128 | FFN hidden dimension |
-| `dropout` | 0.1 | Applied in attn, FFN, pos encoding |
-| `max_seq_len` | 128 | Positional encoding buffer size |
+| `dropout` | 0.1 | Applied in attn and FFN |
 
 ### PreTrainer
 
