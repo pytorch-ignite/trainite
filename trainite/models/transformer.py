@@ -25,21 +25,38 @@ class Tokenizer(Protocol):
 
 
 class RotaryEmbedding(nn.Module):
-    def __init__(self, dim: int) -> None:
+    def __init__(self, dim: int, max_seq_len: int = 2048) -> None:
         super().__init__()
         self.dim = dim
+        self.max_seq_len = max_seq_len
         inv_freq = 1.0 / (10000.0 ** (torch.arange(0, dim, 2).float() / dim))
         self.register_buffer("inv_freq", inv_freq, persistent=False)
+
+        # Precompute cos and sin buffers
+        t = torch.arange(max_seq_len, dtype=torch.float32)
+        freqs = torch.outer(t, inv_freq)
+        emb = torch.cat((freqs, freqs), dim=-1)
+        self.register_buffer(
+            "cos_cached", emb.cos().unsqueeze(0).unsqueeze(0), persistent=False
+        )
+        self.register_buffer(
+            "sin_cached", emb.sin().unsqueeze(0).unsqueeze(0), persistent=False
+        )
 
     def forward(
         self, x: torch.Tensor, seq_len: int
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        t = torch.arange(seq_len, device=x.device, dtype=self.inv_freq.dtype)
-        freqs = torch.outer(t, self.inv_freq)
-        emb = torch.cat((freqs, freqs), dim=-1)
-        cos = emb.cos().unsqueeze(0).unsqueeze(0)
-        sin = emb.sin().unsqueeze(0).unsqueeze(0)
-        return cos, sin
+        if seq_len > self.max_seq_len:
+            t = torch.arange(seq_len, device=x.device, dtype=self.inv_freq.dtype)
+            freqs = torch.outer(t, self.inv_freq)
+            emb = torch.cat((freqs, freqs), dim=-1)
+            cos = emb.cos().unsqueeze(0).unsqueeze(0).to(x.dtype)
+            sin = emb.sin().unsqueeze(0).unsqueeze(0).to(x.dtype)
+            return cos, sin
+
+        return self.cos_cached[:, :, :seq_len].to(x.dtype), self.sin_cached[
+            :, :, :seq_len
+        ].to(x.dtype)
 
 
 def rotate_half(x: torch.Tensor) -> torch.Tensor:
@@ -57,7 +74,13 @@ def apply_rotary_pos_emb(
 
 
 class Attention(nn.Module):
-    def __init__(self, embed_dim: int, num_heads: int, dropout: float = 0.1):
+    def __init__(
+        self,
+        embed_dim: int,
+        num_heads: int,
+        dropout: float = 0.1,
+        max_seq_len: int = 128,
+    ):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
@@ -68,7 +91,7 @@ class Attention(nn.Module):
         self.out = nn.Linear(embed_dim, embed_dim, bias=False)
         self.dropout = nn.Dropout(p=dropout)
         self.dropout_p = dropout
-        self.rotary_emb = RotaryEmbedding(dim=self.head_dim)
+        self.rotary_emb = RotaryEmbedding(dim=self.head_dim, max_seq_len=max_seq_len)
 
     def forward(
         self,
@@ -121,10 +144,13 @@ class TransformerBlock(nn.Module):
         num_heads: int,
         feedforward_dim: int,
         dropout: float = 0.1,
+        max_seq_len: int = 128,
     ) -> None:
         super().__init__()
         self.norm1 = nn.LayerNorm(d_model)
-        self.attention = Attention(d_model, num_heads, dropout=dropout)
+        self.attention = Attention(
+            d_model, num_heads, dropout=dropout, max_seq_len=max_seq_len
+        )
         self.norm2 = nn.LayerNorm(d_model)
         self.feedforward = nn.Sequential(
             nn.Linear(d_model, feedforward_dim),
@@ -155,6 +181,7 @@ class TransformerModel(nn.Module):
         num_heads: int = 2,
         feedforward_dim: int = 128,
         dropout: float = 0.1,
+        max_seq_len: int = 128,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -166,6 +193,7 @@ class TransformerModel(nn.Module):
                     num_heads,
                     feedforward_dim,
                     dropout,
+                    max_seq_len=max_seq_len,
                 )
                 for _ in range(num_layers)
             ]

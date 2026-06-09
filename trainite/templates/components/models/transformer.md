@@ -29,6 +29,9 @@ The model is small and standard:
 ### Padding
 Padding ID is `0`. The model ignores padded positions in attention.
 
+### Sequence length
+`max_seq_len` represents the precomputed cache size for RoPE. Inputs longer than this will fall back to slower on-the-fly calculations.
+
 ### Hidden size and heads
 `hidden_size` must be divisible by `num_heads`.
 
@@ -60,6 +63,9 @@ A common choice is `2x` to `4x` of `hidden_size`.
 ### `dropout`
 Dropout rate used in attention and feedforward layers.
 
+### `max_seq_len`
+Precomputed cache size for the rotary position embeddings.
+
 ## Minimal config example
 
 ```yaml
@@ -70,6 +76,7 @@ model:
   num_heads: 4
   feedforward_dim: 256
   dropout: 0.1
+  max_seq_len: 64
 ```
 
 ## When to change this file

@@ -17,15 +17,26 @@ from trainite.utils import instantiate
 
 def test_rotary_embedding():
     dim = 8
+    max_seq_len = 16
+    rope = RotaryEmbedding(dim, max_seq_len=max_seq_len)
+
+    # Test inside cache boundary
     seq_len = 10
-    rope = RotaryEmbedding(dim)
     x = torch.zeros(1, 2, seq_len, dim)
     cos, sin = rope(x, seq_len)
     assert cos.shape == (1, 1, seq_len, dim)
     assert sin.shape == (1, 1, seq_len, dim)
-    # Ensure cos and sin values are bounded between -1 and 1
     assert cos.abs().max() <= 1.0
     assert sin.abs().max() <= 1.0
+
+    # Test outside cache boundary (fallback dynamic computation)
+    seq_len_large = 24
+    x_large = torch.zeros(1, 2, seq_len_large, dim)
+    cos_l, sin_l = rope(x_large, seq_len_large)
+    assert cos_l.shape == (1, 1, seq_len_large, dim)
+    assert sin_l.shape == (1, 1, seq_len_large, dim)
+    assert cos_l.abs().max() <= 1.0
+    assert sin_l.abs().max() <= 1.0
 
 
 def test_attention():
