@@ -173,15 +173,17 @@ class TransformerModel(nn.Module):
     @torch.no_grad()
     def generate(
         self,
-        prompt: str | list[str],
+        prompts: list[str],
         max_new_tokens: int,
         tokenizer: Tokenizer,
         eos_token_id: int | None = None,
-    ) -> str | list[str]:
-        """Generate text from a raw text prompt.
+        bos_token_id: int | None = None,
+        pad_token_id: int | None = None,
+    ) -> list[str]:
+        """Generate text from a raw text prompts.
 
         Args:
-            prompt: Prompt text (str or list of str).
+            prompt: Prompt text (list of str).
             max_new_tokens: Maximum number of new tokens to generate.
             tokenizer: Tokenizer to use for encoding/decoding.
             eos_token_id: Optional token ID that signals end-of-sequence.
@@ -190,15 +192,13 @@ class TransformerModel(nn.Module):
             The generated text (str or list of str).
         """
         self.eval()
-        bos_id = getattr(tokenizer, "bos_token_id", None)
-        eos_id = getattr(tokenizer, "eos_token_id", None)
-        pad_id = getattr(tokenizer, "pad_token_id", 0)
+        bos_id = bos_token_id or getattr(tokenizer, "bos_token_id", None)
+        eos_id = eos_token_id or getattr(tokenizer, "eos_token_id", None)
+        pad_id = pad_token_id or getattr(tokenizer, "pad_token_id", 0)
         if bos_id is None or eos_id is None:
             raise ValueError(
                 "Tokenizer must have bos_token_id and eos_token_id attributes."
             )
-        is_str = isinstance(prompt, str)
-        prompts = [prompt] if is_str else prompt
 
         encoded = []
         for text in prompts:
@@ -208,6 +208,8 @@ class TransformerModel(nn.Module):
 
         param = next(self.parameters(), None)
         device = param.device if param is not None else "cpu"
+
+        # left-pad sequences and flip back to (B, S) for processing
         input_ids = (
             pad_sequence(encoded, batch_first=True, padding_value=pad_id)
             .flip(1)
@@ -228,15 +230,12 @@ class TransformerModel(nn.Module):
                 )
             generated = torch.cat([generated, next_token], dim=-1)
 
-            if (
-                eos_token_id is not None
-                and next_token.squeeze(-1).eq(eos_token_id).all()
-            ):
+            if eos_token_id is not None and generated[:, -1].eq(eos_token_id).all():
                 break
 
         new_tokens = generated[:, prompt_len:].tolist()
         decoded = [tokenizer.decode(tokens) for tokens in new_tokens]
-        return decoded[0] if is_str else decoded
+        return decoded
 
 
 class CausalLMCollateFn:
@@ -282,9 +281,8 @@ class CausalLMCollateFn:
             # Mask the prompt portion in target labels
             labels[: len(src) - 1] = self.ignore_index
 
-            input_ids_list.append(
-                input_ids.flip(0)
-            )  # Reverse input for better memory locality
+            # We flip the sequences to have padding on the left, which allows us to use causal masking without modification
+            input_ids_list.append(input_ids.flip(0))
             labels_list.append(labels.flip(0))
 
         padded_input_ids = pad_sequence(

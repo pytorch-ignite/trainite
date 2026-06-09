@@ -14,6 +14,3 @@ class TransformerModelConfig(ComponentConfig):
     feedforward_dim: int = Field(default=128, gt=0)
     dropout: float = Field(default=0.1, ge=0.0, lt=1.0)
     max_seq_len: int = Field(default=128, gt=0)
-    inference_every_epochs: int | None = Field(default=None, gt=0)
-    inference_num_samples: int = Field(default=5, gt=0)
-    max_inference_steps: int = Field(default=16, gt=0)
