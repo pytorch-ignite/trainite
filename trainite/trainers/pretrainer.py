@@ -65,7 +65,7 @@ class PreTrainer:
             config.trainer, "inference_num_samples", 5
         )
         self.max_inference_new_tokens: int = getattr(
-            config.trainer, "max_inference_steps", 16
+            config.trainer, "max_inference_new_tokens", 16
         )
         self.set_loaders()
         self.vocab_size: int = self._resolve_vocab_size()

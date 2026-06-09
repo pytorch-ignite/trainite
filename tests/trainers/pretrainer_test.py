@@ -534,6 +534,7 @@ def test_setup_inference_non_dict_dataset_items(project_config):
 
 def test_setup_inference_and_log_success(project_config, temp_run_dir):
     project_config.trainer.inference_every_epochs = 1
+    project_config.trainer.max_inference_new_tokens = 32
     project_config.model = cc(
         "tests.trainers.pretrainer_test.GenerativeModel",
         vocab_size=10,
@@ -552,6 +553,7 @@ def test_setup_inference_and_log_success(project_config, temp_run_dir):
         vocab_size=10,
     )
     trainer = PreTrainer(project_config)
+    assert trainer.max_inference_new_tokens == 32
     trainer.run()
 
 
