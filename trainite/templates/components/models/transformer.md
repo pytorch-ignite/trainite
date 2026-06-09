@@ -1,7 +1,5 @@
 # Transformer model
 
-This is the model that learns the string-reverse task.
-
 It is a decoder-only Transformer: given a sequence of token IDs, it predicts the next token at every position.
 
 ## What goes in / out
@@ -70,7 +68,7 @@ Maximum sequence length supported by positional encoding.
 
 ```yaml
 model:
-  _target_: trainite.models.transformer.build_transformer_model
+  _target_: models.transformer.TransformerModel
   hidden_size: 128
   num_layers: 4
   num_heads: 4

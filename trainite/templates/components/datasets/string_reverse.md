@@ -6,44 +6,24 @@ It is useful because it is easy to understand, fast to generate, and good for ch
 
 ## What each sample looks like
 
-Each example is built as a single prompt + answer sequence:
-
-```text
-<bos> abc <eos> cba <eos>
-```
-
-Training uses teacher forcing:
-
-- the input contains both the prompt and the answer
-- the labels mask out the prompt part with `-100`
-- loss is only computed on the reversed answer
-
-So the model is not asked to copy the input. It is asked to read the input, then produce the reversed text.
-
-## What the dataset returns
-
-Each item is a dictionary:
+Each dataset item is a dictionary of raw strings:
 
 ```python
 {
-    "input_ids": Tensor,
-    "labels": Tensor,
+    "source_text": "abc",
+    "target_text": "cba",
 }
 ```
 
-Use `collate_fn` to pad a batch:
-
-- inputs are padded with `0`
-- labels are padded with `-100`
-
 ## Tokenizer
 
-The dataset uses a simple character tokenizer with these special tokens:
+The dataset uses a character-level tokenizer (`CharTokenizer`) with a universal vocabulary and these special tokens:
 
-- `0` = `<pad>`
-- `1` = `<bos>`
-- `2` = `<eos>`
-- `3` = `<unk>`
+- `0` = `<PAD>`
+- `1` = `<BOS>`
+- `2` = `<SEP>`
+- `3` = `<EOS>`
+- `4` = `<UNK>`
 
 It supports printable ASCII characters by default.
 
@@ -81,7 +61,7 @@ Controls dataset generation so runs are repeatable.
 data:
   train:
     dataset:
-      _target_: trainite.datasets.string_reverse.build_string_reverse_dataset
+      _target_: datasets.string_reverse.StringReverseDataset
       per_seq_size: 512
       charset: "@alpha"
       min_seq_len: 2

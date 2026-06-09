@@ -16,8 +16,8 @@ from trainite.config import (
     OutputConfig,
     ProjectConfig,
     SplitConfig,
+    TrainerConfig,
 )
-from trainite.config.trainer import PreTrainerConfig
 from trainite.trainers.pretrainer import PreTrainer
 
 
@@ -138,7 +138,13 @@ def project_config(temp_run_dir):
                 dataloader=DataLoaderConfig(batch_size=4),
             ),
         ),
-        trainer=PreTrainerConfig(epochs=1, log_every_steps=1),
+        trainer=TrainerConfig(
+            epochs=1,
+            log_every_steps=1,
+            inference_every_epochs=None,  # type : ignore , # pyright: ignore
+            inference_num_samples=4,  # type : ignore , # pyright: ignore
+            max_inference_new_tokens=10,  # type : ignore , # pyright: ignore
+        ),
         output=OutputConfig(root=str(temp_run_dir), run_name="test_run"),
         device="auto",
     )
@@ -378,7 +384,7 @@ def test_pretrainer_builds_train_and_val_loaders_from_ratios(tmp_path):
             train_ratio=0.8,
             val_ratio=0.2,
         ),
-        trainer=PreTrainerConfig(epochs=1),
+        trainer=TrainerConfig(epochs=1),
         output=OutputConfig(root=str(tmp_path), run_name="test"),
     )
 
@@ -410,7 +416,7 @@ def test_pretrainer_builds_train_val_and_test_loaders_from_ratios(tmp_path):
             train_ratio=0.6,
             val_ratio=0.2,
         ),
-        trainer=PreTrainerConfig(epochs=1),
+        trainer=TrainerConfig(epochs=1),
         output=OutputConfig(root=str(tmp_path), run_name="test"),
     )
 
@@ -473,6 +479,49 @@ def test_pretrainer_dataloader_class_collate_fn(project_config):
     assert trainer.train_loader is not None
     assert isinstance(trainer.train_loader.collate_fn, DummyClassCollateFn)
     assert trainer.train_loader.collate_fn.tokenizer == "mock_tokenizer"
+
+
+@pytest.mark.parametrize(
+    "epochs, tokens, samples",
+    [
+        (0, 32, 4),  # Invalid epochs
+        (1, 0, 4),  # Invalid tokens
+        (1, 32, 0),  # Invalid samples
+        (-1, 32, 4),  # Negative epochs
+        (1, -1, 4),  # Negative tokens
+        (1, 32, -1),  # Negative samples
+    ],
+)
+def test_setup_inference_invalid_inference_params(
+    project_config, epochs, tokens, samples
+):
+    project_config.trainer.inference_every_epochs = epochs
+    project_config.trainer.max_inference_new_tokens = tokens
+    project_config.trainer.inference_num_samples = samples
+    with pytest.raises(
+        ValueError, match="Inference logging parameters must be greater than 0"
+    ):
+        PreTrainer(project_config)
+
+
+@pytest.mark.parametrize(
+    "epochs, tokens, samples",
+    [
+        (2.5, 32, 4),  # Invalid type epochs
+        (1, True, 4),  # Invalid type tokens
+        (1, 32, "0.3"),  # Invalid type samples
+    ],
+)
+def test_setup_inference_invalid_inference_type_params(
+    project_config, epochs, tokens, samples
+):
+    project_config.trainer.inference_every_epochs = epochs
+    project_config.trainer.max_inference_new_tokens = tokens
+    project_config.trainer.inference_num_samples = samples
+    with pytest.raises(
+        TypeError, match="Inference logging parameters must be integers."
+    ):
+        PreTrainer(project_config)
 
 
 def test_setup_inference_missing_generate(project_config):

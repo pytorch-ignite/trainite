@@ -76,6 +76,18 @@ If set, gradients are clipped before the optimizer step.
 
 This can help when training becomes unstable.
 
+### `early_stopping_patience`
+Number of epochs to wait for validation loss improvement before stopping training early. Set to `null` to disable early stopping.
+
+### `inference_every_epochs`
+Run qualitative generation/inference tests on the model every N epochs. Set to `null` to disable.
+
+### `inference_num_samples`
+Number of random prompt samples to generate and log during the evaluation inference phase.
+
+### `max_inference_new_tokens`
+Maximum number of new tokens to generate per sample.
+
 ## What to tweak first
 
 If you are just getting started, the usual first changes are:
@@ -83,11 +95,12 @@ If you are just getting started, the usual first changes are:
 - `epochs`
 - `log_every_steps`
 - `grad_clip_norm`
+- `early_stopping_patience`
 - optimizer settings in `config.yaml`
 
 ## If you want to customize behavior
 
-Edit `trainite/trainers/pretrainer.py` if you want to:
+Edit `pretrainer.py` if you want to:
 
 - change how loss is computed
 - add gradient accumulation

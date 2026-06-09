@@ -58,20 +58,11 @@ class PreTrainer:
         self.grad_clip_norm: float | None = getattr(
             config.trainer, "grad_clip_norm", None
         )
-        self.inference_every_epochs: int | None = getattr(
-            config.trainer, "inference_every_epochs", None
-        )
-        self.inference_num_samples: int = getattr(
-            config.trainer, "inference_num_samples", 5
-        )
-        self.max_inference_new_tokens: int = getattr(
-            config.trainer, "max_inference_new_tokens", 16
-        )
         self.set_loaders()
         self.vocab_size: int = self._resolve_vocab_size()
         self.model: nn.Module = self._build_model()
 
-        self._setup_inference()
+        self._setup_inference(config)
 
         self.loss_fn: nn.CrossEntropyLoss = nn.CrossEntropyLoss()
         self.optimizer: torch.optim.Optimizer = self._build_optimizer()
@@ -492,9 +483,46 @@ class PreTrainer:
                 f"{name} dataset items must contain 'source_text' and 'target_text' keys for inference logging."
             )
 
-    def _setup_inference(self) -> None:
-        if not self.inference_every_epochs:
+    def _setup_inference(self, config: ProjectConfig) -> None:
+        self.inference_every_epochs: int | None = getattr(
+            config.trainer, "inference_every_epochs", None
+        )
+        if self.inference_every_epochs is None:
             return
+
+        self.inference_num_samples: int = getattr(
+            config.trainer, "inference_num_samples"
+        )
+        self.max_inference_new_tokens: int = getattr(
+            config.trainer, "max_inference_new_tokens"
+        )
+
+        if (
+            isinstance(self.inference_every_epochs, bool)
+            or isinstance(self.inference_num_samples, bool)
+            or isinstance(self.max_inference_new_tokens, bool)
+            or not isinstance(self.inference_every_epochs, int)
+            or not isinstance(self.inference_num_samples, int)
+            or not isinstance(self.max_inference_new_tokens, int)
+        ):
+            raise TypeError(
+                f"Inference logging parameters must be integers.\n"
+                f"Got inference_every_epochs={self.inference_every_epochs}, "
+                f"inference_num_samples={self.inference_num_samples}, "
+                f"max_inference_new_tokens={self.max_inference_new_tokens}"
+            )
+
+        if (
+            self.inference_every_epochs <= 0
+            or self.inference_num_samples <= 0
+            or self.max_inference_new_tokens <= 0
+        ):
+            raise ValueError(
+                f"Inference logging parameters must be greater than 0.\n"
+                f"Got inference_every_epochs={self.inference_every_epochs}, "
+                f"inference_num_samples={self.inference_num_samples}, "
+                f"max_inference_new_tokens={self.max_inference_new_tokens}"
+            )
 
         if not hasattr(self.model, "generate"):
             raise ValueError(
