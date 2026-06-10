@@ -1,0 +1,46 @@
+model:
+    _target_: models.transformer.TransformerModel
+    hidden_size: 64
+    num_layers: 2
+    num_heads: 2
+    feedforward_dim: 128
+    dropout: 0.1
+    max_seq_len: 128
+optimizer:
+    _target_: torch.optim.AdamW
+    lr: 0.001
+data:
+    dataset:
+        _target_: datasets.string_reverse.StringReverseDataset
+        per_seq_size: 256
+        charset: "@alpha"
+        min_seq_len: 1
+        max_seq_len: 16
+        seq_len: null
+        seed: 42
+    dataloader:
+        batch_size: 32
+        shuffle: true
+        num_workers: 2
+        collate_fn:
+            _target_: models.transformer.CausalLMCollateFn
+    train_ratio: 0.8
+    val_ratio: 0.1
+trainer:
+    log_every_steps: 10
+    epochs: 3
+    early_stopping_patience: 3
+    inference_every_epochs: 1
+    inference_num_samples: 5
+    max_inference_new_tokens: 16
+    grad_clip_norm: null
+    scheduler:
+        patience: 5
+        factor: 0.5
+        min_lr: 1e-6
+        mode: min
+output:
+    root: outputs
+    run_name: transformer__string-reverse
+seed: 42
+device: auto
