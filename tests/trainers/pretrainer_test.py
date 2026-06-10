@@ -160,6 +160,22 @@ def test_flatten_loss():
     assert (flat_targets == torch.tensor([1, 2, 0, 3])).all()
 
 
+def test_flatten_accuracy():
+    # Mock some data
+    logits = torch.randn(2, 3, 5)  # B=2, S=3, V=5
+    targets = torch.tensor([[1, 2, -100], [0, -100, 3]])
+
+    trainer = PreTrainer.__new__(PreTrainer)
+    trainer.loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
+
+    output = {"logits": logits, "targets": targets}
+    flat_logits, flat_targets = trainer._flatten_accuracy(output)
+
+    assert flat_logits.shape == (4, 5)  # 6 tokens total, 2 are masked
+    assert flat_targets.shape == (4,)
+    assert (flat_targets == torch.tensor([1, 2, 0, 3])).all()
+
+
 def test_exact_accuracy_transform():
     logits = torch.tensor(
         [
@@ -311,6 +327,7 @@ def test_pretrainer_test_method(project_config, temp_run_dir):
     # Test evaluators should have run
     assert "loss" in trainer.test_evaluator.state.metrics
     assert "exact_accuracy" in trainer.test_evaluator.state.metrics
+    assert "token_accuracy" in trainer.test_evaluator.state.metrics
 
 
 def test_pretrainer_test_without_val(project_config, temp_run_dir):

@@ -251,6 +251,14 @@ class PreTrainer:
         mask = targets != self.loss_fn.ignore_index
         return logits[mask], targets[mask]
 
+    def _flatten_accuracy(
+        self, output: dict[str, torch.Tensor]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        logits = output["logits"].reshape(-1, output["logits"].size(-1))
+        targets = output["targets"].reshape(-1)
+        mask = targets != self.loss_fn.ignore_index
+        return logits[mask], targets[mask]
+
     def _train_step(
         self, engine: Engine, batch: dict[str, torch.Tensor]
     ) -> dict[str, torch.Tensor]:
@@ -289,26 +297,35 @@ class PreTrainer:
         )
 
         train_loss = Loss(self.loss_fn, output_transform=self._flatten_loss)
-        train_accuracy = Accuracy(output_transform=self._exact_accuracy_transform)
+        train_exact_acc = Accuracy(output_transform=self._exact_accuracy_transform)
+        train_token_acc = Accuracy(output_transform=self._flatten_accuracy)
         val_loss = Loss(self.loss_fn, output_transform=self._flatten_loss)
-        val_accuracy = Accuracy(output_transform=self._exact_accuracy_transform)
+        val_exact_acc = Accuracy(output_transform=self._exact_accuracy_transform)
+        val_token_acc = Accuracy(output_transform=self._flatten_accuracy)
         test_loss = Loss(self.loss_fn, output_transform=self._flatten_loss)
-        test_accuracy = Accuracy(output_transform=self._exact_accuracy_transform)
+        test_exact_acc = Accuracy(output_transform=self._exact_accuracy_transform)
+        test_token_acc = Accuracy(output_transform=self._flatten_accuracy)
 
         train_loss.attach(self.train_evaluator, "loss")
-        train_accuracy.attach(self.train_evaluator, "exact_accuracy")
+        train_exact_acc.attach(self.train_evaluator, "exact_accuracy")
+        train_token_acc.attach(self.train_evaluator, "token_accuracy")
         val_loss.attach(self.val_evaluator, "loss")
-        val_accuracy.attach(self.val_evaluator, "exact_accuracy")
+        val_exact_acc.attach(self.val_evaluator, "exact_accuracy")
+        val_token_acc.attach(self.val_evaluator, "token_accuracy")
         test_loss.attach(self.test_evaluator, "loss")
-        test_accuracy.attach(self.test_evaluator, "exact_accuracy")
+        test_exact_acc.attach(self.test_evaluator, "exact_accuracy")
+        test_token_acc.attach(self.test_evaluator, "token_accuracy")
 
         self.metrics = {
             "train_loss": train_loss,
-            "train_accuracy": train_accuracy,
+            "train_exact_accuracy": train_exact_acc,
+            "train_token_accuracy": train_token_acc,
             "val_loss": val_loss,
-            "val_accuracy": val_accuracy,
+            "val_exact_accuracy": val_exact_acc,
+            "val_token_accuracy": val_token_acc,
             "test_loss": test_loss,
-            "test_accuracy": test_accuracy,
+            "test_exact_accuracy": test_exact_acc,
+            "test_token_accuracy": test_token_acc,
         }
 
     def _attach_handlers(self) -> None:
@@ -419,7 +436,7 @@ class PreTrainer:
             output_transform=lambda output: {"batch_loss": output["loss"]},
         )
 
-        metric_names = ["loss", "exact_accuracy"]
+        metric_names = ["loss", "exact_accuracy", "token_accuracy"]
         tb_logger.attach_output_handler(
             self.train_evaluator,
             event_name=Events.EPOCH_COMPLETED,
@@ -462,19 +479,22 @@ class PreTrainer:
             self.val_evaluator.run(self.val_loader)
             val_metrics = self.val_evaluator.state.metrics
             self.logger.info(
-                "epoch=%s train_loss=%.4f train_acc=%.4f val_loss=%.4f val_acc=%.4f",
+                "epoch=%s train_loss=%.4f train_exact_match_acc=%.4f train_token_acc=%.4f val_loss=%.4f val_exact_match_acc=%.4f val_token_acc=%.4f",
                 epoch,
                 train_metrics["loss"],
                 train_metrics["exact_accuracy"],
+                train_metrics["token_accuracy"],
                 val_metrics["loss"],
                 val_metrics["exact_accuracy"],
+                val_metrics["token_accuracy"],
             )
         else:
             self.logger.info(
-                "epoch=%s train_loss=%.4f train_acc=%.4f",
+                "epoch=%s train_loss=%.4f train_exact_match_acc=%.4f train_token_acc=%.4f",
                 epoch,
                 train_metrics["loss"],
                 train_metrics["exact_accuracy"],
+                train_metrics["token_accuracy"],
             )
 
     def _validate_dataloader_for_inference(self, loader: DataLoader, name: str) -> None:
@@ -603,9 +623,10 @@ class PreTrainer:
         self.test_evaluator.run(loader)
         metrics = self.test_evaluator.state.metrics
         self.logger.info(
-            "Test results: loss=%.4f acc=%.4f",
+            "Test results: loss=%.4f exact_match_acc=%.4f token_acc=%.4f",
             metrics["loss"],
             metrics["exact_accuracy"],
+            metrics["token_accuracy"],
         )
 
     def run(self) -> None:
