@@ -54,7 +54,6 @@ class PreTrainer:
 
         self.device: str | torch.device = self._resolve_device()
         self.epochs: int = config.trainer.epochs
-        self.log_every_steps: int = config.trainer.log_every_steps
         self.grad_clip_norm: float | None = getattr(
             config.trainer, "grad_clip_norm", None
         )
@@ -66,7 +65,6 @@ class PreTrainer:
 
         self.loss_fn: nn.CrossEntropyLoss = nn.CrossEntropyLoss()
         self.optimizer: torch.optim.Optimizer = self._build_optimizer()
-        self.lr: float = config.optimizer.lr
         self.total_iters: int = len(self.train_loader) * self.epochs
         self.run_dir: Path | None = None
         self.handlers: dict = {}
@@ -188,21 +186,25 @@ class PreTrainer:
     def set_loaders(self) -> None:
         if self.config.data.train:
             self.train_loader = self._build_dataloader(self.config.data.train)
-            if self.config.data.val:
-                self.val_loader = self._build_dataloader(self.config.data.val)
-            if self.config.data.test:
-                self.test_loader = self._build_dataloader(self.config.data.test)
+            self.val_loader = (
+                self._build_dataloader(self.config.data.val)
+                if self.config.data.val
+                else None
+            )
+            self.test_loader = (
+                self._build_dataloader(self.config.data.test)
+                if self.config.data.test
+                else None
+            )
         elif self.config.data.dataset:
             self.logger.info(
                 "Automatic splitting requested with ratios: train=%s, val=%s",
                 self.config.data.train_ratio,
                 self.config.data.val_ratio,
             )
-            (
-                self.train_loader,
-                self.val_loader,
-                self.test_loader,
-            ) = self._build_loaders_from_ratios(self.config.data)
+            self.train_loader, self.val_loader, self.test_loader = (
+                self._build_loaders_from_ratios(self.config.data)
+            )
 
         if self.val_loader is None:
             self.logger.warning(
@@ -287,37 +289,22 @@ class PreTrainer:
             self.engine, "loss"
         )
 
-        train_loss = Loss(self.loss_fn, output_transform=self._flatten_loss)
-        train_exact_acc = Accuracy(output_transform=self._exact_accuracy_transform)
-        train_token_acc = Accuracy(output_transform=self._flatten_accuracy)
-        val_loss = Loss(self.loss_fn, output_transform=self._flatten_loss)
-        val_exact_acc = Accuracy(output_transform=self._exact_accuracy_transform)
-        val_token_acc = Accuracy(output_transform=self._flatten_accuracy)
-        test_loss = Loss(self.loss_fn, output_transform=self._flatten_loss)
-        test_exact_acc = Accuracy(output_transform=self._exact_accuracy_transform)
-        test_token_acc = Accuracy(output_transform=self._flatten_accuracy)
+        for prefix, evaluator in [
+            ("train", self.train_evaluator),
+            ("val", self.val_evaluator),
+            ("test", self.test_evaluator),
+        ]:
+            loss = Loss(self.loss_fn, output_transform=self._flatten_loss)
+            exact_acc = Accuracy(output_transform=self._exact_accuracy_transform)
+            token_acc = Accuracy(output_transform=self._flatten_accuracy)
 
-        train_loss.attach(self.train_evaluator, "loss")
-        train_exact_acc.attach(self.train_evaluator, "exact_accuracy")
-        train_token_acc.attach(self.train_evaluator, "token_accuracy")
-        val_loss.attach(self.val_evaluator, "loss")
-        val_exact_acc.attach(self.val_evaluator, "exact_accuracy")
-        val_token_acc.attach(self.val_evaluator, "token_accuracy")
-        test_loss.attach(self.test_evaluator, "loss")
-        test_exact_acc.attach(self.test_evaluator, "exact_accuracy")
-        test_token_acc.attach(self.test_evaluator, "token_accuracy")
+            loss.attach(evaluator, "loss")
+            exact_acc.attach(evaluator, "exact_accuracy")
+            token_acc.attach(evaluator, "token_accuracy")
 
-        self.metrics = {
-            "train_loss": train_loss,
-            "train_exact_accuracy": train_exact_acc,
-            "train_token_accuracy": train_token_acc,
-            "val_loss": val_loss,
-            "val_exact_accuracy": val_exact_acc,
-            "val_token_accuracy": val_token_acc,
-            "test_loss": test_loss,
-            "test_exact_accuracy": test_exact_acc,
-            "test_token_accuracy": test_token_acc,
-        }
+            self.metrics[f"{prefix}_loss"] = loss
+            self.metrics[f"{prefix}_exact_accuracy"] = exact_acc
+            self.metrics[f"{prefix}_token_accuracy"] = token_acc
 
     def _attach_handlers(self) -> None:
         self.logger = setup_logger(
@@ -332,7 +319,7 @@ class PreTrainer:
         self.train_fb_logger.attach(
             self.engine,
             name="Train",
-            every=self.log_every_steps,
+            every=self.config.trainer.log_every_steps,
             optimizer=self.optimizer,
             output_transform=lambda output: {"loss": output["loss"].item()},
         )
@@ -348,7 +335,7 @@ class PreTrainer:
         self.scheduler: ParamScheduler = create_lr_scheduler_with_warmup(
             linear_decay,
             warmup_start_value=0.0,
-            warmup_end_value=self.lr,
+            warmup_end_value=self.config.optimizer.lr,
             warmup_duration=warmup_iters,
         )
 
