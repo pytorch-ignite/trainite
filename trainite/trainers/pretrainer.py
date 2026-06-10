@@ -510,41 +510,12 @@ class PreTrainer:
             )
 
     def _setup_inference(self, config: ProjectConfig) -> None:
-        self.inference_every_epochs: int | None = getattr(
-            config.trainer, "inference_every_epochs", None
-        )
+        self.inference_every_epochs: int | None = config.trainer.inference_every_epochs
         if self.inference_every_epochs is None:
             return
 
-        self.inference_num_samples: int = getattr(
-            config.trainer, "inference_num_samples"
-        )
-        self.max_inference_new_tokens: int = getattr(
-            config.trainer, "max_inference_new_tokens"
-        )
-        inference_params = (
-            self.inference_every_epochs,
-            self.inference_num_samples,
-            self.max_inference_new_tokens,
-        )
-        if any(
-            (not isinstance(param, int) or isinstance(param, bool))
-            for param in inference_params
-        ):
-            raise TypeError(
-                f"Inference logging parameters must be integers.\n"
-                f"Got inference_every_epochs={self.inference_every_epochs}, "
-                f"inference_num_samples={self.inference_num_samples}, "
-                f"max_inference_new_tokens={self.max_inference_new_tokens}"
-            )
-
-        if any(param <= 0 for param in inference_params):
-            raise ValueError(
-                f"Inference logging parameters must be greater than 0.\n"
-                f"Got inference_every_epochs={self.inference_every_epochs}, "
-                f"inference_num_samples={self.inference_num_samples}, "
-                f"max_inference_new_tokens={self.max_inference_new_tokens}"
-            )
+        self.inference_num_samples: int = config.trainer.inference_num_samples
+        self.max_inference_new_tokens: int = config.trainer.max_inference_new_tokens
 
         if not hasattr(self.model, "generate"):
             raise ValueError(

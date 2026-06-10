@@ -7,6 +7,7 @@ from unittest import mock
 import pytest
 import torch
 import torch.nn as nn
+from pydantic import ValidationError
 
 from trainite.config import (
     ComponentConfig,
@@ -469,7 +470,6 @@ def test_pretrainer_dataset_is_empty(project_config):
 
 
 def test_pretrainer_early_stopping_patience(project_config):
-    from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
         project_config.trainer.early_stopping_patience = 0
@@ -512,13 +512,10 @@ def test_pretrainer_dataloader_class_collate_fn(project_config):
 def test_setup_inference_invalid_inference_params(
     project_config, epochs, tokens, samples
 ):
-    project_config.trainer.inference_every_epochs = epochs
-    project_config.trainer.max_inference_new_tokens = tokens
-    project_config.trainer.inference_num_samples = samples
-    with pytest.raises(
-        ValueError, match="Inference logging parameters must be greater than 0"
-    ):
-        PreTrainer(project_config)
+    with pytest.raises(ValidationError):
+        project_config.trainer.inference_every_epochs = epochs
+        project_config.trainer.max_inference_new_tokens = tokens
+        project_config.trainer.inference_num_samples = samples
 
 
 @pytest.mark.parametrize(
@@ -532,13 +529,10 @@ def test_setup_inference_invalid_inference_params(
 def test_setup_inference_invalid_inference_type_params(
     project_config, epochs, tokens, samples
 ):
-    project_config.trainer.inference_every_epochs = epochs
-    project_config.trainer.max_inference_new_tokens = tokens
-    project_config.trainer.inference_num_samples = samples
-    with pytest.raises(
-        TypeError, match="Inference logging parameters must be integers."
-    ):
-        PreTrainer(project_config)
+    with pytest.raises(ValidationError):
+        project_config.trainer.inference_every_epochs = epochs
+        project_config.trainer.max_inference_new_tokens = tokens
+        project_config.trainer.inference_num_samples = samples
 
 
 def test_setup_inference_missing_generate(project_config):

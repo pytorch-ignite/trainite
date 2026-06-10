@@ -7,6 +7,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    field_validator,
     model_serializer,
     model_validator,
 )
@@ -28,6 +29,22 @@ class TrainerConfig(BaseModel):
     log_every_steps: int = Field(default=10, gt=0)
     epochs: int = Field(default=10, gt=0)
     early_stopping_patience: int | None = Field(default=3, gt=0)
+    inference_every_epochs: int | None = Field(default=None, gt=0)
+    inference_num_samples: int = Field(default=5, gt=0)
+    max_inference_new_tokens: int = Field(default=16, gt=0)
+
+    @field_validator(
+        "inference_every_epochs",
+        "inference_num_samples",
+        "max_inference_new_tokens",
+        mode="before",
+    )
+    @classmethod
+    def validate_inference_types(cls, v: Any) -> Any:
+        if v is not None:
+            if not isinstance(v, int) or isinstance(v, bool):
+                raise ValueError("Inference logging parameters must be integers.")
+        return v
 
 
 class OptimizerConfig(ComponentConfig):
