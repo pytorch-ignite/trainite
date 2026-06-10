@@ -358,15 +358,21 @@ class PreTrainer:
         self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
         if self.inference_every_epochs is not None:
             self.engine.add_event_handler(
-                Events.EPOCH_COMPLETED, self._log_inference, self.train_loader, "Train"
+                Events.EPOCH_COMPLETED(every=self.inference_every_epochs),
+                self._log_inference,
+                self.train_loader,
+                "Train",
             )
             if self.val_loader is not None:
                 self.engine.add_event_handler(
-                    Events.EPOCH_COMPLETED, self._log_inference, self.val_loader, "Val"
+                    Events.EPOCH_COMPLETED(every=self.inference_every_epochs),
+                    self._log_inference,
+                    self.val_loader,
+                    "Val",
                 )
             if self.test_loader is not None:
                 self.engine.add_event_handler(
-                    Events.EPOCH_COMPLETED,
+                    Events.EPOCH_COMPLETED(every=self.inference_every_epochs),
                     self._log_inference,
                     self.test_loader,
                     "Test",
@@ -561,12 +567,6 @@ class PreTrainer:
             self._validate_dataloader_for_inference(self.test_loader, "Test")
 
     def _log_inference(self, engine: Engine, loader: DataLoader, name: str) -> None:
-        if (
-            not self.inference_every_epochs
-            or engine.state.epoch % self.inference_every_epochs != 0
-        ):
-            return
-
         tokenizer = self.inference_tokenizer
         if tokenizer is None:
             return
@@ -578,8 +578,6 @@ class PreTrainer:
         eos_token_id = getattr(tokenizer, "eos_token_id", None)
 
         dataset = loader.dataset
-        if not isinstance(dataset, Sized):
-            raise TypeError(f"{name} dataset must be Sized to run inference logging.")
         total_samples = len(dataset)
         num_samples = min(self.inference_num_samples, total_samples)
         samples = [dataset[i] for i in range(num_samples)]
