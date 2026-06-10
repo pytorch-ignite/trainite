@@ -30,13 +30,13 @@ The model is small and standard:
 Padding ID is `0`. The model ignores padded positions in attention.
 
 ### Sequence length
-`max_seq_len` should be at least as long as your longest input sequence.
+`max_seq_len` represents the precomputed cache size for RoPE. Inputs longer than this will fall back to slower on-the-fly calculations.
 
 ### Hidden size and heads
 `hidden_size` must be divisible by `num_heads`.
 
-### Positional encoding
-`hidden_size` must be even because the positional encoding uses sine and cosine pairs.
+### Rotary positional encoding
+`head_dim` (which is `hidden_size // num_heads`) must be even because RoPE rotates pairs of dimensions.
 
 ## Config knobs
 
@@ -61,10 +61,10 @@ Size of the feedforward layer inside each block.
 A common choice is `2x` to `4x` of `hidden_size`.
 
 ### `dropout`
-Dropout rate used in attention, feedforward layers, and positional encoding.
+Dropout rate used in attention and feedforward layers.
 
 ### `max_seq_len`
-Maximum sequence length supported by positional encoding.
+Precomputed cache size for the rotary position embeddings.
 
 ## Minimal config example
 

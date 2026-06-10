@@ -24,27 +24,58 @@ class Tokenizer(Protocol):
     def decode(self, ids: list[int]) -> str: ...
 
 
-class PositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, max_len: int, dropout: float = 0.1) -> None:
+class RotaryEmbedding(nn.Module):
+    def __init__(self, dim: int, max_seq_len: int) -> None:
         super().__init__()
-        self.dropout = nn.Dropout(p=dropout)
+        if dim % 2 != 0:
+            raise ValueError(
+                f"RotaryEmbedding dimension (head_dim) must be even, got {dim}."
+            )
+        self.dim = dim
+        self.max_seq_len = max_seq_len
+        inv_freq = 1.0 / (10000.0 ** (torch.arange(0, dim, 2).float() / dim))
+        self.register_buffer("inv_freq", inv_freq, persistent=False)
 
-        if d_model % 2 != 0:
-            raise ValueError("d_model must be even for sinusoidal positional encoding.")
-
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(
-            torch.arange(0, d_model, 2, dtype=torch.float)
-            * (-math.log(10000.0) / d_model)
+        # Precompute cos and sin buffers
+        cos, sin = self._compute_embeddings(
+            max_seq_len, device=inv_freq.device, dtype=torch.float32
         )
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        self.register_buffer("pe", pe.unsqueeze(0))
+        self.register_buffer("cos_cached", cos, persistent=False)
+        self.register_buffer("sin_cached", sin, persistent=False)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.pe[:, : x.size(1)]
-        return self.dropout(x)
+    def _compute_embeddings(
+        self, seq_len: int, device: torch.device, dtype: torch.dtype
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        t = torch.arange(seq_len, device=device, dtype=self.inv_freq.dtype)
+        freqs = torch.outer(t, self.inv_freq)
+        emb = torch.cat((freqs, freqs), dim=-1)
+        cos = emb.cos().unsqueeze(0).unsqueeze(0).to(dtype)
+        sin = emb.sin().unsqueeze(0).unsqueeze(0).to(dtype)
+        return cos, sin
+
+    def forward(
+        self, x: torch.Tensor, seq_len: int
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if seq_len > self.max_seq_len:
+            return self._compute_embeddings(seq_len, device=x.device, dtype=x.dtype)
+
+        return self.cos_cached[:, :, :seq_len].to(x.dtype), self.sin_cached[
+            :, :, :seq_len
+        ].to(x.dtype)
+
+
+def rotate_half(x: torch.Tensor) -> torch.Tensor:
+    x1 = x[..., : x.shape[-1] // 2]
+    x2 = x[..., x.shape[-1] // 2 :]
+    return torch.cat((-x2, x1), dim=-1)
+
+
+def apply_rotary_pos_emb(
+    q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    q_embed = (q * cos) + (rotate_half(q) * sin)
+    k_embed = (k * cos) + (rotate_half(k) * sin)
+    return q_embed, k_embed
 
 
 class Attention(nn.Module):
@@ -63,6 +94,8 @@ class Attention(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
         padding_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         B, S, C = x.shape
@@ -74,6 +107,10 @@ class Attention(nn.Module):
         q = q.view(B, S, self.num_heads, self.head_dim).transpose(1, 2)
         k = k.view(B, S, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(B, S, self.num_heads, self.head_dim).transpose(1, 2)
+
+        # Apply Rotary Position Embeddings
+        q, k = apply_rotary_pos_emb(q, k, cos, sin)
+
         # padding mask shape should be (B,1,1,S) to broadcast correctly with attention scores of shape (B, num_heads, S, S)
         if padding_mask is not None:
             causal_mask = torch.ones(S, S, dtype=torch.bool, device=x.device).tril()
@@ -101,11 +138,7 @@ class Attention(nn.Module):
 
 class TransformerBlock(nn.Module):
     def __init__(
-        self,
-        d_model: int,
-        num_heads: int,
-        feedforward_dim: int,
-        dropout: float = 0.1,
+        self, d_model: int, num_heads: int, feedforward_dim: int, dropout: float = 0.1
     ) -> None:
         super().__init__()
         self.norm1 = nn.LayerNorm(d_model)
@@ -120,10 +153,14 @@ class TransformerBlock(nn.Module):
         )
 
     def forward(
-        self, x: torch.Tensor, padding_mask: torch.Tensor | None = None
+        self,
+        x: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+        padding_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         normed = self.norm1(x)
-        attn_output, _ = self.attention(normed, padding_mask=padding_mask)
+        attn_output, _ = self.attention(normed, cos, sin, padding_mask=padding_mask)
         x = x + attn_output
 
         normed = self.norm2(x)
@@ -145,7 +182,9 @@ class TransformerModel(nn.Module):
     ) -> None:
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, hidden_size, padding_idx=0)
-        self.pos_encoding = PositionalEncoding(hidden_size, max_seq_len, dropout)
+        self.rotary_emb = RotaryEmbedding(
+            dim=hidden_size // num_heads, max_seq_len=max_seq_len
+        )
         self.blocks = nn.ModuleList(
             [
                 TransformerBlock(
@@ -163,13 +202,13 @@ class TransformerModel(nn.Module):
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
         B, S = input_ids.shape
         x = self.embedding(input_ids) * math.sqrt(self.embedding.embedding_dim)
-        x = self.pos_encoding(x)
+        cos, sin = self.rotary_emb(x, seq_len=S)
         if (input_ids == self.embedding.padding_idx).any():
             padding_mask = (input_ids != self.embedding.padding_idx).reshape(B, 1, 1, S)
         else:
             padding_mask = None
         for block in self.blocks:
-            x = block(x, padding_mask=padding_mask)
+            x = block(x, cos, sin, padding_mask=padding_mask)
         x = self.norm(x)
         return self.proj(x)
 
