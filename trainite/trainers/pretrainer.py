@@ -496,14 +496,14 @@ class PreTrainer:
         self.max_inference_new_tokens: int = getattr(
             config.trainer, "max_inference_new_tokens"
         )
-
-        if (
-            isinstance(self.inference_every_epochs, bool)
-            or isinstance(self.inference_num_samples, bool)
-            or isinstance(self.max_inference_new_tokens, bool)
-            or not isinstance(self.inference_every_epochs, int)
-            or not isinstance(self.inference_num_samples, int)
-            or not isinstance(self.max_inference_new_tokens, int)
+        inference_params = (
+            self.inference_every_epochs,
+            self.inference_num_samples,
+            self.max_inference_new_tokens,
+        )
+        if any(
+            (not isinstance(param, int) or isinstance(param, bool))
+            for param in inference_params
         ):
             raise TypeError(
                 f"Inference logging parameters must be integers.\n"
@@ -512,11 +512,7 @@ class PreTrainer:
                 f"max_inference_new_tokens={self.max_inference_new_tokens}"
             )
 
-        if (
-            self.inference_every_epochs <= 0
-            or self.inference_num_samples <= 0
-            or self.max_inference_new_tokens <= 0
-        ):
+        if any(param <= 0 for param in inference_params):
             raise ValueError(
                 f"Inference logging parameters must be greater than 0.\n"
                 f"Got inference_every_epochs={self.inference_every_epochs}, "
