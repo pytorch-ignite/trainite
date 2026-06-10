@@ -8,46 +8,61 @@ from trainite.datasets.string_reverse import CharTokenizer
 from trainite.models.transformer import (
     Attention,
     CausalLMCollateFn,
-    PositionalEncoding,
+    RotaryEmbedding,
     TransformerBlock,
     TransformerModel,
 )
 from trainite.utils import instantiate
 
 
-def test_positional_encoding():
-    d_model = 16
-    max_len = 32
-    pe = PositionalEncoding(d_model, max_len)
-    x = torch.zeros(1, 10, d_model)
-    output = pe(x)
-    assert output.shape == x.shape
-    assert not torch.allclose(output, x)
+def test_rotary_embedding():
+    dim = 8
+    max_seq_len = 16
+    rope = RotaryEmbedding(dim, max_seq_len)
 
-    d_model = 15
-    max_len = 32
-    with pytest.raises(
-        ValueError, match="d_model must be even for sinusoidal positional encoding."
-    ):
-        PositionalEncoding(d_model, max_len)
+    # Test inside cache boundary
+    seq_len = 10
+    x = torch.zeros(1, 2, seq_len, dim)
+    cos, sin = rope(x, seq_len)
+    assert cos.shape == (1, 1, seq_len, dim)
+    assert sin.shape == (1, 1, seq_len, dim)
+    assert cos.abs().max() <= 1.0
+    assert sin.abs().max() <= 1.0
+
+    # Test outside cache boundary (fallback dynamic computation)
+    seq_len_large = 24
+    x_large = torch.zeros(1, 2, seq_len_large, dim)
+    cos_l, sin_l = rope(x_large, seq_len_large)
+    assert cos_l.shape == (1, 1, seq_len_large, dim)
+    assert sin_l.shape == (1, 1, seq_len_large, dim)
+    assert cos_l.abs().max() <= 1.0
+    assert sin_l.abs().max() <= 1.0
+
+    # Test odd dimension throws ValueError
+    with pytest.raises(ValueError, match="RotaryEmbedding dimension.*must be even"):
+        RotaryEmbedding(7, max_seq_len)
 
 
 def test_attention():
     embed_dim = 16
     num_heads = 2
+    head_dim = embed_dim // num_heads
     attn = Attention(embed_dim, num_heads)
     x = torch.randn(2, 10, embed_dim)
 
+    rope = RotaryEmbedding(head_dim, 16)
+    cos, sin = rope(x, seq_len=10)
+
     # Test causal attention (default when padding_mask is None)
     attn.eval()
-    output, context = attn(x)
+    output, context = attn(x, cos, sin)
     assert output.shape == x.shape
 
     # Test with padding mask
     # padding_mask shape (B, 1, 1, S)
     padding_mask = torch.ones(2, 1, 1, 10, dtype=torch.bool)
     padding_mask[:, :, :, -2:] = False  # Mask last 2 tokens
-    output, context = attn(x, padding_mask=padding_mask)
+    output, context = attn(x, cos, sin, padding_mask=padding_mask)
     assert output.shape == x.shape
 
     # Non-divisible embed_dim should raise an assertion error
@@ -59,37 +74,46 @@ def test_transformer_block():
     d_model = 16
     num_heads = 2
     feedforward_dim = 32
+    head_dim = d_model // num_heads
     block = TransformerBlock(d_model, num_heads, feedforward_dim)
     x = torch.randn(2, 10, d_model)
-    output = block(x)
+
+    rope = RotaryEmbedding(head_dim, 16)
+    cos, sin = rope(x, seq_len=10)
+
+    output = block(x, cos, sin)
     assert output.shape == x.shape
 
 
 def test_attention_context_and_dropout_behavior():
     embed_dim = 16
     num_heads = 2
+    head_dim = embed_dim // num_heads
     # use noticeable dropout so behavior is observable
     attn = Attention(embed_dim, num_heads, dropout=0.5)
     x = torch.randn(2, 10, embed_dim)
 
+    rope = RotaryEmbedding(head_dim, 16)
+    cos, sin = rope(x, seq_len=10)
+
     # context shape should match (B, S, C)
-    output, context = attn(x)
+    output, context = attn(x, cos, sin)
     assert context.shape == x.shape
 
     # Dropout should be disabled in eval mode (deterministic outputs across different seeds)
     attn.eval()
     torch.manual_seed(0)
-    out1, _ = attn(x)
+    out1, _ = attn(x, cos, sin)
     torch.manual_seed(1)
-    out2, _ = attn(x)
+    out2, _ = attn(x, cos, sin)
     assert torch.allclose(out1, out2)
 
     # In train mode with different seeds outputs are expected to differ due to dropout randomness
     attn.train()
     torch.manual_seed(0)
-    out3, _ = attn(x)
+    out3, _ = attn(x, cos, sin)
     torch.manual_seed(1)
-    out4, _ = attn(x)
+    out4, _ = attn(x, cos, sin)
     # It's extremely unlikely these are exactly equal when dropout is active
     assert not torch.allclose(out3, out4)
 
