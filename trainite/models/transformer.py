@@ -37,26 +37,27 @@ class RotaryEmbedding(nn.Module):
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
         # Precompute cos and sin buffers
-        t = torch.arange(max_seq_len, dtype=torch.float32)
-        freqs = torch.outer(t, inv_freq)
+        cos, sin = self._compute_embeddings(
+            max_seq_len, device=inv_freq.device, dtype=torch.float32
+        )
+        self.register_buffer("cos_cached", cos, persistent=False)
+        self.register_buffer("sin_cached", sin, persistent=False)
+
+    def _compute_embeddings(
+        self, seq_len: int, device: torch.device, dtype: torch.dtype
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        t = torch.arange(seq_len, device=device, dtype=self.inv_freq.dtype)
+        freqs = torch.outer(t, self.inv_freq)
         emb = torch.cat((freqs, freqs), dim=-1)
-        self.register_buffer(
-            "cos_cached", emb.cos().unsqueeze(0).unsqueeze(0), persistent=False
-        )
-        self.register_buffer(
-            "sin_cached", emb.sin().unsqueeze(0).unsqueeze(0), persistent=False
-        )
+        cos = emb.cos().unsqueeze(0).unsqueeze(0).to(dtype)
+        sin = emb.sin().unsqueeze(0).unsqueeze(0).to(dtype)
+        return cos, sin
 
     def forward(
         self, x: torch.Tensor, seq_len: int
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if seq_len > self.max_seq_len:
-            t = torch.arange(seq_len, device=x.device, dtype=self.inv_freq.dtype)
-            freqs = torch.outer(t, self.inv_freq)
-            emb = torch.cat((freqs, freqs), dim=-1)
-            cos = emb.cos().unsqueeze(0).unsqueeze(0).to(x.dtype)
-            sin = emb.sin().unsqueeze(0).unsqueeze(0).to(x.dtype)
-            return cos, sin
+            return self._compute_embeddings(seq_len, device=x.device, dtype=x.dtype)
 
         return self.cos_cached[:, :, :seq_len].to(x.dtype), self.sin_cached[
             :, :, :seq_len
@@ -78,13 +79,7 @@ def apply_rotary_pos_emb(
 
 
 class Attention(nn.Module):
-    def __init__(
-        self,
-        embed_dim: int,
-        num_heads: int,
-        dropout: float = 0.1,
-        max_seq_len: int = 128,
-    ):
+    def __init__(self, embed_dim: int, num_heads: int, dropout: float = 0.1):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
@@ -95,11 +90,12 @@ class Attention(nn.Module):
         self.out = nn.Linear(embed_dim, embed_dim, bias=False)
         self.dropout = nn.Dropout(p=dropout)
         self.dropout_p = dropout
-        self.rotary_emb = RotaryEmbedding(dim=self.head_dim, max_seq_len=max_seq_len)
 
     def forward(
         self,
         x: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
         padding_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         B, S, C = x.shape
@@ -113,7 +109,6 @@ class Attention(nn.Module):
         v = v.view(B, S, self.num_heads, self.head_dim).transpose(1, 2)
 
         # Apply Rotary Position Embeddings
-        cos, sin = self.rotary_emb(q, seq_len=S)
         q, k = apply_rotary_pos_emb(q, k, cos, sin)
 
         # padding mask shape should be (B,1,1,S) to broadcast correctly with attention scores of shape (B, num_heads, S, S)
@@ -143,18 +138,11 @@ class Attention(nn.Module):
 
 class TransformerBlock(nn.Module):
     def __init__(
-        self,
-        d_model: int,
-        num_heads: int,
-        feedforward_dim: int,
-        dropout: float = 0.1,
-        max_seq_len: int = 128,
+        self, d_model: int, num_heads: int, feedforward_dim: int, dropout: float = 0.1
     ) -> None:
         super().__init__()
         self.norm1 = nn.LayerNorm(d_model)
-        self.attention = Attention(
-            d_model, num_heads, dropout=dropout, max_seq_len=max_seq_len
-        )
+        self.attention = Attention(d_model, num_heads, dropout=dropout)
         self.norm2 = nn.LayerNorm(d_model)
         self.feedforward = nn.Sequential(
             nn.Linear(d_model, feedforward_dim),
@@ -165,10 +153,14 @@ class TransformerBlock(nn.Module):
         )
 
     def forward(
-        self, x: torch.Tensor, padding_mask: torch.Tensor | None = None
+        self,
+        x: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+        padding_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         normed = self.norm1(x)
-        attn_output, _ = self.attention(normed, padding_mask=padding_mask)
+        attn_output, _ = self.attention(normed, cos, sin, padding_mask=padding_mask)
         x = x + attn_output
 
         normed = self.norm2(x)
@@ -190,6 +182,9 @@ class TransformerModel(nn.Module):
     ) -> None:
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, hidden_size, padding_idx=0)
+        self.rotary_emb = RotaryEmbedding(
+            dim=hidden_size // num_heads, max_seq_len=max_seq_len
+        )
         self.blocks = nn.ModuleList(
             [
                 TransformerBlock(
@@ -197,7 +192,6 @@ class TransformerModel(nn.Module):
                     num_heads,
                     feedforward_dim,
                     dropout,
-                    max_seq_len=max_seq_len,
                 )
                 for _ in range(num_layers)
             ]
@@ -208,12 +202,13 @@ class TransformerModel(nn.Module):
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
         B, S = input_ids.shape
         x = self.embedding(input_ids) * math.sqrt(self.embedding.embedding_dim)
+        cos, sin = self.rotary_emb(x, seq_len=S)
         if (input_ids == self.embedding.padding_idx).any():
             padding_mask = (input_ids != self.embedding.padding_idx).reshape(B, 1, 1, S)
         else:
             padding_mask = None
         for block in self.blocks:
-            x = block(x, padding_mask=padding_mask)
+            x = block(x, cos, sin, padding_mask=padding_mask)
         x = self.norm(x)
         return self.proj(x)
 

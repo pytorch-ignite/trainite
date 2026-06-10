@@ -46,19 +46,23 @@ def test_rotary_embedding():
 def test_attention():
     embed_dim = 16
     num_heads = 2
+    head_dim = embed_dim // num_heads
     attn = Attention(embed_dim, num_heads)
     x = torch.randn(2, 10, embed_dim)
 
+    rope = RotaryEmbedding(head_dim, 16)
+    cos, sin = rope(x, seq_len=10)
+
     # Test causal attention (default when padding_mask is None)
     attn.eval()
-    output, context = attn(x)
+    output, context = attn(x, cos, sin)
     assert output.shape == x.shape
 
     # Test with padding mask
     # padding_mask shape (B, 1, 1, S)
     padding_mask = torch.ones(2, 1, 1, 10, dtype=torch.bool)
     padding_mask[:, :, :, -2:] = False  # Mask last 2 tokens
-    output, context = attn(x, padding_mask=padding_mask)
+    output, context = attn(x, cos, sin, padding_mask=padding_mask)
     assert output.shape == x.shape
 
     # Non-divisible embed_dim should raise an assertion error
@@ -70,37 +74,46 @@ def test_transformer_block():
     d_model = 16
     num_heads = 2
     feedforward_dim = 32
+    head_dim = d_model // num_heads
     block = TransformerBlock(d_model, num_heads, feedforward_dim)
     x = torch.randn(2, 10, d_model)
-    output = block(x)
+
+    rope = RotaryEmbedding(head_dim, 16)
+    cos, sin = rope(x, seq_len=10)
+
+    output = block(x, cos, sin)
     assert output.shape == x.shape
 
 
 def test_attention_context_and_dropout_behavior():
     embed_dim = 16
     num_heads = 2
+    head_dim = embed_dim // num_heads
     # use noticeable dropout so behavior is observable
     attn = Attention(embed_dim, num_heads, dropout=0.5)
     x = torch.randn(2, 10, embed_dim)
 
+    rope = RotaryEmbedding(head_dim, 16)
+    cos, sin = rope(x, seq_len=10)
+
     # context shape should match (B, S, C)
-    output, context = attn(x)
+    output, context = attn(x, cos, sin)
     assert context.shape == x.shape
 
     # Dropout should be disabled in eval mode (deterministic outputs across different seeds)
     attn.eval()
     torch.manual_seed(0)
-    out1, _ = attn(x)
+    out1, _ = attn(x, cos, sin)
     torch.manual_seed(1)
-    out2, _ = attn(x)
+    out2, _ = attn(x, cos, sin)
     assert torch.allclose(out1, out2)
 
     # In train mode with different seeds outputs are expected to differ due to dropout randomness
     attn.train()
     torch.manual_seed(0)
-    out3, _ = attn(x)
+    out3, _ = attn(x, cos, sin)
     torch.manual_seed(1)
-    out4, _ = attn(x)
+    out4, _ = attn(x, cos, sin)
     # It's extremely unlikely these are exactly equal when dropout is active
     assert not torch.allclose(out3, out4)
 
