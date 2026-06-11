@@ -271,7 +271,7 @@ class TransformerModel(nn.Module):
             next_token_logits = logits[:, -1, :]
             next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
             if eos_token_id is not None:
-                eos_mask = generated[:, -1].eq(eos_token_id)
+                eos_mask = generated[:, -1:].eq(eos_token_id)
                 next_token = torch.where(
                     eos_mask, torch.tensor(eos_token_id, device=device), next_token
                 )

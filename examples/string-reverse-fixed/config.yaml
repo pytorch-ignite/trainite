@@ -24,8 +24,8 @@ data:
         num_workers: 2
         collate_fn:
             _target_: models.transformer.CausalLMCollateFn
-    train_ratio: 0.8
-    val_ratio: 0.1
+    train_ratio: 0.75
+    val_ratio: 0.2
 trainer:
     log_every_steps: 10
     epochs: 3
