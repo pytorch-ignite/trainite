@@ -470,7 +470,6 @@ def test_pretrainer_dataset_is_empty(project_config):
 
 
 def test_pretrainer_early_stopping_patience(project_config):
-
     with pytest.raises(ValidationError):
         project_config.trainer.early_stopping_patience = 0
 
