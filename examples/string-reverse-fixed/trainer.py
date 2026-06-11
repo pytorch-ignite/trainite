@@ -347,7 +347,7 @@ class PreTrainer:
             save_history=True,
         )
 
-        self.val_evaluator.add_event_handler(Events.ITERATION_COMPLETED, self.scheduler)
+        self.val_evaluator.add_event_handler(Events.COMPLETED, self.scheduler)
 
         # 2. Run evaluations
         self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
