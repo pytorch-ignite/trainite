@@ -1,6 +1,6 @@
 # Trainite
 
-**Trainite** is a cookiecutter project generator for training language models using [PyTorch-Ignite](https://github.com/pytorch/ignite). 
+**Trainite** is a cookiecutter project generator for training language models using [PyTorch-Ignite](https://github.com/pytorch/ignite).
 
 Instead of wrapping your code in a runtime framework, Trainite generates a clean, standalone, zero-dependency project folder containing standard PyTorch code that you fully own.
 
