@@ -43,13 +43,21 @@ class DataLoaderConfig(BaseModel):
     collate_fn: ComponentConfig | None = None
 
 
+class ModelConfig(ComponentConfig):
+    pass
+
+
+class DatasetConfig(ComponentConfig):
+    pass
+
+
 class SplitConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
     dataset: ComponentConfig
     dataloader: DataLoaderConfig = Field(default_factory=DataLoaderConfig)
 
 
-class DataConfig(BaseModel):
+class DataConfigBase(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
     # Option 1: Explicit splits
     train: SplitConfig | None = None
@@ -70,7 +78,7 @@ class DataConfig(BaseModel):
         return res
 
     @model_validator(mode="after")
-    def validate_options(self) -> "DataConfig":
+    def validate_options(self) -> "DataConfigBase":
         option1_fields = {"train", "val", "test"}
         option2_fields = {"dataset", "train_ratio", "val_ratio", "dataloader"}
 
@@ -80,7 +88,7 @@ class DataConfig(BaseModel):
         if present_option1 and present_option2:
             if "dataset" in present_option2 or "dataloader" in present_option2:
                 raise ValueError(
-                    r"Cannot provide train/val/test levels when 'dataset' or 'dataloader' is provided at the data level"
+                    "Cannot provide train/val/test levels when 'dataset' or 'dataloader' is provided at the data level"
                 )
             raise ValueError(
                 "Cannot provide train_ratio or val_ratio at the data level when explicit splits are used"
@@ -109,11 +117,15 @@ class DataConfig(BaseModel):
         return self
 
 
+class DataConfig(DataConfigBase):
+    pass
+
+
 class ProjectConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
     model: ComponentConfig
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
-    data: DataConfig
+    data: DataConfigBase
     trainer: TrainerConfig
     output: OutputConfig
     seed: int = 42
@@ -128,7 +140,7 @@ def load_yaml(path: str | Path) -> dict:
     return data
 
 
-def dump_yaml(data: dict["str", Any], path: str | Path) -> None:
+def dump_yaml(data: dict[str, Any], path: str | Path) -> None:
     Path(path).write_text(yaml.safe_dump(data, sort_keys=False))
 
 

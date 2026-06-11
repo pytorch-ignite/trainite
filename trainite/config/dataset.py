@@ -1,6 +1,6 @@
-from pydantic import Field, ConfigDict, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
-from trainite.config.base import ComponentConfig, DataConfig, DataLoaderConfig
+from trainite.config.base import ComponentConfig, DataConfigBase, DataLoaderConfig
 
 
 class StringReverseDatasetConfig(ComponentConfig):
@@ -35,7 +35,7 @@ class StringReverseDatasetConfig(ComponentConfig):
         return self
 
 
-class StringReverseDataConfig(DataConfig):
+class StringReverseDataConfig(DataConfigBase):
     dataset: ComponentConfig | None = Field(default_factory=StringReverseDatasetConfig)
     train_ratio: float | None = 0.8
     val_ratio: float | None = 0.1
