@@ -222,7 +222,7 @@ class TransformerModel(nn.Module):
         sep_token_id: int | None = None,
         eos_token_id: int | None = None,
         pad_token_id: int | None = None,
-    ) -> tuple[list[str], torch.Tensor]:
+    ) -> list[str]:
         """Generate text from a raw text prompts.
 
         Args:
@@ -265,13 +265,13 @@ class TransformerModel(nn.Module):
 
         generated = input_ids.clone()
         prompt_len = input_ids.size(1)
-        print(f"max_new_tokens: {max_new_tokens}, prompt_len: {prompt_len}")
+
         for _ in range(max_new_tokens):
             logits = self(generated)
             next_token_logits = logits[:, -1, :]
             next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
             if eos_token_id is not None:
-                eos_mask = generated[:, -1:].eq(eos_token_id)
+                eos_mask = generated[:, -1].eq(eos_token_id)
                 next_token = torch.where(
                     eos_mask, torch.tensor(eos_token_id, device=device), next_token
                 )
@@ -282,7 +282,7 @@ class TransformerModel(nn.Module):
 
         new_tokens = generated[:, prompt_len:].tolist()
         decoded = [tokenizer.decode(tokens) for tokens in new_tokens]
-        return decoded, generated[:, prompt_len:]
+        return decoded
 
 
 class CausalLMCollateFn:

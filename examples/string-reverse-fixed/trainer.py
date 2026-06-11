@@ -36,7 +36,7 @@ class GenerativeModel(Protocol):
         max_new_tokens: int,
         tokenizer: Any,
         eos_token_id: int | None = None,
-    ) -> tuple[list[str], torch.Tensor]: ...
+    ) -> list[str]: ...
 
 
 class PreTrainer:
@@ -354,9 +354,9 @@ class PreTrainer:
         # 2. Run evaluations
         self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
         if self.inference_every_epochs is not None:
-            # self.engine.add_event_handler(
-            #     Events.EPOCH_COMPLETED, self._log_inference, self.train_loader, "Train"
-            # )
+            self.engine.add_event_handler(
+                Events.EPOCH_COMPLETED, self._log_inference, self.train_loader, "Train"
+            )
             if self.val_loader is not None:
                 self.engine.add_event_handler(
                     Events.EPOCH_COMPLETED,
@@ -364,13 +364,13 @@ class PreTrainer:
                     self.val_loader,
                     "Val",
                 )
-            # if self.test_loader is not None:
-            #     self.engine.add_event_handler(
-            #         Events.EPOCH_COMPLETED,
-            #         self._log_inference,
-            #         self.test_loader,
-            #         "Test",
-            #     )
+            if self.test_loader is not None:
+                self.engine.add_event_handler(
+                    Events.EPOCH_COMPLETED,
+                    self._log_inference,
+                    self.test_loader,
+                    "Test",
+                )
 
         # 3. Checkpoint
         to_save = {"model": self.model, "optimizer": self.optimizer}
@@ -591,13 +591,9 @@ class PreTrainer:
         prompts = [sample["source_text"] for sample in samples]
         targets = [sample["target_text"] for sample in samples]
 
-        tokenized_targets = torch.tensor(
-            [tokenizer.encode(t) for t in targets], device=self.device
-        )
-
         self.model.eval()
         generative_model = cast(GenerativeModel, self.model)
-        (decoded_strs, generated) = generative_model.generate(
+        decoded_strs = generative_model.generate(
             prompts,
             max_new_tokens=self.max_inference_new_tokens,
             tokenizer=tokenizer,
@@ -632,16 +628,6 @@ class PreTrainer:
             tb_writer.add_text(
                 tb_tag, "\n".join(tb_table), global_step=engine.state.epoch
             )
-            min_len = min(generated.size(1), tokenized_targets.size(1))
-            gen = generated[:, :min_len]
-            tgt = tokenized_targets[:, :min_len]
-
-            exact_per_sample = (gen == tgt).all(dim=-1)
-            inference_acc = exact_per_sample.float().mean().item()
-            inference_token_acc = (gen == tgt).float().mean().item()
-
-            engine.state.metrics["inference_exact_accuracy"] = inference_acc
-            engine.state.metrics["inference_token_accuracy"] = inference_token_acc
 
     def test(self, test_loader: DataLoader | None = None) -> None:
         loader = test_loader or self.test_loader
@@ -671,6 +657,69 @@ class PreTrainer:
             metrics["exact_accuracy"],
             metrics["token_accuracy"],
         )
+
+        # Autoregressive evaluation on test dataset
+        self.logger.info("Running autoregressive testing on the test dataset...")
+        dataset = loader.dataset
+        
+        # Resolve dataset elements even if it's a Subset
+        samples = [dataset[i] for i in range(len(dataset))]
+        prompts = [sample["source_text"] for sample in samples]
+        targets = [sample["target_text"] for sample in samples]
+
+        tokenizer = self.inference_tokenizer
+        if tokenizer is None:
+            train_ds = self._get_underlying_dataset(self.train_loader.dataset)
+            tokenizer = getattr(train_ds, "tokenizer", None)
+
+        if tokenizer is not None:
+            eos_token_id = getattr(tokenizer, "eos_token_id", None)
+            max_new_tokens = getattr(self, "max_inference_new_tokens", None)
+            if max_new_tokens is None:
+                max_new_tokens = getattr(self.config.trainer, "max_inference_new_tokens", 16)
+
+            batch_size = getattr(loader, "batch_size", 32) or 32
+            decoded_strs = []
+            
+            self.model.eval()
+            generative_model = cast(GenerativeModel, self.model)
+            
+            for i in range(0, len(prompts), batch_size):
+                batch_prompts = prompts[i : i + batch_size]
+                batch_decoded = generative_model.generate(
+                    batch_prompts,
+                    max_new_tokens=max_new_tokens,
+                    tokenizer=tokenizer,
+                    eos_token_id=eos_token_id,
+                )
+                decoded_strs.extend(batch_decoded)
+
+            # Calculate metrics
+            correct = sum(1 for p, t in zip(decoded_strs, targets) if p == t)
+            ar_exact_match_acc = correct / len(targets) if targets else 0.0
+
+            # Calculate character-level accuracy (token level)
+            correct_chars = 0
+            total_chars = 0
+            for p, t in zip(decoded_strs, targets):
+                max_len = max(len(p), len(t))
+                p_padded = list(p) + [None] * (max_len - len(p))
+                t_padded = list(t) + [None] * (max_len - len(t))
+                correct_chars += sum(1 for c1, c2 in zip(p_padded, t_padded) if c1 == c2)
+                total_chars += max_len
+            ar_token_acc = correct_chars / total_chars if total_chars > 0 else 0.0
+
+            self.logger.info(
+                "Autoregressive Test results: exact_match_acc=%.4f token_acc=%.4f",
+                ar_exact_match_acc,
+                ar_token_acc,
+            )
+            
+            # Save autoregressive metrics on evaluator state or trainer state for visibility
+            self.test_evaluator.state.metrics["ar_exact_match_acc"] = ar_exact_match_acc
+            self.test_evaluator.state.metrics["ar_token_acc"] = ar_token_acc
+        else:
+            self.logger.warning("Tokenizer not found. Skipping autoregressive testing.")
 
     def run(self) -> None:
         # create run directory and handlers when the run actually starts

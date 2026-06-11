@@ -30,7 +30,7 @@ trainer:
     log_every_steps: 10
     epochs: 3
     early_stopping_patience: 3
-    inference_every_epochs: 1
+    inference_every_epochs: 5
     inference_num_samples: 5
     max_inference_new_tokens: 16
     grad_clip_norm: null

@@ -149,6 +149,15 @@ def run_single_experiment(
     elapsed = time.time() - start
     epochs_trained = trainer.engine.state.epoch
 
+    # Explicitly run test to ensure it runs even if run() exited abnormally or was terminated
+    if getattr(trainer, "test_loader", None) is not None:
+        if "ar_exact_match_acc" not in trainer.test_evaluator.state.metrics:
+            print("  [experiment_script] Running final autoregressive test...")
+            trainer.test()
+            
+        store["test_ar_exact_match_acc"] = trainer.test_evaluator.state.metrics.get("ar_exact_match_acc", 0.0)
+        store["test_ar_token_acc"] = trainer.test_evaluator.state.metrics.get("ar_token_acc", 0.0)
+
     return store, elapsed, epochs_trained
 
 
@@ -170,6 +179,8 @@ def run_suite(
         "inf_token_acc",
         "max_train_exact_acc",
         "epochs_trained",
+        "test_ar_exact_match_acc",
+        "test_ar_token_acc",
     ]
     raw: dict[str, list[list[float]]] = {k: [] for k in _METRICS}
 
@@ -191,6 +202,7 @@ def run_suite(
                 f"  -> {elapsed:.0f}s  {epochs} epochs  "
                 f"v_acc={snap.get('val_exact_acc', float('nan')):.3f}  "
                 f"inf_acc={snap.get('inf_exact_acc', float('nan')):.3f}  "
+                f"test_ar_acc={snap.get('test_ar_exact_match_acc', float('nan')):.3f}  "
                 f"max_train={snap.get('max_train_exact_acc', 0):.3f}"
             )
 
