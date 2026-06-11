@@ -14,7 +14,7 @@ from trainer import PreTrainer
 
 NUM_RUNS: int = 2
 TIME_LIMIT_SECONDS: float = 30
-TEST_SEQ_LENGTHS: list[int] = [8]
+TEST_SEQ_LENGTHS: list[int] = [8, 16, 32, 64, 96, 128, 192, 256, 384, 512]
 
 MODEL_HIDDEN_SIZE: int = 256
 MODEL_NUM_LAYERS: int = 6
@@ -239,9 +239,9 @@ def plot_results(
         ("Exact Match Accuracy (anchored)", "train_exact_acc", "val_exact_acc", [0, 1]),
         ("Loss (anchored)", "train_loss", "val_loss", None),
         ("Epochs Trained", "epochs_trained", None, None),
-        ("Test Autoregressive Token Acc", "test_ar_token_acc", None, [0, 1]),
+        ("Inference Token Acc (anchored)", "test_ar_token_acc", None, [0, 1]),
         (
-            "Test Autoregressive Exact Match Acc",
+            "Inference Exact Match Acc (anchored)",
             "test_ar_exact_match_acc",
             None,
             [0, 1],
@@ -319,7 +319,7 @@ def plot_results(
                     linewidth=1.5,
                     markersize=6,
                     capsize=3,
-                    label="Test Autoregressive",
+                    label="Inference (test)",
                 )
             else:
                 ax.errorbar(
