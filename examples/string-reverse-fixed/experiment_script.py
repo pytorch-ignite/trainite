@@ -13,7 +13,7 @@ from ignite.engine import Engine, Events
 from trainer import PreTrainer
 
 NUM_RUNS: int = 2
-TIME_LIMIT_SECONDS: float = 30
+TIME_LIMIT_SECONDS: float = 3600 * 2
 TEST_SEQ_LENGTHS: list[int] = [8, 16, 32, 64, 96, 128, 192, 256, 384, 512]
 
 MODEL_HIDDEN_SIZE: int = 256
