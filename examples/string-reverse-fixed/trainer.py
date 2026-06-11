@@ -16,15 +16,13 @@ from ignite.engine import Engine, Events
 from ignite.handlers import (
     Checkpoint,
     DiskSaver,
-    EarlyStopping,
 )
 from ignite.handlers.fbresearch_logger import FBResearchLogger
 from ignite.handlers.param_scheduler import ReduceLROnPlateauScheduler
 from ignite.handlers.tensorboard_logger import OptimizerParamsHandler, TensorboardLogger
-from ignite.metrics import Accuracy, Loss, Metric, RunningAverage
+from ignite.metrics import Accuracy, Loss, RunningAverage
 from ignite.utils import setup_logger
 from torch import nn
-from torch.optim.lr_scheduler import LinearLR
 from torch.utils.data import DataLoader, Dataset, random_split
 from utils import get_target, instantiate
 
@@ -661,7 +659,7 @@ class PreTrainer:
         # Autoregressive evaluation on test dataset
         self.logger.info("Running autoregressive testing on the test dataset...")
         dataset = loader.dataset
-        
+
         # Resolve dataset elements even if it's a Subset
         samples = [dataset[i] for i in range(len(dataset))]
         prompts = [sample["source_text"] for sample in samples]
@@ -676,14 +674,16 @@ class PreTrainer:
             eos_token_id = getattr(tokenizer, "eos_token_id", None)
             max_new_tokens = getattr(self, "max_inference_new_tokens", None)
             if max_new_tokens is None:
-                max_new_tokens = getattr(self.config.trainer, "max_inference_new_tokens", 16)
+                max_new_tokens = getattr(
+                    self.config.trainer, "max_inference_new_tokens", 16
+                )
 
             batch_size = getattr(loader, "batch_size", 32) or 32
             decoded_strs = []
-            
+
             self.model.eval()
             generative_model = cast(GenerativeModel, self.model)
-            
+
             for i in range(0, len(prompts), batch_size):
                 batch_prompts = prompts[i : i + batch_size]
                 batch_decoded = generative_model.generate(
@@ -705,7 +705,9 @@ class PreTrainer:
                 max_len = max(len(p), len(t))
                 p_padded = list(p) + [None] * (max_len - len(p))
                 t_padded = list(t) + [None] * (max_len - len(t))
-                correct_chars += sum(1 for c1, c2 in zip(p_padded, t_padded) if c1 == c2)
+                correct_chars += sum(
+                    1 for c1, c2 in zip(p_padded, t_padded) if c1 == c2
+                )
                 total_chars += max_len
             ar_token_acc = correct_chars / total_chars if total_chars > 0 else 0.0
 
@@ -714,7 +716,7 @@ class PreTrainer:
                 ar_exact_match_acc,
                 ar_token_acc,
             )
-            
+
             # Save autoregressive metrics on evaluator state or trainer state for visibility
             self.test_evaluator.state.metrics["ar_exact_match_acc"] = ar_exact_match_acc
             self.test_evaluator.state.metrics["ar_token_acc"] = ar_token_acc

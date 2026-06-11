@@ -94,12 +94,7 @@ def _make_anchor_snapshot_callback(
         store["val_loss"] = val_metrics["loss"]
         store["val_exact_acc"] = val_metrics["exact_accuracy"]
         store["val_token_acc"] = val_metrics["token_accuracy"]
-        store["inf_exact_acc"] = engine.state.metrics.get(
-            "inference_exact_accuracy", float("nan")
-        )
-        store["inf_token_acc"] = engine.state.metrics.get(
-            "inference_token_accuracy", float("nan")
-        )
+        # No old inference metrics stored here since we run autoregressive evaluation at the end of testing.
 
     return handler
 
@@ -154,9 +149,13 @@ def run_single_experiment(
         if "ar_exact_match_acc" not in trainer.test_evaluator.state.metrics:
             print("  [experiment_script] Running final autoregressive test...")
             trainer.test()
-            
-        store["test_ar_exact_match_acc"] = trainer.test_evaluator.state.metrics.get("ar_exact_match_acc", 0.0)
-        store["test_ar_token_acc"] = trainer.test_evaluator.state.metrics.get("ar_token_acc", 0.0)
+
+        store["test_ar_exact_match_acc"] = trainer.test_evaluator.state.metrics.get(
+            "ar_exact_match_acc", 0.0
+        )
+        store["test_ar_token_acc"] = trainer.test_evaluator.state.metrics.get(
+            "ar_token_acc", 0.0
+        )
 
     return store, elapsed, epochs_trained
 
@@ -175,8 +174,6 @@ def run_suite(
         "val_loss",
         "val_exact_acc",
         "val_token_acc",
-        "inf_exact_acc",
-        "inf_token_acc",
         "max_train_exact_acc",
         "epochs_trained",
         "test_ar_exact_match_acc",
@@ -201,7 +198,6 @@ def run_suite(
             print(
                 f"  -> {elapsed:.0f}s  {epochs} epochs  "
                 f"v_acc={snap.get('val_exact_acc', float('nan')):.3f}  "
-                f"inf_acc={snap.get('inf_exact_acc', float('nan')):.3f}  "
                 f"test_ar_acc={snap.get('test_ar_exact_match_acc', float('nan')):.3f}  "
                 f"max_train={snap.get('max_train_exact_acc', 0):.3f}"
             )
@@ -244,8 +240,13 @@ def plot_results(
         ("Exact Match Accuracy (anchored)", "train_exact_acc", "val_exact_acc", [0, 1]),
         ("Loss (anchored)", "train_loss", "val_loss", None),
         ("Epochs Trained", "epochs_trained", None, None),
-        ("Inference Token Acc (anchored)", "inf_token_acc", None, [0, 1]),
-        ("Inference Exact Match Acc (anchored)", "inf_exact_acc", None, [0, 1]),
+        ("Test Autoregressive Token Acc", "test_ar_token_acc", None, [0, 1]),
+        (
+            "Test Autoregressive Exact Match Acc",
+            "test_ar_exact_match_acc",
+            None,
+            [0, 1],
+        ),
     ]
 
     fig, axes = plt.subplots(3, 2, figsize=(14, 14))
@@ -309,7 +310,7 @@ def plot_results(
                     alpha=0.8,
                     label="Epochs",
                 )
-            elif key.startswith("inf_"):
+            elif key.startswith("test_ar_"):
                 ax.errorbar(
                     x_values,
                     y_mean,
@@ -319,7 +320,7 @@ def plot_results(
                     linewidth=1.5,
                     markersize=6,
                     capsize=3,
-                    label="Inference (Val)",
+                    label="Test Autoregressive",
                 )
             else:
                 ax.errorbar(
