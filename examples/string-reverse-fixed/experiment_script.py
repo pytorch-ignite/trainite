@@ -94,7 +94,6 @@ def _make_anchor_snapshot_callback(
         store["val_loss"] = val_metrics["loss"]
         store["val_exact_acc"] = val_metrics["exact_accuracy"]
         store["val_token_acc"] = val_metrics["token_accuracy"]
-        # No old inference metrics stored here since we run autoregressive evaluation at the end of testing.
 
     return handler
 
