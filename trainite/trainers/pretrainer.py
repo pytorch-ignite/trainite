@@ -100,6 +100,12 @@ class PreTrainer:
                     f"to let it resolve automatically."
                 )
             vocab_size = configured_vocab_size
+        if vocab_size <= 0:
+            raise ValueError(
+                f"Resolved vocab_size is {vocab_size}. This usually means your custom dataset "
+                "class does not expose a 'vocab_size' attribute, and 'vocab_size' was not "
+                "specified in the 'model' block of config.yaml. Please define it in either place."
+            )
         return vocab_size
 
     def _build_model(self) -> nn.Module:

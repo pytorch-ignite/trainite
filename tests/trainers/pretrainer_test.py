@@ -54,6 +54,21 @@ class SimpleDataset(torch.utils.data.Dataset):
         }
 
 
+class SimpleDatasetNoVocab(torch.utils.data.Dataset):
+    def __init__(self, size=16, seq_len=4):
+        self.size = size
+        self.seq_len = seq_len
+
+    def __len__(self):
+        return self.size
+
+    def __getitem__(self, index):
+        return {
+            "input_ids": torch.randint(0, 10, (self.seq_len,)),
+            "labels": torch.randint(0, 10, (self.seq_len,)),
+        }
+
+
 class EmptyDataset(torch.utils.data.Dataset):
     def __len__(self):
         return 0
@@ -252,6 +267,22 @@ def test_pretrainer_vocab_size_mismatch(project_config):
     project_config.model = cc(**model_conf)
 
     with pytest.raises(ValueError, match="is smaller than the dataset vocabulary size"):
+        PreTrainer(project_config)
+
+
+def test_pretrainer_vocab_size_missing(project_config):
+    # Setup dataset to not have vocab_size
+    project_config.data.train.dataset = cc(
+        "tests.trainers.pretrainer_test.SimpleDatasetNoVocab",
+        size=16,
+        seq_len=4,
+    )
+    # Ensure model config does not have vocab_size
+    model_conf = project_config.model.model_dump(by_alias=True)
+    model_conf.pop("vocab_size", None)
+    project_config.model = cc(**model_conf)
+
+    with pytest.raises(ValueError, match="Resolved vocab_size is 0"):
         PreTrainer(project_config)
 
 

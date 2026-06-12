@@ -270,14 +270,14 @@ class TransformerModel(nn.Module):
             logits = self(generated)
             next_token_logits = logits[:, -1, :]
             next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
-            if eos_token_id is not None:
-                eos_mask = generated[:, -1:].eq(eos_token_id)
+            if eos_id is not None:
+                eos_mask = generated[:, -1:].eq(eos_id)
                 next_token = torch.where(
-                    eos_mask, torch.tensor(eos_token_id, device=device), next_token
+                    eos_mask, torch.tensor(eos_id, device=device), next_token
                 )
             generated = torch.cat([generated, next_token], dim=-1)
 
-            if eos_token_id is not None and generated[:, -1].eq(eos_token_id).all():
+            if eos_id is not None and generated[:, -1].eq(eos_id).all():
                 break
 
         new_tokens = generated[:, prompt_len:].tolist()
