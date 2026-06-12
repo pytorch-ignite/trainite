@@ -1,19 +1,14 @@
 from trainite.config.base import (
     ComponentConfig,
-    DataConfig,
     DataLoaderConfig,
-    OptimizerConfig,
-    OutputConfig,
-    ProjectConfig,
     SplitConfig,
-    TrainerConfig,
+)
+from trainite.utils import (
     dump_config,
     dump_yaml,
     load_config,
     load_yaml,
 )
-from trainite.config.dataset import StringReverseDatasetConfig
-from trainite.config.model import TransformerModelConfig
 from trainite.config.registry import (
     DATASET_CONFIGS,
     MODEL_CONFIGS,
@@ -23,7 +18,60 @@ from trainite.config.registry import (
     get_model_spec,
     get_trainer_spec,
 )
-from trainite.config.trainer import PreTrainerConfig
+
+
+def __getattr__(name: str):
+    if name == "StringReverseDatasetConfig":
+        from trainite.datasets.string_reverse import StringReverseDatasetConfig
+
+        return StringReverseDatasetConfig
+    if name == "TransformerModelConfig":
+        from trainite.models.transformer import TransformerModelConfig
+
+        return TransformerModelConfig
+    if name == "PreTrainerConfig":
+        from trainite.trainers.pretrainer import PreTrainerConfig
+
+        return PreTrainerConfig
+    if name == "ProjectConfig":
+        from trainite.trainers.pretrainer import ProjectConfig
+
+        return ProjectConfig
+    if name == "OutputConfig":
+        from trainite.trainers.pretrainer import OutputConfig
+
+        return OutputConfig
+    if name == "OptimizerConfig":
+        from trainite.trainers.pretrainer import OptimizerConfig
+
+        return OptimizerConfig
+    if name == "DataConfig" or name == "DataConfigBase":
+        from trainite.config.base import DataConfigBase
+
+        return DataConfigBase
+    if name == "TrainerConfig":
+        from trainite.trainers.pretrainer import PreTrainerConfig
+
+        return PreTrainerConfig
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
+
+def __dir__():
+    return sorted(
+        list(globals().keys())
+        + [
+            "StringReverseDatasetConfig",
+            "TransformerModelConfig",
+            "PreTrainerConfig",
+            "ProjectConfig",
+            "OutputConfig",
+            "OptimizerConfig",
+            "DataConfig",
+            "DataConfigBase",
+            "TrainerConfig",
+        ]
+    )
+
 
 __all__ = [
     "ProjectConfig",
@@ -35,6 +83,7 @@ __all__ = [
     "TransformerModelConfig",
     "ComponentConfig",
     "DataConfig",
+    "DataConfigBase",
     "SplitConfig",
     "DataLoaderConfig",
     "dump_config",

@@ -1,7 +1,7 @@
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Any, Sized
+from typing import Sized
 from unittest import mock
 
 import pytest
@@ -10,18 +10,18 @@ import torch.nn as nn
 
 from trainite.config import (
     ComponentConfig,
-    DataConfig,
+    DataConfigBase,
     DataLoaderConfig,
     OptimizerConfig,
     OutputConfig,
+    PreTrainerConfig,
     ProjectConfig,
     SplitConfig,
-    TrainerConfig,
 )
 from trainite.trainers.pretrainer import PreTrainer
 
 
-def cc(target: str | None = None, **kwargs: Any) -> ComponentConfig:
+def cc(target: str | None = None, **kwargs: object) -> ComponentConfig:
     """Helper to create ComponentConfig with extra arguments without type errors."""
     if target:
         kwargs["_target_"] = target
@@ -86,10 +86,14 @@ class GenerativeModel(SimpleModel):
         return [f"pred_{p}" for p in prompt]
 
 
+class DummyTokenizer:
+    pass
+
+
 class GenerativeDataset(SimpleDataset):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.tokenizer = mock.Mock()
+        self.tokenizer = DummyTokenizer()
 
     def __getitem__(self, index):
         item = super().__getitem__(index)
@@ -118,7 +122,7 @@ def project_config(temp_run_dir):
             hidden_size=8,
         ),
         optimizer=OptimizerConfig(_target_="torch.optim.AdamW", lr=1e-3),
-        data=DataConfig(
+        data=DataConfigBase(
             train=SplitConfig(
                 dataset=cc(
                     "tests.trainers.pretrainer_test.SimpleDataset",
@@ -138,12 +142,12 @@ def project_config(temp_run_dir):
                 dataloader=DataLoaderConfig(batch_size=4),
             ),
         ),
-        trainer=TrainerConfig(
+        trainer=PreTrainerConfig(
             epochs=1,
             log_every_steps=1,
-            inference_every_epochs=None,  # type : ignore , # pyright: ignore
-            inference_num_samples=4,  # type : ignore , # pyright: ignore
-            max_inference_new_tokens=10,  # type : ignore , # pyright: ignore
+            inference_every_epochs=None,
+            inference_num_samples=4,
+            max_inference_new_tokens=10,
         ),
         output=OutputConfig(root=str(temp_run_dir), run_name="test_run"),
         device="auto",
@@ -391,7 +395,7 @@ def test_pretrainer_builds_train_and_val_loaders_from_ratios(tmp_path):
             vocab_size=100,
             hidden_size=32,
         ),
-        data=DataConfig(
+        data=DataConfigBase(
             dataset=cc(
                 "tests.trainers.pretrainer_test.SimpleDataset",
                 size=100,
@@ -401,7 +405,7 @@ def test_pretrainer_builds_train_and_val_loaders_from_ratios(tmp_path):
             train_ratio=0.8,
             val_ratio=0.2,
         ),
-        trainer=TrainerConfig(epochs=1),
+        trainer=PreTrainerConfig(epochs=1),
         output=OutputConfig(root=str(tmp_path), run_name="test"),
     )
 
@@ -423,7 +427,7 @@ def test_pretrainer_builds_train_val_and_test_loaders_from_ratios(tmp_path):
             vocab_size=100,
             hidden_size=32,
         ),
-        data=DataConfig(
+        data=DataConfigBase(
             dataset=cc(
                 "tests.trainers.pretrainer_test.SimpleDataset",
                 size=100,
@@ -433,7 +437,7 @@ def test_pretrainer_builds_train_val_and_test_loaders_from_ratios(tmp_path):
             train_ratio=0.6,
             val_ratio=0.2,
         ),
-        trainer=TrainerConfig(epochs=1),
+        trainer=PreTrainerConfig(epochs=1),
         output=OutputConfig(root=str(tmp_path), run_name="test"),
     )
 
@@ -457,7 +461,7 @@ def test_pretrainer_builds_train_val_and_test_loaders_from_ratios(tmp_path):
 
 
 def test_pretrainer_dataset_is_empty(project_config):
-    project_config.data = DataConfig(
+    project_config.data = DataConfigBase(
         dataset=cc(
             "tests.trainers.pretrainer_test.EmptyDataset",
         ),

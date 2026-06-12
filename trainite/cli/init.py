@@ -11,7 +11,7 @@ from packaging.requirements import Requirement
 
 from trainite.config import (
     ComponentConfig,
-    DataConfig,
+    DataConfigBase,
     DataLoaderConfig,
     OutputConfig,
     ProjectConfig,
@@ -164,61 +164,6 @@ def parse_dependencies(
     return dep_map, other_dep_map
 
 
-def generate_config_py(model_spec, dataset_spec) -> str:
-    template_path = PACKAGE_ROOT / "config/base.py"
-    template = template_path.read_text()
-
-    # 1. ModelConfig Source
-    model_source = _render_class_source(model_spec.config_cls)
-    model_source = model_source.replace(
-        f"class {model_spec.config_cls.__name__}", "class ModelConfig"
-    )
-    model_source = model_source.replace(
-        f"trainite.models.{model_spec.name}", f"models.{model_spec.name}"
-    )
-
-    # 2. DatasetConfig Source
-    dataset_config_cls = dataset_spec.dataset_config_cls
-    dataset_source = _render_class_source(dataset_config_cls)
-    dataset_source = dataset_source.replace(
-        f"class {dataset_config_cls.__name__}", "class DatasetConfig"
-    )
-    dataset_source = dataset_source.replace(
-        f'"{dataset_config_cls.__name__}"', '"DatasetConfig"'
-    )
-    dataset_source = dataset_source.replace(
-        f"trainite.datasets.{dataset_spec.name}", f"datasets.{dataset_spec.name}"
-    )
-    # 3. DataConfig Source (replaces base DataConfig completely by inheritance)
-    data_source = _render_class_source(dataset_spec.config_cls)
-    data_source = data_source.replace(
-        f"class {dataset_spec.config_cls.__name__}(DataConfigBase):",
-        "class DataConfig(DataConfigBase):",
-    )
-    # Adjust annotations inside DataConfig to refer to DatasetConfig
-    data_source = data_source.replace(
-        "dataset: ComponentConfig", "dataset: DatasetConfig"
-    )
-    # Replace references to the original dataset config class name with DatasetConfig
-    data_source = data_source.replace(dataset_config_cls.__name__, "DatasetConfig")
-    # Replace any references to trainite.datasets.{name} with datasets.{name}
-    data_source = data_source.replace(
-        f"trainite.datasets.{dataset_spec.name}", f"datasets.{dataset_spec.name}"
-    )
-
-    replacements = {
-        "class ModelConfig(ComponentConfig):\n    pass": model_source,
-        "class DatasetConfig(ComponentConfig):\n    pass": dataset_source,
-        "class DataConfig(DataConfigBase):\n    pass": data_source,
-        "data: DatasetConfigBase": "dataset: DatasetConfig",
-        "dataset: ComponentConfig | None = None": "dataset: DatasetConfig | None = None",
-        "data: DataConfigBase": "data: DataConfig",
-        "model: ComponentConfig": "model: ModelConfig",
-    }
-
-    return _replace_many(template, replacements.items())
-
-
 def _build_templates(
     model_name: str, dataset_name: str, trainer_name: str, project_name: str
 ) -> dict[str, str]:
@@ -264,27 +209,40 @@ def _build_templates(
         ),
         "trainer.py": _render_template(
             PROJECT_ROOT / trainer_spec.implementation_path,
-            trainer_spec.template_replacements,
+            trainer_spec.template_replacements
+            + [
+                (
+                    "model: ComponentConfig | BaseModel",
+                    f"model: {model_spec.config_cls.__name__}",
+                ),
+                (
+                    "data: DataConfigBase",
+                    f"data: {dataset_spec.config_cls.__name__}",
+                ),
+                (
+                    "from trainite.config.base import (\n    ComponentConfig,\n    DataConfigBase,\n    DataLoaderConfig,\n    OptimizerConfig,\n    OutputConfig,\n    SplitConfig,\n    TrainerConfig,\n)",
+                    f"from trainite.config.base import (\n    ComponentConfig,\n    DataConfigBase,\n    DataLoaderConfig,\n    OptimizerConfig,\n    OutputConfig,\n    SplitConfig,\n    TrainerConfig,\n)\nfrom models.{model_spec.name} import {model_spec.config_cls.__name__}\nfrom datasets.{dataset_spec.name} import {dataset_spec.config_cls.__name__}",
+                ),
+            ],
         ),
         "utils.py": _render_template(
             PROJECT_ROOT / "trainite/utils.py",
-            [("trainite.config", "config")],
+            [],
         ),
-        "config.py": generate_config_py(model_spec, dataset_spec),
         "main.py": _render_template(
             PROJECT_ROOT / "trainite/main.py",
             [
                 (
-                    "trainite.config",
-                    "config",
+                    "from trainite.trainers.pretrainer import PreTrainer, ProjectConfig",
+                    f"from trainer import {trainer_spec.implementation_symbol}, ProjectConfig",
                 ),
                 (
-                    "from trainite.trainers import PreTrainer",
-                    f"from trainer import {trainer_spec.implementation_symbol}",
+                    "trainite.utils",
+                    "utils",
                 ),
                 (
-                    "trainer = PreTrainer(config)",
-                    f"trainer = {trainer_spec.implementation_symbol}(config)",
+                    "PreTrainer(config)",
+                    f"{trainer_spec.implementation_symbol}(config)",
                 ),
             ],
         ),
@@ -348,7 +306,7 @@ def build_parser() -> argparse.ArgumentParser:
 def _update_targets(
     config: ComponentConfig
     | ProjectConfig
-    | DataConfig
+    | DataConfigBase
     | SplitConfig
     | DataLoaderConfig,
     old_prefix: str,
@@ -361,7 +319,7 @@ def _update_targets(
         # Recursively update all components in ProjectConfig
         for field in config.model_fields:
             _update_targets(getattr(config, field), old_prefix, new_prefix)
-    elif isinstance(config, DataConfig):
+    elif isinstance(config, DataConfigBase):
         for field in config.model_fields:
             _update_targets(getattr(config, field), old_prefix, new_prefix)
     elif isinstance(config, SplitConfig):
@@ -443,7 +401,8 @@ def init_project(args: argparse.Namespace) -> None:
 
         _inject_collate(data_config)
 
-    starter_config = ProjectConfig(
+    project_config_cls = trainer_spec.project_config_cls
+    starter_config = project_config_cls(
         model=model_component,
         data=data_config,
         trainer=trainer_component,

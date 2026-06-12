@@ -1,12 +1,10 @@
-from typing import Any
-
 import pytest
 
 from trainite.config import ComponentConfig
 from trainite.utils import get_target, instantiate
 
 
-def cc(target: str | None = None, **kwargs: Any) -> ComponentConfig:
+def cc(target: str | None = None, **kwargs: object) -> ComponentConfig:
     """Helper to create ComponentConfig with extra arguments without type errors."""
     if target:
         kwargs["_target_"] = target

@@ -3,14 +3,14 @@ from pydantic import ValidationError
 
 from trainite.config.base import (
     ComponentConfig,
-    DataConfig,
+    DataConfigBase,
     SplitConfig,
 )
 
 
 def test_data_config_option_1():
     # Valid Option 1
-    config = DataConfig(
+    config = DataConfigBase(
         train=SplitConfig(dataset=ComponentConfig(_target_="dataset.train")),
         val=SplitConfig(dataset=ComponentConfig(_target_="dataset.val")),
     )
@@ -25,12 +25,12 @@ def test_data_config_option_1_missing_train():
         ValidationError,
         match="requires at least the 'train' split",
     ):
-        DataConfig(val=SplitConfig(dataset=ComponentConfig(_target_="dataset.val")))
+        DataConfigBase(val=SplitConfig(dataset=ComponentConfig(_target_="dataset.val")))
 
 
 def test_data_config_option_2():
     # Valid Option 2
-    config = DataConfig(
+    config = DataConfigBase(
         dataset=ComponentConfig(_target_="dataset.all"), train_ratio=0.8, val_ratio=0.2
     )
     assert config.dataset is not None
@@ -45,7 +45,7 @@ def test_data_config_option_2_missing_dataset():
         ValidationError,
         match="requires the 'dataset' field",
     ):
-        DataConfig(train_ratio=0.8)
+        DataConfigBase(train_ratio=0.8)
 
 
 def test_data_config_mixed_modes_dataset_and_splits():
@@ -54,7 +54,7 @@ def test_data_config_mixed_modes_dataset_and_splits():
         ValidationError,
         match="when 'dataset' or 'dataloader' is provided",
     ):
-        DataConfig(
+        DataConfigBase(
             dataset=ComponentConfig(_target_="dataset.all"),
             train=SplitConfig(dataset=ComponentConfig(_target_="dataset.train")),
         )
@@ -66,7 +66,7 @@ def test_data_config_mixed_modes_ratios_and_splits():
         ValidationError,
         match="Cannot provide train_ratio or val_ratio at the data level when explicit splits are used",
     ):
-        DataConfig(
+        DataConfigBase(
             train_ratio=0.8,
             train=SplitConfig(dataset=ComponentConfig(_target_="dataset.train")),
         )
@@ -77,43 +77,45 @@ def test_data_config_invalid_ratios():
         ValidationError,
         match="Input should be greater than 0",
     ):
-        DataConfig(dataset=ComponentConfig(_target_="dataset.all"), train_ratio=0.0)
+        DataConfigBase(dataset=ComponentConfig(_target_="dataset.all"), train_ratio=0.0)
 
     with pytest.raises(
         ValidationError,
         match="Input should be greater than 0",
     ):
-        DataConfig(dataset=ComponentConfig(_target_="dataset.all"), train_ratio=-1.0)
+        DataConfigBase(
+            dataset=ComponentConfig(_target_="dataset.all"), train_ratio=-1.0
+        )
 
     with pytest.raises(
         ValidationError,
         match="Input should be less than or equal to 1",
     ):
-        DataConfig(dataset=ComponentConfig(_target_="dataset.all"), train_ratio=1.1)
+        DataConfigBase(dataset=ComponentConfig(_target_="dataset.all"), train_ratio=1.1)
 
     with pytest.raises(
         ValidationError,
         match="Input should be greater than or equal to 0",
     ):
-        DataConfig(dataset=ComponentConfig(_target_="dataset.all"), val_ratio=-1.0)
+        DataConfigBase(dataset=ComponentConfig(_target_="dataset.all"), val_ratio=-1.0)
 
     with pytest.raises(
         ValidationError,
         match="Input should be less than 1",
     ):
-        DataConfig(dataset=ComponentConfig(_target_="dataset.all"), val_ratio=1.0)
+        DataConfigBase(dataset=ComponentConfig(_target_="dataset.all"), val_ratio=1.0)
 
     with pytest.raises(
         ValidationError,
         match="Input should be less than 1",
     ):
-        DataConfig(dataset=ComponentConfig(_target_="dataset.all"), val_ratio=1.1)
+        DataConfigBase(dataset=ComponentConfig(_target_="dataset.all"), val_ratio=1.1)
 
     with pytest.raises(
         ValidationError,
         match="exceeds 1.0",
     ):
-        DataConfig(
+        DataConfigBase(
             dataset=ComponentConfig(_target_="dataset.all"),
             train_ratio=0.8,
             val_ratio=0.3,
@@ -123,7 +125,7 @@ def test_data_config_invalid_ratios():
         ValidationError,
         match="exceeds 1.0",
     ):
-        DataConfig(
+        DataConfigBase(
             dataset=ComponentConfig(_target_="dataset.all"),
             val_ratio=0.2,
         )
@@ -134,4 +136,4 @@ def test_data_config_empty():
         ValidationError,
         match="Must provide either explicit splits",
     ):
-        DataConfig()
+        DataConfigBase()

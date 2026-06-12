@@ -2,8 +2,8 @@ import argparse
 import logging
 from pathlib import Path
 
-from trainite.config import load_config
-from trainite.trainers import PreTrainer
+from trainite.trainers.pretrainer import PreTrainer, ProjectConfig
+from trainite.utils import load_config
 
 
 def parse_args() -> argparse.Namespace:
@@ -23,7 +23,7 @@ def main() -> None:
 
     args = parse_args()
     config_path = Path(args.config)
-    config = load_config(config_path)
+    config = load_config(config_path, ProjectConfig)
     trainer = PreTrainer(config)
     trainer.run()
 
