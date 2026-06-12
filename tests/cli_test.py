@@ -100,7 +100,7 @@ def test_generated_string_reversal_project_is_runnable() -> None:
 
         config["trainer"]["epochs"] = 1
         config["trainer"]["log_every_steps"] = 1
-        config["model"]["layers"] = 1
+        config["model"]["num_layers"] = 1
         config["model"]["hidden_size"] = 16
         config["model"]["feedforward_dim"] = 32
         config["model"]["num_heads"] = 2
