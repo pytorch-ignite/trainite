@@ -12,6 +12,7 @@ class ComponentSpec(BaseModel):
     config_cls_path: str
     implementation_symbol: str
     readme_template_path: Path | None = None
+    # static replacements to apply to the template when generating.
     template_replacements: list[tuple[str, str]] = []
     dependencies: list[str] = []
 
@@ -21,13 +22,7 @@ class ComponentSpec(BaseModel):
 
 
 class TrainerSpec(ComponentSpec):
-    project_config_cls_path: str
-
-    @property
-    def project_config_cls(self) -> type:
-        from trainite.utils import get_target
-
-        return get_target(self.project_config_cls_path)
+    pass
 
 
 class ModelSpec(ComponentSpec):
@@ -56,6 +51,8 @@ MODEL_SPECS = {
         collate_fn_target="trainite.models.transformer.CausalLMCollateFn",
         template_replacements=[
             ("trainite.utils", "utils"),
+            ("trainite.models", "models"),
+            ("trainite.config.base", "config"),
         ],
         readme_template_path=Path(
             "trainite/templates/components/models/transformer.md"
@@ -73,6 +70,8 @@ DATASET_SPECS = {
         builder_symbol="StringReverseDataset",
         template_replacements=[
             ("trainite.utils", "utils"),
+            ("trainite.datasets", "datasets"),
+            ("trainite.config.base", "config"),
         ],
         readme_template_path=Path(
             "trainite/templates/components/datasets/string_reverse.md"
@@ -85,7 +84,6 @@ TRAINER_SPECS = {
         name="pretrainer",
         implementation_path=Path("trainite/trainers/pretrainer.py"),
         config_cls_path="trainite.trainers.pretrainer.PreTrainerConfig",
-        project_config_cls_path="trainite.trainers.pretrainer.ProjectConfig",
         implementation_symbol="PreTrainer",
         template_replacements=[
             ("trainite.utils", "utils"),
@@ -104,47 +102,16 @@ REGISTRY = {
 }
 
 
-class LazyDict(dict):
-    def __init__(self, spec_dict):
-        self.spec_dict = spec_dict
-        super().__init__()
-
-    def __getitem__(self, key):
-        return self.spec_dict[key].config_cls
-
-    def __contains__(self, key):
-        return key in self.spec_dict
-
-    def keys(self):
-        return self.spec_dict.keys()
-
-    def values(self):
-        return [spec.config_cls for spec in self.spec_dict.values()]
-
-    def items(self):
-        return [(name, spec.config_cls) for name, spec in self.spec_dict.items()]
-
-    def get(self, key, default=None):
-        if key in self.spec_dict:
-            return self.spec_dict[key].config_cls
-        return default
-
-
-MODEL_CONFIGS = LazyDict(MODEL_SPECS)
-DATASET_CONFIGS = LazyDict(DATASET_SPECS)
-TRAINER_CONFIGS = LazyDict(TRAINER_SPECS)
-
-
 def get_model_config_cls(name: str) -> type[BaseModel]:
-    return MODEL_CONFIGS[name]
+    return MODEL_SPECS[name].config_cls
 
 
 def get_dataset_config_cls(name: str) -> type[BaseModel]:
-    return DATASET_CONFIGS[name]
+    return DATASET_SPECS[name].dataset_config_cls
 
 
 def get_trainer_config_cls(name: str) -> type[BaseModel]:
-    return TRAINER_CONFIGS[name]
+    return TRAINER_SPECS[name].config_cls
 
 
 def get_model_spec(name: str) -> ModelSpec:

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import logging
 from collections.abc import Sized
 from datetime import datetime
@@ -19,11 +17,10 @@ from ignite.handlers.param_scheduler import ParamScheduler
 from ignite.handlers.tensorboard_logger import OptimizerParamsHandler, TensorboardLogger
 from ignite.metrics import Accuracy, Loss, RunningAverage
 from ignite.utils import setup_logger
+from pydantic import BaseModel, ConfigDict, Field
 from torch import nn
 from torch.optim.lr_scheduler import LinearLR
 from torch.utils.data import DataLoader, Dataset, random_split
-
-from pydantic import BaseModel, ConfigDict, Field
 
 from trainite.config.base import (
     ComponentConfig,
@@ -44,6 +41,29 @@ class GenerativeModel(Protocol):
         tokenizer: object,
         eos_token_id: int | None = None,
     ) -> list[str]: ...
+
+
+class PreTrainerConfig(BaseModel):
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
+    epochs: int = Field(default=3, gt=0)
+    log_every_steps: int = Field(default=10, gt=0)
+    early_stopping_patience: int | None = Field(default=3, gt=0)
+    # Inference logging — validated at runtime in _setup_inference
+    inference_every_epochs: int | None = Field(default=None)
+    inference_num_samples: int = Field(default=5)
+    max_inference_new_tokens: int = Field(default=16)
+    grad_clip_norm: float | None = Field(default=None, gt=0.0)
+
+
+class ProjectConfig(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
+    model: ComponentConfig
+    optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
+    data: DataConfigBase
+    trainer: PreTrainerConfig
+    output: OutputConfig
+    seed: int = 42
+    device: str = "auto"
 
 
 class PreTrainer:
@@ -679,26 +699,3 @@ class PreTrainer:
 
         if "tensorboard" in self.handlers:
             self.handlers["tensorboard"].close()
-
-
-class PreTrainerConfig(BaseModel):
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
-    epochs: int = Field(default=3, gt=0)
-    log_every_steps: int = Field(default=10, gt=0)
-    early_stopping_patience: int | None = Field(default=3, gt=0)
-    # Inference logging — validated at runtime in _setup_inference
-    inference_every_epochs: int | None = Field(default=None)
-    inference_num_samples: int = Field(default=5)
-    max_inference_new_tokens: int = Field(default=16)
-    grad_clip_norm: float | None = Field(default=None, gt=0.0)
-
-
-class ProjectConfig(BaseModel):
-    model_config = ConfigDict(validate_assignment=True)
-    model: ComponentConfig
-    optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
-    data: DataConfigBase
-    trainer: PreTrainerConfig
-    output: OutputConfig
-    seed: int = 42
-    device: str = "auto"

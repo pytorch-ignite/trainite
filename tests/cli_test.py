@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from trainite.config import get_dataset_spec, get_model_spec
+from trainite.config.registry import get_dataset_spec, get_model_spec
 
 
 @pytest.mark.parametrize(

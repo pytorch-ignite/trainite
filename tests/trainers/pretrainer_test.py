@@ -14,11 +14,9 @@ from trainite.config import (
     DataLoaderConfig,
     OptimizerConfig,
     OutputConfig,
-    PreTrainerConfig,
-    ProjectConfig,
     SplitConfig,
 )
-from trainite.trainers.pretrainer import PreTrainer
+from trainite.trainers.pretrainer import PreTrainer, PreTrainerConfig, ProjectConfig
 
 
 def cc(target: str | None = None, **kwargs: object) -> ComponentConfig:
@@ -536,9 +534,9 @@ def test_setup_inference_invalid_inference_params(
 def test_setup_inference_invalid_inference_type_params(
     project_config, epochs, tokens, samples
 ):
-    project_config.trainer.inference_every_epochs = epochs
-    project_config.trainer.max_inference_new_tokens = tokens
-    project_config.trainer.inference_num_samples = samples
+    project_config.trainer.__dict__["inference_every_epochs"] = epochs
+    project_config.trainer.__dict__["max_inference_new_tokens"] = tokens
+    project_config.trainer.__dict__["inference_num_samples"] = samples
     with pytest.raises(
         TypeError, match="Inference logging parameters must be integers."
     ):

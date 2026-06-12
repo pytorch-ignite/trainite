@@ -8,15 +8,15 @@ from typing import Iterable, Sequence
 import questionary
 import tomlkit
 from packaging.requirements import Requirement
+from pydantic import BaseModel, ConfigDict, Field
 
 from trainite.config import (
     ComponentConfig,
     DataConfigBase,
     DataLoaderConfig,
+    OptimizerConfig,
     OutputConfig,
-    ProjectConfig,
     SplitConfig,
-    dump_config,
 )
 from trainite.config.registry import (
     REGISTRY,
@@ -24,6 +24,19 @@ from trainite.config.registry import (
     get_model_spec,
     get_trainer_spec,
 )
+from trainite.utils import dump_config
+
+
+class ProjectConfig(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
+    model: ComponentConfig
+    optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
+    data: DataConfigBase
+    trainer: BaseModel
+    output: OutputConfig
+    seed: int = 42
+    device: str = "auto"
+
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = PACKAGE_ROOT.parent
@@ -198,6 +211,7 @@ def _build_templates(
             PROJECT_ROOT / trainer_spec.readme_template_path
         )
 
+    # Dynamically render templates for model, dataset and trainer implementations with appropriate replacements
     return {
         f"models/{model_spec.name}.py": _render_template(
             PROJECT_ROOT / model_spec.implementation_path,
@@ -212,7 +226,7 @@ def _build_templates(
             trainer_spec.template_replacements
             + [
                 (
-                    "model: ComponentConfig | BaseModel",
+                    "model: ComponentConfig",
                     f"model: {model_spec.config_cls.__name__}",
                 ),
                 (
@@ -220,8 +234,8 @@ def _build_templates(
                     f"data: {dataset_spec.config_cls.__name__}",
                 ),
                 (
-                    "from trainite.config.base import (\n    ComponentConfig,\n    DataConfigBase,\n    DataLoaderConfig,\n    OptimizerConfig,\n    OutputConfig,\n    SplitConfig,\n    TrainerConfig,\n)",
-                    f"from trainite.config.base import (\n    ComponentConfig,\n    DataConfigBase,\n    DataLoaderConfig,\n    OptimizerConfig,\n    OutputConfig,\n    SplitConfig,\n    TrainerConfig,\n)\nfrom models.{model_spec.name} import {model_spec.config_cls.__name__}\nfrom datasets.{dataset_spec.name} import {dataset_spec.config_cls.__name__}",
+                    "from trainite.config.base import (\n    ComponentConfig,\n    DataConfigBase,\n    DataLoaderConfig,\n    OptimizerConfig,\n    OutputConfig,\n    SplitConfig,\n)",
+                    f"from config import (\n    ComponentConfig,\n    DataConfigBase,\n    DataLoaderConfig,\n    OptimizerConfig,\n    OutputConfig,\n    SplitConfig,\n)\nfrom models.{model_spec.name} import {model_spec.config_cls.__name__}\nfrom datasets.{dataset_spec.name} import {dataset_spec.config_cls.__name__}",
                 ),
             ],
         ),
@@ -258,6 +272,7 @@ def _build_templates(
                 ("{{trainer_docs}}", trainer_docs),
             ],
         ),
+        "config.py": _render_template(PROJECT_ROOT / "trainite/config/base.py", []),
         "pyproject.toml": generate_uv_project(
             name=project_name,
             version="0.1.0",
@@ -401,8 +416,7 @@ def init_project(args: argparse.Namespace) -> None:
 
         _inject_collate(data_config)
 
-    project_config_cls = trainer_spec.project_config_cls
-    starter_config = project_config_cls(
+    starter_config = ProjectConfig(
         model=model_component,
         data=data_config,
         trainer=trainer_component,

@@ -3,7 +3,7 @@ from unittest import mock
 import pytest
 import torch
 
-from trainite.config import get_model_spec
+from trainite.config.registry import get_model_spec
 from trainite.datasets.string_reverse import CharTokenizer
 from trainite.models.transformer import (
     Attention,

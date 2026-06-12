@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections.abc import Callable
 from typing import Any
 
@@ -34,7 +32,7 @@ class DataLoaderConfig(BaseModel):
     batch_size: int = Field(default=32, gt=0)
     shuffle: bool = False
     num_workers: int = Field(default=2, ge=0)
-    collate_fn: ComponentConfig | BaseModel | None = None
+    collate_fn: ComponentConfig | None = None
 
 
 class SplitConfig(BaseModel):
@@ -58,7 +56,7 @@ class DataConfigBase(BaseModel):
 
     @model_serializer(mode="wrap")
     def serialize_model(
-        self, handler: Callable[[DataConfigBase], dict[str, Any]]
+        self, handler: Callable[[Any], dict[str, Any]]
     ) -> dict[str, Any]:
         res = handler(self)
         if isinstance(res, dict):

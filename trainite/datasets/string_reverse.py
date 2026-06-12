@@ -238,7 +238,9 @@ class StringReverseDatasetConfig(ComponentConfig):
 
 
 class StringReverseDataConfig(DataConfigBase):
-    dataset: ComponentConfig | None = Field(default_factory=StringReverseDatasetConfig)
+    dataset: StringReverseDatasetConfig | None = Field(  # type: ignore[assignment]
+        default_factory=StringReverseDatasetConfig
+    )
     train_ratio: float | None = 0.8
     val_ratio: float | None = 0.1
     dataloader: DataLoaderConfig | None = Field(

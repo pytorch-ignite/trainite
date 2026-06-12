@@ -1,16 +1,15 @@
 import importlib
 from pathlib import Path
-from typing import TypeVar
-from pydantic import BaseModel
+from typing import Any, TypeVar
 
 import yaml
 from omegaconf import OmegaConf
+from pydantic import BaseModel
+
+T = TypeVar("T", bound=BaseModel)
 
 
-T = TypeVar("T")
-
-
-def get_target(target_path: str) -> object:
+def get_target(target_path: str) -> Any:
     """
     Gets a class or a function defined by a `_target_` key
     using an OmegaConf DictConfig.
@@ -29,7 +28,7 @@ def get_target(target_path: str) -> object:
     return target_symbol
 
 
-def instantiate(config: BaseModel, **kwargs: object) -> object:
+def instantiate(config: BaseModel, **kwargs) -> Any:
     """
     Instantiates a class or calls a function defined by a `_target_` key
     using an OmegaConf DictConfig.
