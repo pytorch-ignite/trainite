@@ -2,20 +2,23 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from trainite.config.dataset import StringReverseDataConfig
-from trainite.config.model import TransformerModelConfig
-from trainite.config.trainer import PreTrainerConfig
+from trainite.utils import get_target
 
 
 class ComponentSpec(BaseModel):
     model_config = ConfigDict(frozen=True)
     name: str
     implementation_path: Path
-    config_cls: type
+    config_cls_path: str
     implementation_symbol: str
     readme_template_path: Path | None = None
+    # static replacements to apply to the template when generating.
     template_replacements: list[tuple[str, str]] = []
     dependencies: list[str] = []
+
+    @property
+    def config_cls(self) -> type:
+        return get_target(self.config_cls_path)
 
 
 class TrainerSpec(ComponentSpec):
@@ -29,16 +32,28 @@ class ModelSpec(ComponentSpec):
 
 class DatasetSpec(ComponentSpec):
     builder_symbol: str
+    dataset_config_cls_path: str
+
+    @property
+    def dataset_config_cls(self) -> type:
+        from trainite.utils import get_target
+
+        return get_target(self.dataset_config_cls_path)
 
 
 MODEL_SPECS = {
     "transformer": ModelSpec(
         name="transformer",
         implementation_path=Path("trainite/models/transformer.py"),
-        config_cls=TransformerModelConfig,
+        config_cls_path="trainite.models.transformer.TransformerModelConfig",
         implementation_symbol="TransformerModel",
         builder_symbol="TransformerModel",
         collate_fn_target="trainite.models.transformer.CausalLMCollateFn",
+        template_replacements=[
+            ("trainite.utils", "utils"),
+            ("trainite.models", "models"),
+            ("trainite.config.base", "config"),
+        ],
         readme_template_path=Path(
             "trainite/templates/components/models/transformer.md"
         ),
@@ -49,9 +64,15 @@ DATASET_SPECS = {
     "string-reverse": DatasetSpec(
         name="string_reverse",
         implementation_path=Path("trainite/datasets/string_reverse.py"),
-        config_cls=StringReverseDataConfig,
+        config_cls_path="trainite.datasets.string_reverse.StringReverseDataConfig",
+        dataset_config_cls_path="trainite.datasets.string_reverse.StringReverseDatasetConfig",
         implementation_symbol="StringReverseDataset",
         builder_symbol="StringReverseDataset",
+        template_replacements=[
+            ("trainite.utils", "utils"),
+            ("trainite.datasets", "datasets"),
+            ("trainite.config.base", "config"),
+        ],
         readme_template_path=Path(
             "trainite/templates/components/datasets/string_reverse.md"
         ),
@@ -62,14 +83,11 @@ TRAINER_SPECS = {
     "pretrainer": TrainerSpec(
         name="pretrainer",
         implementation_path=Path("trainite/trainers/pretrainer.py"),
-        config_cls=PreTrainerConfig,
+        config_cls_path="trainite.trainers.pretrainer.PreTrainerConfig",
         implementation_symbol="PreTrainer",
         template_replacements=[
-            (
-                "trainite.config",
-                "config",
-            ),
             ("trainite.utils", "utils"),
+            ("trainite.config.base", "config"),
         ],
         readme_template_path=Path(
             "trainite/templates/components/trainers/pretrainer.md"
@@ -85,21 +103,16 @@ REGISTRY = {
 }
 
 
-MODEL_CONFIGS = {name: spec.config_cls for name, spec in MODEL_SPECS.items()}
-DATASET_CONFIGS = {name: spec.config_cls for name, spec in DATASET_SPECS.items()}
-TRAINER_CONFIGS = {name: spec.config_cls for name, spec in TRAINER_SPECS.items()}
+def get_model_config_cls(name: str) -> type[BaseModel]:
+    return MODEL_SPECS[name].config_cls
 
 
-def get_model_config_cls(name: str):
-    return MODEL_CONFIGS[name]
+def get_dataset_config_cls(name: str) -> type[BaseModel]:
+    return DATASET_SPECS[name].dataset_config_cls
 
 
-def get_dataset_config_cls(name: str):
-    return DATASET_CONFIGS[name]
-
-
-def get_trainer_config_cls(name: str):
-    return TRAINER_CONFIGS[name]
+def get_trainer_config_cls(name: str) -> type[BaseModel]:
+    return TRAINER_SPECS[name].config_cls
 
 
 def get_model_spec(name: str) -> ModelSpec:

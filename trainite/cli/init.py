@@ -8,15 +8,15 @@ from typing import Iterable, Sequence
 import questionary
 import tomlkit
 from packaging.requirements import Requirement
+from pydantic import BaseModel, ConfigDict, Field
 
 from trainite.config import (
     ComponentConfig,
-    DataConfig,
+    DataConfigBase,
     DataLoaderConfig,
+    OptimizerConfig,
     OutputConfig,
-    ProjectConfig,
     SplitConfig,
-    dump_config,
 )
 from trainite.config.registry import (
     REGISTRY,
@@ -24,6 +24,19 @@ from trainite.config.registry import (
     get_model_spec,
     get_trainer_spec,
 )
+from trainite.utils import dump_config
+
+
+class ProjectConfig(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
+    model: ComponentConfig
+    optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
+    data: DataConfigBase
+    trainer: BaseModel
+    output: OutputConfig
+    seed: int = 42
+    device: str = "auto"
+
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = PACKAGE_ROOT.parent
@@ -198,6 +211,40 @@ def _build_templates(
             PROJECT_ROOT / trainer_spec.readme_template_path
         )
 
+    # Dynamic replacements that depend on the user's model/dataset/trainer selection.
+    trainer_replacements = [
+        *trainer_spec.template_replacements,
+        ("model: ComponentConfig", f"model: {model_spec.config_cls.__name__}"),
+        ("data: DataConfigBase", f"data: {dataset_spec.config_cls.__name__}"),
+        (
+            "# __MODEL_IMPORT__",
+            f"from models.{model_spec.name} import {model_spec.config_cls.__name__}",
+        ),
+        (
+            "# __DATASET_IMPORT__",
+            f"from datasets.{dataset_spec.name} import {dataset_spec.config_cls.__name__}",
+        ),
+    ]
+
+    main_replacements = [
+        (
+            "from trainite.trainers.pretrainer import PreTrainer, ProjectConfig",
+            f"from trainer import {trainer_spec.implementation_symbol}, ProjectConfig",
+        ),
+        ("trainite.utils", "utils"),
+        ("PreTrainer(config)", f"{trainer_spec.implementation_symbol}(config)"),
+    ]
+
+    readme_replacements = [
+        ("{{project_name}}", project_name),
+        ("{{model_name}}", model_spec.name),
+        ("{{model_docs}}", model_docs),
+        ("{{dataset_name}}", dataset_spec.name),
+        ("{{dataset_docs}}", dataset_docs),
+        ("{{trainer_name}}", trainer_spec.name),
+        ("{{trainer_docs}}", trainer_docs),
+    ]
+
     return {
         f"models/{model_spec.name}.py": _render_template(
             PROJECT_ROOT / model_spec.implementation_path,
@@ -208,47 +255,18 @@ def _build_templates(
             dataset_spec.template_replacements,
         ),
         "trainer.py": _render_template(
-            PROJECT_ROOT / trainer_spec.implementation_path,
-            trainer_spec.template_replacements,
+            PROJECT_ROOT / trainer_spec.implementation_path, trainer_replacements
         ),
-        "utils.py": _render_template(
-            PROJECT_ROOT / "trainite/utils.py",
-            [("trainite.config", "config")],
-        ),
-        "config.py": _render_template(PROJECT_ROOT / "trainite/config/base.py", []),
+        "utils.py": _render_template(PROJECT_ROOT / "trainite/utils.py"),
         "main.py": _render_template(
-            PROJECT_ROOT / "trainite/main.py",
-            [
-                (
-                    "trainite.config",
-                    "config",
-                ),
-                (
-                    "from trainite.trainers import PreTrainer",
-                    f"from trainer import {trainer_spec.implementation_symbol}",
-                ),
-                (
-                    "trainer = PreTrainer(config)",
-                    f"trainer = {trainer_spec.implementation_symbol}(config)",
-                ),
-            ],
+            PROJECT_ROOT / "trainite/main.py", main_replacements
         ),
         "README.md": _render_template(
-            PROJECT_ROOT / "trainite/templates/project/README.md",
-            [
-                ("{{project_name}}", project_name),
-                ("{{model_name}}", model_spec.name),
-                ("{{model_docs}}", model_docs),
-                ("{{dataset_name}}", dataset_spec.name),
-                ("{{dataset_docs}}", dataset_docs),
-                ("{{trainer_name}}", trainer_spec.name),
-                ("{{trainer_docs}}", trainer_docs),
-            ],
+            PROJECT_ROOT / "trainite/templates/project/README.md", readme_replacements
         ),
+        "config.py": _render_template(PROJECT_ROOT / "trainite/config/base.py"),
         "pyproject.toml": generate_uv_project(
-            name=project_name,
-            version="0.1.0",
-            dependencies=sorted(final_deps),
+            name=project_name, version="0.1.0", dependencies=sorted(final_deps)
         ),
     }
 
@@ -293,7 +311,7 @@ def build_parser() -> argparse.ArgumentParser:
 def _update_targets(
     config: ComponentConfig
     | ProjectConfig
-    | DataConfig
+    | DataConfigBase
     | SplitConfig
     | DataLoaderConfig,
     old_prefix: str,
@@ -306,7 +324,7 @@ def _update_targets(
         # Recursively update all components in ProjectConfig
         for field in config.model_fields:
             _update_targets(getattr(config, field), old_prefix, new_prefix)
-    elif isinstance(config, DataConfig):
+    elif isinstance(config, DataConfigBase):
         for field in config.model_fields:
             _update_targets(getattr(config, field), old_prefix, new_prefix)
     elif isinstance(config, SplitConfig):

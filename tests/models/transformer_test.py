@@ -3,7 +3,7 @@ from unittest import mock
 import pytest
 import torch
 
-from trainite.config import get_model_spec
+from trainite.config.registry import get_model_spec
 from trainite.datasets.string_reverse import CharTokenizer
 from trainite.models.transformer import (
     Attention,
@@ -182,6 +182,23 @@ def test_transformer_model_generate():
             max_new_tokens=10,
             tokenizer=tokenizer,
             eos_token_id=tokenizer.eos_token_id,
+        )
+        assert generated[0] == ""
+
+    # Test with eos_token_id early exit (default tokenizer fallback)
+    with mock.patch.object(model, "forward") as mock_forward:
+
+        def mock_forward_fn(x):
+            logits = torch.zeros(1, x.shape[1], tokenizer.vocab_size)
+            logits[0, -1, tokenizer.eos_token_id] = 10.0
+            return logits
+
+        mock_forward.side_effect = mock_forward_fn
+
+        generated = model.generate(
+            ["ab"],
+            max_new_tokens=10,
+            tokenizer=tokenizer,
         )
         assert generated[0] == ""
 

@@ -1,7 +1,7 @@
 import pytest
 from torch.utils.data import DataLoader
 
-from trainite.config import get_dataset_spec
+from trainite.config.registry import get_dataset_spec
 from trainite.datasets.string_reverse import (
     CHARSET_PRESETS,
     UNIVERSAL_VOCAB,

@@ -4,6 +4,9 @@ from typing import Protocol
 import torch
 from torch import nn
 from torch.nn.utils.rnn import pad_sequence
+from pydantic import Field
+
+from trainite.config.base import ComponentConfig
 
 
 class Tokenizer(Protocol):
@@ -270,14 +273,14 @@ class TransformerModel(nn.Module):
             logits = self(generated)
             next_token_logits = logits[:, -1, :]
             next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
-            if eos_token_id is not None:
-                eos_mask = generated[:, -1:].eq(eos_token_id)
+            if eos_id is not None:
+                eos_mask = generated[:, -1:].eq(eos_id)
                 next_token = torch.where(
-                    eos_mask, torch.tensor(eos_token_id, device=device), next_token
+                    eos_mask, torch.tensor(eos_id, device=device), next_token
                 )
             generated = torch.cat([generated, next_token], dim=-1)
 
-            if eos_token_id is not None and generated[:, -1].eq(eos_token_id).all():
+            if eos_id is not None and generated[:, -1].eq(eos_id).all():
                 break
 
         new_tokens = generated[:, prompt_len:].tolist()
@@ -346,3 +349,15 @@ class CausalLMCollateFn:
             "input_ids": padded_input_ids,
             "labels": padded_labels,
         }
+
+
+class TransformerModelConfig(ComponentConfig):
+    target: str = Field(
+        default="trainite.models.transformer.TransformerModel", alias="_target_"
+    )
+    hidden_size: int = Field(default=64, gt=0)
+    num_layers: int = Field(default=2, gt=0)
+    num_heads: int = Field(default=2, gt=0)
+    feedforward_dim: int = Field(default=128, gt=0)
+    dropout: float = Field(default=0.1, ge=0.0, lt=1.0)
+    max_seq_len: int = Field(default=128, gt=0)
