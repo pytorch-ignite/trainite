@@ -6,7 +6,7 @@ import torch
 from pydantic import ConfigDict, Field, model_validator
 from torch.utils.data import Dataset
 
-from trainite.config.base import ComponentConfig, DataConfigBase, DataLoaderConfig
+from trainite.config.base import ComponentConfig, DataLoaderConfig, DataWithAutoSplit
 
 # Hardcoded universal vocabulary: all printable ASCII characters
 UNIVERSAL_VOCAB = string.ascii_letters + string.digits + string.punctuation + " "
@@ -237,13 +237,13 @@ class StringReverseDatasetConfig(ComponentConfig):
         return self
 
 
-class StringReverseDataConfig(DataConfigBase):
+class StringReverseDataConfig(DataWithAutoSplit):
     dataset: StringReverseDatasetConfig | None = Field(  # type: ignore[assignment]
         default_factory=StringReverseDatasetConfig
     )
-    train_ratio: float | None = 0.8
-    val_ratio: float | None = 0.1
-    dataloader: DataLoaderConfig | None = Field(
+    test_ratio: float = 0.1
+    val_ratio: float = 0.1
+    dataloader: DataLoaderConfig = Field(
         default_factory=lambda: DataLoaderConfig(
             batch_size=32,
             shuffle=True,

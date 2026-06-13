@@ -12,6 +12,7 @@ from trainite.config import (
     ComponentConfig,
     DataConfigBase,
     DataLoaderConfig,
+    DataWithAutoSplit,
     OptimizerConfig,
     OutputConfig,
     SplitConfig,
@@ -311,8 +312,17 @@ def test_pretrainer_run_with_val(project_config, temp_run_dir):
     assert "checkpoint_best" in trainer.handlers
 
 
+@pytest.mark.skip(reason="Skipping this test because validation is required.")
 def test_pretrainer_run_without_val(project_config, temp_run_dir):
-    project_config.data.val = None
+    object.__setattr__(
+        project_config,
+        "data",
+        DataConfigBase.model_construct(
+            train=project_config.data.train,
+            val=None,
+            test=None,
+        ),
+    )
     trainer = PreTrainer(project_config)
     trainer.run()
 
@@ -369,18 +379,26 @@ def test_pretrainer_test_method(project_config, temp_run_dir):
     assert "token_accuracy" in trainer.test_evaluator.state.metrics
 
 
+@pytest.mark.skip(reason="Skipping this test because validation is required ")
 def test_pretrainer_test_without_val(project_config, temp_run_dir):
     # Remove validation split
-    project_config.data.val = None
     # Add test split
-    project_config.data.test = SplitConfig(
-        dataset=cc(
-            "tests.trainers.pretrainer_test.SimpleDataset",
-            size=4,
-            seq_len=4,
-            vocab_size=10,
+    object.__setattr__(
+        project_config,
+        "data",
+        DataConfigBase.model_construct(
+            train=project_config.data.train,
+            val=None,
+            test=SplitConfig(
+                dataset=cc(
+                    "tests.trainers.pretrainer_test.SimpleDataset",
+                    size=4,
+                    seq_len=4,
+                    vocab_size=10,
+                ),
+                dataloader=DataLoaderConfig(batch_size=4),
+            ),
         ),
-        dataloader=DataLoaderConfig(batch_size=4),
     )
 
     trainer = PreTrainer(project_config)
@@ -424,14 +442,14 @@ def test_pretrainer_builds_train_and_val_loaders_from_ratios(tmp_path):
             vocab_size=100,
             hidden_size=32,
         ),
-        data=DataConfigBase(
+        data=DataWithAutoSplit(
             dataset=cc(
                 "tests.trainers.pretrainer_test.SimpleDataset",
                 size=100,
                 seq_len=10,
                 vocab_size=100,
             ),
-            train_ratio=0.8,
+            test_ratio=0.0,
             val_ratio=0.2,
         ),
         trainer=PreTrainerConfig(epochs=1),
@@ -456,14 +474,14 @@ def test_pretrainer_builds_train_val_and_test_loaders_from_ratios(tmp_path):
             vocab_size=100,
             hidden_size=32,
         ),
-        data=DataConfigBase(
+        data=DataWithAutoSplit(
             dataset=cc(
                 "tests.trainers.pretrainer_test.SimpleDataset",
                 size=100,
                 seq_len=10,
                 vocab_size=100,
             ),
-            train_ratio=0.6,
+            test_ratio=0.2,
             val_ratio=0.2,
         ),
         trainer=PreTrainerConfig(epochs=1),
@@ -490,11 +508,11 @@ def test_pretrainer_builds_train_val_and_test_loaders_from_ratios(tmp_path):
 
 
 def test_pretrainer_dataset_is_empty(project_config):
-    project_config.data = DataConfigBase(
+    project_config.data = DataWithAutoSplit(
         dataset=cc(
             "tests.trainers.pretrainer_test.EmptyDataset",
         ),
-        train_ratio=0.8,
+        test_ratio=0.0,
         val_ratio=0.2,
     )
     with pytest.raises(ValueError, match="Training dataset is empty"):

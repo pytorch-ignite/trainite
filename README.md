@@ -65,8 +65,8 @@ Define one dataset and let Trainite handle the math. Useful for quick prototypin
 ```yaml
 data:
   dataset: { _target_: ..., size: 1200 }
-  train_ratio: 0.8
-  val_ratio: 0.2
+  test_ratio: 0.1
+  val_ratio: 0.1
   dataloader: { batch_size: 32 } # Applied to all splits
 ```
 

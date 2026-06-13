@@ -119,8 +119,8 @@ Define a single dataset and split ratios. Trainite will split it randomly (with 
 data:
   dataset:
     _target_: ...
-  train_ratio: 0.8
-  val_ratio: 0.2
+  test_ratio: 0.1
+  val_ratio: 0.1
   dataloader:
     batch_size: 32
 ```
