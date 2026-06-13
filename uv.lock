@@ -1310,7 +1310,7 @@ wheels = [
 ]
 
 [[package]]
-name = "trainite-prototype"
+name = "trainite"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

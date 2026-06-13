@@ -185,6 +185,23 @@ def test_transformer_model_generate():
         )
         assert generated[0] == ""
 
+    # Test with eos_token_id early exit (default tokenizer fallback)
+    with mock.patch.object(model, "forward") as mock_forward:
+
+        def mock_forward_fn(x):
+            logits = torch.zeros(1, x.shape[1], tokenizer.vocab_size)
+            logits[0, -1, tokenizer.eos_token_id] = 10.0
+            return logits
+
+        mock_forward.side_effect = mock_forward_fn
+
+        generated = model.generate(
+            ["ab"],
+            max_new_tokens=10,
+            tokenizer=tokenizer,
+        )
+        assert generated[0] == ""
+
 
 def test_causal_lm_collate_fn():
     tokenizer = CharTokenizer()
