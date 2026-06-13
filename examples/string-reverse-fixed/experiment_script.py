@@ -14,7 +14,7 @@ from trainer import PreTrainer
 
 NUM_RUNS: int = 2
 TIME_LIMIT_SECONDS: float = 3600 * 2
-TEST_SEQ_LENGTHS: list[int] = [8, 16, 32, 64, 96, 128, 192, 256, 384, 512]
+TEST_SEQ_LENGTHS: list[int] = [8, 16, 32, 64, 96, 128, 192, 256, 384, 512, 768, 1024]
 
 MODEL_HIDDEN_SIZE: int = 64
 MODEL_NUM_LAYERS: int = 6
@@ -190,6 +190,7 @@ def run_suite(
         for run_idx in range(NUM_RUNS):
             cfg = ProjectConfig.model_validate(base_cfg.model_dump(by_alias=True))
             cfg.seed = base_cfg.seed + run_idx
+            cfg.output.run_name = _make_run_name(x_val, cfg.seed)
             print(f"  Run {run_idx + 1}/{NUM_RUNS}  (seed = {cfg.seed})", end="")
 
             snap, elapsed, epochs = run_single_experiment(cfg, time_limit_seconds)
