@@ -87,6 +87,7 @@ TRAINER_SPECS = {
         implementation_symbol="PreTrainer",
         template_replacements=[
             ("trainite.utils", "utils"),
+            ("trainite.config.base", "config"),
         ],
         readme_template_path=Path(
             "trainite/templates/components/trainers/pretrainer.md"

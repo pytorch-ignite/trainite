@@ -211,7 +211,40 @@ def _build_templates(
             PROJECT_ROOT / trainer_spec.readme_template_path
         )
 
-    # Dynamically render templates for model, dataset and trainer implementations with appropriate replacements
+    # Dynamic replacements that depend on the user's model/dataset/trainer selection.
+    trainer_replacements = [
+        *trainer_spec.template_replacements,
+        ("model: ComponentConfig", f"model: {model_spec.config_cls.__name__}"),
+        ("data: DataConfigBase", f"data: {dataset_spec.config_cls.__name__}"),
+        (
+            "# __MODEL_IMPORT__",
+            f"from models.{model_spec.name} import {model_spec.config_cls.__name__}",
+        ),
+        (
+            "# __DATASET_IMPORT__",
+            f"from datasets.{dataset_spec.name} import {dataset_spec.config_cls.__name__}",
+        ),
+    ]
+
+    main_replacements = [
+        (
+            "from trainite.trainers.pretrainer import PreTrainer, ProjectConfig",
+            f"from trainer import {trainer_spec.implementation_symbol}, ProjectConfig",
+        ),
+        ("trainite.utils", "utils"),
+        ("PreTrainer(config)", f"{trainer_spec.implementation_symbol}(config)"),
+    ]
+
+    readme_replacements = [
+        ("{{project_name}}", project_name),
+        ("{{model_name}}", model_spec.name),
+        ("{{model_docs}}", model_docs),
+        ("{{dataset_name}}", dataset_spec.name),
+        ("{{dataset_docs}}", dataset_docs),
+        ("{{trainer_name}}", trainer_spec.name),
+        ("{{trainer_docs}}", trainer_docs),
+    ]
+
     return {
         f"models/{model_spec.name}.py": _render_template(
             PROJECT_ROOT / model_spec.implementation_path,
@@ -222,61 +255,18 @@ def _build_templates(
             dataset_spec.template_replacements,
         ),
         "trainer.py": _render_template(
-            PROJECT_ROOT / trainer_spec.implementation_path,
-            trainer_spec.template_replacements
-            + [
-                (
-                    "model: ComponentConfig",
-                    f"model: {model_spec.config_cls.__name__}",
-                ),
-                (
-                    "data: DataConfigBase",
-                    f"data: {dataset_spec.config_cls.__name__}",
-                ),
-                (
-                    "from trainite.config.base import (\n    ComponentConfig,\n    DataConfigBase,\n    DataLoaderConfig,\n    OptimizerConfig,\n    OutputConfig,\n    SplitConfig,\n)",
-                    f"from config import (\n    ComponentConfig,\n    DataConfigBase,\n    DataLoaderConfig,\n    OptimizerConfig,\n    OutputConfig,\n    SplitConfig,\n)\nfrom models.{model_spec.name} import {model_spec.config_cls.__name__}\nfrom datasets.{dataset_spec.name} import {dataset_spec.config_cls.__name__}",
-                ),
-            ],
+            PROJECT_ROOT / trainer_spec.implementation_path, trainer_replacements
         ),
-        "utils.py": _render_template(
-            PROJECT_ROOT / "trainite/utils.py",
-            [],
-        ),
+        "utils.py": _render_template(PROJECT_ROOT / "trainite/utils.py"),
         "main.py": _render_template(
-            PROJECT_ROOT / "trainite/main.py",
-            [
-                (
-                    "from trainite.trainers.pretrainer import PreTrainer, ProjectConfig",
-                    f"from trainer import {trainer_spec.implementation_symbol}, ProjectConfig",
-                ),
-                (
-                    "trainite.utils",
-                    "utils",
-                ),
-                (
-                    "PreTrainer(config)",
-                    f"{trainer_spec.implementation_symbol}(config)",
-                ),
-            ],
+            PROJECT_ROOT / "trainite/main.py", main_replacements
         ),
         "README.md": _render_template(
-            PROJECT_ROOT / "trainite/templates/project/README.md",
-            [
-                ("{{project_name}}", project_name),
-                ("{{model_name}}", model_spec.name),
-                ("{{model_docs}}", model_docs),
-                ("{{dataset_name}}", dataset_spec.name),
-                ("{{dataset_docs}}", dataset_docs),
-                ("{{trainer_name}}", trainer_spec.name),
-                ("{{trainer_docs}}", trainer_docs),
-            ],
+            PROJECT_ROOT / "trainite/templates/project/README.md", readme_replacements
         ),
-        "config.py": _render_template(PROJECT_ROOT / "trainite/config/base.py", []),
+        "config.py": _render_template(PROJECT_ROOT / "trainite/config/base.py"),
         "pyproject.toml": generate_uv_project(
-            name=project_name,
-            version="0.1.0",
-            dependencies=sorted(final_deps),
+            name=project_name, version="0.1.0", dependencies=sorted(final_deps)
         ),
     }
 
