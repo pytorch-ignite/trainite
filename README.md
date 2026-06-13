@@ -19,32 +19,18 @@ my-experiment/
 └── README.md       # Documentation tailored to your selected components
 ```
 
-### Dynamic configuration (`config.yaml`):
+### Dynamic Configuration
 
-Swap components (like models, optimizers, or datasets) purely from the YAML configuration using dotted import paths (`_target_`):
+Swap components (like models, optimizers, or datasets) dynamically via config using dotted import paths (`_target_`):
 
 ```yaml
 model:
   _target_: models.transformer.TransformerModel
   hidden_size: 64
-  num_layers: 2
-  num_heads: 2
-  feedforward_dim: 128
-  dropout: 0.1
-  max_seq_len: 128
 
 optimizer:
   _target_: torch.optim.AdamW
   lr: 0.001
-
-data:
-  dataset:
-    _target_: datasets.string_reverse.StringReverseDataset
-    per_seq_size: 256
-    min_seq_len: 1
-    max_seq_len: 16
-  dataloader:
-    batch_size: 32
 ```
 
 **Trainite is explicitly not:**
@@ -68,9 +54,7 @@ data:
 - [Examples](#examples)
 - [Development](#development)
   - [Architecture Overview](#architecture-overview)
-  - [Adding a Built-in Component](#adding-a-built-in-component)
   - [Testing](#testing)
-  - [Contributing](#contributing)
 
 ---
 
@@ -212,55 +196,21 @@ outputs/
 
 All configuration lives in `config.yaml`. Every key maps to a validated Pydantic model in `config.py`, giving you type checking, clear error messages, and IDE autocomplete.
 
-### Data Configuration
+### Swapping Components with `_target_`
 
-Trainite supports two ways to define your data:
-
-**Option 1: Automatic splitting** — define one dataset and let Trainite split it:
+Components (such as models, datasets, optimizers, or collation functions) are specified via the `_target_` key. This key holds a dotted import path resolved at runtime, allowing you to swap components directly from config without altering training scripts:
 
 ```yaml
-data:
-  dataset:
-    _target_: datasets.string_reverse.StringReverseDataset
-    per_seq_size: 256
-    charset: "@alpha"
-    min_seq_len: 1
-    max_seq_len: 16
-  train_ratio: 0.8
-  val_ratio: 0.1
-  dataloader:
-    batch_size: 32
-    shuffle: true
-```
+model:
+  _target_: models.transformer.TransformerModel
+  hidden_size: 64
 
-**Option 2: Explicit splits** — define each split independently:
-
-```yaml
-data:
-  train:
-    dataset:
-      _target_: datasets.string_reverse.StringReverseDataset
-      per_seq_size: 1000
-    dataloader:
-      batch_size: 32
-      shuffle: true
-  val:
-    dataset:
-      _target_: datasets.string_reverse.StringReverseDataset
-      per_seq_size: 200
-    dataloader:
-      batch_size: 32
-```
-
-### The `_target_` Key
-
-Components are specified via `_target_`, a dotted import path that is resolved at runtime. This allows you to swap models, datasets, optimizers, or collate functions purely from config:
-
-```yaml
 optimizer:
   _target_: torch.optim.AdamW
   lr: 0.001
 ```
+
+For detailed configuration parameters and data splitting options (e.g., automatic splitting vs. explicit splits) specific to your selected components, refer to the generated `README.md` inside your initialized project.
 
 ---
 
@@ -329,38 +279,6 @@ trainite init my-experiment --model transformer --dataset string-reverse
 The generated project has **zero runtime dependency** on the `trainite` package.
 
 
-## Adding a Built-in Component
-
-To add a new built-in model (the process is similar for datasets and trainers):
-
-1. **Write the implementation** in `trainite/models/<name>.py`. The model class should accept all hyperparameters as `__init__` kwargs.
-
-2. **Create a Pydantic config class** in `trainite/config/model.py`:
-
-   ```python
-   class MyModelConfig(ComponentConfig):
-       target: str = Field(default="trainite.models.my_model.MyModel", alias="_target_")
-       hidden_size: int = Field(default=64, gt=0)
-       # ... other hyperparameters
-   ```
-
-3. **Register it** in `trainite/config/registry.py`:
-
-   ```python
-   MODEL_SPECS["my-model"] = ModelSpec(
-       name="my_model",
-       implementation_path=Path("trainite/models/my_model.py"),
-       config_cls=MyModelConfig,
-       implementation_symbol="MyModel",
-       builder_symbol="MyModel",
-       # ...
-   )
-   ```
-
-4. **(Optional)** Add a readme template at `trainite/templates/components/models/my_model.md`.
-
-5. **Add tests** in `tests/models/my_model_test.py`.
-
 ## Testing
 
 Run the full test suite:
@@ -384,34 +302,3 @@ tests/
 └── trainers/
     └── pretrainer_test.py          # Training loop integration
 ```
-
-## Contributing
-
-### Setup
-
-```bash
-git clone https://github.com/pytorch-ignite/trainite.git
-cd trainite
-uv sync --dev
-uv run pre-commit install
-```
-
-### Code Quality
-
-Pre-commit hooks run automatically on every commit and enforce:
-
-- **Ruff** — linting and formatting
-- **Pyrefly** — type checking
-- Trailing whitespace, YAML validity, TOML validity, no debug statements
-
-To run checks manually:
-
-```bash
-uv run pre-commit run --all-files
-```
-
-### Pull Requests
-
-- Branch from `main`
-- Write tests for new functionality
-- Ensure all CI checks pass (`uv run pytest` + pre-commit)
