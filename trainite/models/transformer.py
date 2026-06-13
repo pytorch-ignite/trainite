@@ -1,6 +1,6 @@
 import math
 import string
-from typing import Any, Protocol
+from typing import Any
 
 import torch
 from pydantic import BaseModel, ConfigDict, Field
@@ -35,24 +35,6 @@ class GenerateOutput(BaseModel):
     def __getitem__(self, idx: int) -> torch.Tensor:
         """Convenience: index directly into sequences (batch dim)."""
         return self.sequences[idx]
-
-
-class Tokenizer(Protocol):
-    @property
-    def bos_token_id(self) -> int | None: ...
-
-    @property
-    def eos_token_id(self) -> int | None: ...
-
-    @property
-    def sep_token_id(self) -> int | None: ...
-
-    @property
-    def pad_token_id(self) -> int | None: ...
-
-    def encode(self, text: str) -> list[int]: ...
-
-    def decode(self, ids: list[int]) -> str: ...
 
 
 class CharTokenizer:
@@ -413,48 +395,29 @@ class TransformerModel(nn.Module):
         input_ids: torch.Tensor,
         max_new_tokens: int,
         attention_mask: torch.Tensor | None = None,
-        bos_token_id: int | None = None,
         eos_token_id: int | None = None,
         pad_token_id: int | None = None,
         **kwargs: Any,
-    ) -> GenerateOutput:
+    ) -> torch.Tensor:
         """Generate text token IDs from prompt input_ids.
+
+        Expects a pre-padded tensor (B, S). The caller is responsible for
+        left-padding and providing an attention mask before calling this method.
 
         Args:
             input_ids: Prompt token IDs of shape (batch, seq_len).
             max_new_tokens: Maximum number of new tokens to generate.
             attention_mask: Optional attention mask of shape (batch, seq_len).
-            bos_token_id: Optional token ID that signals beginning-of-sequence.
             eos_token_id: Optional token ID that signals end-of-sequence.
             pad_token_id: Optional token ID used for padding sequences.
 
         Returns:
-            GenerateOutput with ``sequences`` containing the full token IDs
-            (prompt + newly generated tokens) of shape (batch, prompt_len + new_tokens).
+            Tensor containing the full token IDs (prompt + newly generated tokens)
+            of shape (batch, prompt_len + new_tokens).
         """
         self.eval()
 <<<<<<< HEAD
-        bos_id = bos_token_id or getattr(tokenizer, "bos_token_id", None)
-        sep_id = sep_token_id or getattr(tokenizer, "sep_token_id", None)
-        eos_id = eos_token_id or getattr(tokenizer, "eos_token_id", None)
-        pad_id = pad_token_id or getattr(tokenizer, "pad_token_id", 0)
-        if bos_id is None or eos_id is None or sep_id is None:
-            raise ValueError(
-                "Tokenizer must have bos_token_id, sep_token_id, and eos_token_id defined, or they must be provided explicitly to the generate method."
-            )
 
-        encoded = []
-        for text in prompts:
-            ids = tokenizer.encode(text)
-            ids = torch.tensor([bos_id] + ids + [sep_id], dtype=torch.long)
-            encoded.append(ids.flip(0))
-
-        param = next(self.parameters(), None)
-        device = param.device if param is not None else "cpu"
-
-        # left-pad sequences and flip back to (B, S) for processing
-        input_ids = pad_sequence(encoded, batch_first=True, padding_value=pad_id).flip(1).to(device)
-=======
         eos_id = (
             eos_token_id
             if eos_token_id is not None
@@ -492,7 +455,7 @@ class TransformerModel(nn.Module):
             if eos_id is not None and generated[:, -1].eq(eos_id).all():
                 break
 
-        return GenerateOutput(sequences=generated)
+        return generated
 
 
 class CausalLMCollateFn:
@@ -500,7 +463,7 @@ class CausalLMCollateFn:
 
     def __init__(
         self,
-        tokenizer: Tokenizer,
+        tokenizer: Any,
         pad_token_id: int | None = None,
         ignore_index: int = -100,
     ) -> None:

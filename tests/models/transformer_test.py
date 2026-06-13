@@ -8,7 +8,6 @@ from trainite.models.transformer import (
     Attention,
     CausalLMCollateFn,
     CharTokenizer,
-    GenerateOutput,
     RotaryEmbedding,
     TransformerBlock,
     TransformerModel,
@@ -166,8 +165,8 @@ def test_transformer_model_generate():
 
         input_ids = torch.tensor([[5, 6]], dtype=torch.long)
         generated = model.generate(input_ids, max_new_tokens=1)
-        assert isinstance(generated, GenerateOutput)
-        assert generated.sequences[0].tolist() == [5, 6, 7]
+        assert isinstance(generated, torch.Tensor)
+        assert generated[0].tolist() == [5, 6, 7]
 
     # Test with eos_token_id early exit
     with mock.patch.object(model, "forward") as mock_forward:
@@ -185,7 +184,7 @@ def test_transformer_model_generate():
             max_new_tokens=10,
             eos_token_id=tokenizer.eos_token_id,
         )
-        assert generated.sequences[0].tolist() == [5, 6, tokenizer.eos_token_id]
+        assert generated[0].tolist() == [5, 6, tokenizer.eos_token_id]
 
     # Test with eos_token_id early exit (default tokenizer fallback)
     with mock.patch.object(model, "forward") as mock_forward:
@@ -202,7 +201,7 @@ def test_transformer_model_generate():
             input_ids,
             max_new_tokens=10,
         )
-        assert generated.sequences[0].tolist() == [5, 6, tokenizer.eos_token_id]
+        assert generated[0].tolist() == [5, 6, tokenizer.eos_token_id]
 
 
 def test_causal_lm_collate_fn():

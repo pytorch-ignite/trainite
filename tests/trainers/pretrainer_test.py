@@ -115,6 +115,8 @@ class DummyTokenizer:
 
 
 class GenerativeModel(SimpleModel):
+    tokenizer = DummyTokenizer()
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.tokenizer = DummyTokenizer()
@@ -167,7 +169,7 @@ def temp_run_dir():
 def project_config(temp_run_dir):
     return ProjectConfig(
         model=cc(
-            "tests.trainers.pretrainer_test.SimpleModel",
+            "tests.trainers.pretrainer_test.SimpleModelWithTokenizer",
             vocab_size=10,
             hidden_size=8,
         ),
@@ -470,7 +472,7 @@ def test_pretrainer_explicit_split_shuffle(project_config):
 def test_pretrainer_builds_train_and_val_loaders_from_ratios(tmp_path):
     config = ProjectConfig(
         model=cc(
-            "tests.trainers.pretrainer_test.SimpleModel",
+            "tests.trainers.pretrainer_test.SimpleModelWithTokenizer",
             vocab_size=100,
             hidden_size=32,
         ),
@@ -502,7 +504,7 @@ def test_pretrainer_builds_train_and_val_loaders_from_ratios(tmp_path):
 def test_pretrainer_builds_train_val_and_test_loaders_from_ratios(tmp_path):
     config = ProjectConfig(
         model=cc(
-            "tests.trainers.pretrainer_test.SimpleModel",
+            "tests.trainers.pretrainer_test.SimpleModelWithTokenizer",
             vocab_size=100,
             hidden_size=32,
         ),
@@ -638,7 +640,7 @@ def test_setup_inference_missing_tokenizer(project_config):
         seq_len=4,
         vocab_size=10,
     )
-    with pytest.raises(ValueError, match="Model must have a 'tokenizer' attribute"):
+    with pytest.raises(ValueError, match="Failed to resolve tokenizer from model"):
         PreTrainer(project_config)
 
 
@@ -677,7 +679,7 @@ def test_setup_inference_non_dict_dataset_items(project_config):
     )
     with pytest.raises(
         ValueError,
-        match="dataset items must be dictionaries containing",
+        match="dataset items must be dicts with",
     ):
         PreTrainer(project_config)
 

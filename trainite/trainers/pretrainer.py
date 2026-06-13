@@ -102,13 +102,13 @@ class PreTrainer:
         return resolved
 
     def _resolve_tokenizer(self) -> Any:
-        try:
-            model_class = get_target(self.config.model.target)
-            tokenizer = getattr(model_class, "tokenizer", None)
-            tokenizer = tokenizer or getattr(self.model, "tokenizer", None)
-            return tokenizer
-        except Exception:
-            return None
+        model_class = get_target(self.config.model.target)
+        tokenizer = getattr(model_class, "tokenizer", None)
+        if tokenizer is None:
+            raise ValueError(
+                "Failed to resolve tokenizer from model. Please ensure your model class has a 'tokenizer' attribute or specify a tokenizer in your config."
+            )
+        return tokenizer
 
     def _get_underlying_dataset(self, dataset: Dataset) -> Dataset:
         while hasattr(dataset, "dataset"):
@@ -546,12 +546,6 @@ class PreTrainer:
         if not hasattr(self.model, "generate"):
             raise ValueError("Model must implement 'generate' method for inference logging.")
 
-        # Retrieve and check tokenizer from model
-        if self.tokenizer is None:
-            self.tokenizer = getattr(self.model, "tokenizer", None)
-
-        if self.tokenizer is None:
-            raise ValueError("Model must have a 'tokenizer' attribute for inference logging.")
         tokenizer: Any = self.tokenizer
         if not hasattr(tokenizer, "apply_chat_template") and not hasattr(tokenizer, "decode"):
             raise ValueError("Tokenizer must implement 'apply_chat_template' or 'decode' method for inference logging.")
@@ -563,12 +557,13 @@ class PreTrainer:
         if self.test_loader is not None:
             self._validate_dataloader_for_inference(self.test_loader, "Test")
 
-        return inference_tokenizer
-
     def _log_inference(self, engine: Engine, loader: DataLoader, name: str) -> None:
-        tokenizer = self.inference_tokenizer
-        if tokenizer is None:
+        if (
+            not self.inference_every_epochs
+            or engine.state.epoch % self.inference_every_epochs != 0
+        ):
             return
+        tokenizer: Any = self.tokenizer
 
         self.logger.info(f"Epoch {engine.state.epoch}: Running inference on {name} samples...")
 
@@ -611,15 +606,18 @@ class PreTrainer:
 
             encoded_prompts.append(ids)
 
-        max_len = max(len(ids) for ids in encoded_prompts)
         pad_id = getattr(tokenizer, "pad_token_id", 0)
 
-        padded_prompts = []
-        for ids in encoded_prompts:
-            pad_len = max_len - len(ids)
-            padded_prompts.append([pad_id] * pad_len + ids)
-
-        input_ids = torch.tensor(padded_prompts, dtype=torch.long, device=self.device)
+        # Left-pad efficiently: reverse → pad_sequence → reverse
+        tensors = [torch.tensor(ids, dtype=torch.long) for ids in encoded_prompts]
+        reversed_tensors = [t.flip(0) for t in tensors]
+        input_ids = (
+            torch.nn.utils.rnn.pad_sequence(
+                reversed_tensors, batch_first=True, padding_value=pad_id
+            )
+            .flip(1)
+            .to(self.device)
+        )
         attention_mask = input_ids.ne(pad_id).to(torch.long)
 
         output = model.generate(
@@ -627,7 +625,6 @@ class PreTrainer:
             max_new_tokens=self.max_inference_new_tokens,
             attention_mask=attention_mask,
             eos_token_id=eos_token_id,
-            pad_token_id=pad_id,
         )
         sequences = output.sequences if hasattr(output, "sequences") else output
         new_tokens = sequences[:, input_ids.shape[1] :]
