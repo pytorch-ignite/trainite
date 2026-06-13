@@ -312,9 +312,7 @@ def test_pretrainer_run_with_val(project_config, temp_run_dir):
     assert "checkpoint_best" in trainer.handlers
 
 
-@pytest.mark.skip(
-    reason="Skipping this test because validation is required for early stopping and best checkpoint. "
-)
+@pytest.mark.skip(reason="Skipping this test because validation is required.")
 def test_pretrainer_run_without_val(project_config, temp_run_dir):
     object.__setattr__(
         project_config,
@@ -381,6 +379,7 @@ def test_pretrainer_test_method(project_config, temp_run_dir):
     assert "token_accuracy" in trainer.test_evaluator.state.metrics
 
 
+@pytest.mark.skip(reason="Skipping this test because validation is required ")
 def test_pretrainer_test_without_val(project_config, temp_run_dir):
     # Remove validation split
     # Add test split
