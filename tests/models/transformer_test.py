@@ -4,10 +4,11 @@ import pytest
 import torch
 
 from trainite.config.registry import get_model_spec
-from trainite.datasets.string_reverse import CharTokenizer
 from trainite.models.transformer import (
     Attention,
     CausalLMCollateFn,
+    CharTokenizer,
+    GenerateOutput,
     RotaryEmbedding,
     TransformerBlock,
     TransformerModel,
@@ -153,63 +154,63 @@ def test_transformer_model_generate():
     model = TransformerModel(vocab_size=tokenizer.vocab_size, hidden_size=hidden_size)
     model.eval()
 
-    # Test with string prompt and tokenizer
+    # Test tensor input generate
     with mock.patch.object(model, "forward") as mock_forward:
 
-        def mock_forward_fn(x):
+        def mock_forward_fn(x, attention_mask=None):
             logits = torch.zeros(1, x.shape[1], tokenizer.vocab_size)
             logits[0, -1, 7] = 10.0
             return logits
 
         mock_forward.side_effect = mock_forward_fn
 
-        generated = model.generate(["ab"], max_new_tokens=1, tokenizer=tokenizer)
-        assert isinstance(generated, list)
-        assert generated[0] == "c"
+        input_ids = torch.tensor([[5, 6]], dtype=torch.long)
+        generated = model.generate(input_ids, max_new_tokens=1)
+        assert isinstance(generated, GenerateOutput)
+        assert generated.sequences[0].tolist() == [5, 6, 7]
 
     # Test with eos_token_id early exit
     with mock.patch.object(model, "forward") as mock_forward:
 
-        def mock_forward_fn(x):
+        def mock_forward_fn(x, attention_mask=None):
             logits = torch.zeros(1, x.shape[1], tokenizer.vocab_size)
             logits[0, -1, tokenizer.eos_token_id] = 10.0
             return logits
 
         mock_forward.side_effect = mock_forward_fn
 
+        input_ids = torch.tensor([[5, 6]], dtype=torch.long)
         generated = model.generate(
-            ["ab"],
+            input_ids,
             max_new_tokens=10,
-            tokenizer=tokenizer,
             eos_token_id=tokenizer.eos_token_id,
         )
-        assert generated[0] == ""
+        assert generated.sequences[0].tolist() == [5, 6, tokenizer.eos_token_id]
 
     # Test with eos_token_id early exit (default tokenizer fallback)
     with mock.patch.object(model, "forward") as mock_forward:
 
-        def mock_forward_fn(x):
+        def mock_forward_fn(x, attention_mask=None):
             logits = torch.zeros(1, x.shape[1], tokenizer.vocab_size)
             logits[0, -1, tokenizer.eos_token_id] = 10.0
             return logits
 
         mock_forward.side_effect = mock_forward_fn
 
+        input_ids = torch.tensor([[5, 6]], dtype=torch.long)
         generated = model.generate(
-            ["ab"],
+            input_ids,
             max_new_tokens=10,
-            tokenizer=tokenizer,
         )
-        assert generated[0] == ""
+        assert generated.sequences[0].tolist() == [5, 6, tokenizer.eos_token_id]
 
 
 def test_causal_lm_collate_fn():
     tokenizer = CharTokenizer()
     collate = CausalLMCollateFn(tokenizer=tokenizer, pad_token_id=0, ignore_index=-100)
 
-    data1 = {"source_text": "abc", "target_text": "cba"}
-    data2 = {"source_text": "d", "target_text": "d"}
-
+    data1 = {"prompt": "abc", "completion": "cba"}
+    data2 = {"prompt": "d", "completion": "d"}
     batch = [data1, data2]
 
     collated = collate(batch)
@@ -221,8 +222,8 @@ def test_causal_lm_collate_fn():
     assert collated["input_ids"].shape == collated["labels"].shape
 
     # Max sequence length:
-    # "abc" (3) -> src is <bos> abc <eos> (5 tokens). target is cba <eos> (4 tokens). total full_seq = 9. input_ids = 8. labels = 8.
-    # "d" (1) -> src is <bos> d <eos> (3 tokens). target is d <eos> (2 tokens). total full_seq = 5. input_ids = 4. labels = 4.
+    # "abc" (3) -> src is <bos> abc <sep> (5 tokens). target is cba <eos> (4 tokens). total full_seq = 9. input_ids = 8. labels = 8.
+    # "d" (1) -> src is <bos> d <sep> (3 tokens). target is d <eos> (2 tokens). total full_seq = 5. input_ids = 4. labels = 4.
     # So max length is 8.
     assert collated["input_ids"].shape == (2, 8)
     assert (collated["input_ids"][1, :4] == 0).all()

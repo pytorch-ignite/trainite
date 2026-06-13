@@ -17,6 +17,7 @@ from trainite.config import (
     OutputConfig,
     SplitConfig,
 )
+from trainite.models.transformer import GenerateOutput
 from trainite.trainers.pretrainer import PreTrainer, PreTrainerConfig, ProjectConfig
 
 
@@ -35,6 +36,10 @@ class SimpleModel(nn.Module):
 
     def forward(self, x):
         return self.fc(self.embedding(x))
+
+
+class SimpleModelWithTokenizer(SimpleModel):
+    tokenizer = "mock_tokenizer"
 
 
 class SimpleDataset(torch.utils.data.Dataset):
@@ -95,25 +100,56 @@ class NonDictDataset(SimpleDatasetWithTokenizer):
         return [1, 2, 3]
 
 
-class GenerativeModel(SimpleModel):
-    def generate(self, prompt, max_new_tokens, tokenizer, eos_token_id=None):
-        return [f"pred_{p}" for p in prompt]
-
-
 class DummyTokenizer:
-    pass
+    def __init__(self):
+        self.pad_token_id = 0
+        self.bos_token_id = 1
+        self.sep_token_id = 2
+        self.eos_token_id = 3
+
+    def encode(self, text):
+        return [5, 6]
+
+    def decode(self, ids, skip_special_tokens=True):
+        return "decoded_prediction"
 
 
-class GenerativeDataset(SimpleDataset):
+class GenerativeModel(SimpleModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.tokenizer = DummyTokenizer()
 
+    def generate(
+        self,
+        input_ids,
+        max_new_tokens,
+        attention_mask=None,
+        bos_token_id=None,
+        eos_token_id=None,
+        pad_token_id=None,
+    ):
+        dummy_new = torch.tensor(
+            [[7]], dtype=torch.long, device=input_ids.device
+        ).repeat(input_ids.shape[0], 1)
+        return GenerateOutput(sequences=torch.cat([input_ids, dummy_new], dim=-1))
+
+
+class GenerativeDataset(SimpleDataset):
     def __getitem__(self, index):
         item = super().__getitem__(index)
-        item["source_text"] = f"source_{index}"  # type: ignore[assignment]
-        item["target_text"] = f"target_{index}"  # type: ignore[assignment]
+        item["prompt"] = f"source_{index}"  # type: ignore[assignment]
+        item["completion"] = f"target_{index}"  # type: ignore[assignment]
         return item
+
+
+class GenerativeModelNoTokenizer(SimpleModel):
+    """Like GenerativeModel but without a tokenizer — used to test the missing-tokenizer error."""
+
+    def generate(self, input_ids, max_new_tokens, **kwargs):
+        dummy_new = torch.tensor(
+            [[7]], dtype=torch.long, device=input_ids.device
+        ).repeat(input_ids.shape[0], 1)
+        return GenerateOutput(sequences=torch.cat([input_ids, dummy_new], dim=-1))
 
 
 def dummy_collate_fn(batch):
@@ -530,11 +566,10 @@ def test_pretrainer_early_stopping_patience(project_config):
 
 
 def test_pretrainer_dataloader_class_collate_fn(project_config):
-    project_config.data.train.dataset = cc(
-        "tests.trainers.pretrainer_test.SimpleDatasetWithTokenizer",
-        size=16,
-        seq_len=4,
+    project_config.model = cc(
+        "tests.trainers.pretrainer_test.SimpleModelWithTokenizer",
         vocab_size=10,
+        hidden_size=8,
     )
     project_config.data.train.dataloader.collate_fn = cc("tests.trainers.pretrainer_test.DummyClassCollateFn")
     trainer = PreTrainer(project_config)
@@ -587,11 +622,23 @@ def test_setup_inference_missing_generate(project_config):
 def test_setup_inference_missing_tokenizer(project_config):
     project_config.trainer.inference_every_epochs = 1
     project_config.model = cc(
-        "tests.trainers.pretrainer_test.GenerativeModel",
+        "tests.trainers.pretrainer_test.GenerativeModelNoTokenizer",
         vocab_size=10,
         hidden_size=8,
     )
-    with pytest.raises(ValueError, match="Dataset must have a 'tokenizer' attribute"):
+    project_config.data.train.dataset = cc(
+        "tests.trainers.pretrainer_test.GenerativeDataset",
+        size=16,
+        seq_len=4,
+        vocab_size=10,
+    )
+    project_config.data.val.dataset = cc(
+        "tests.trainers.pretrainer_test.GenerativeDataset",
+        size=8,
+        seq_len=4,
+        vocab_size=10,
+    )
+    with pytest.raises(ValueError, match="Model must have a 'tokenizer' attribute"):
         PreTrainer(project_config)
 
 
@@ -610,7 +657,7 @@ def test_setup_inference_invalid_dataset_items(project_config):
     )
     with pytest.raises(
         ValueError,
-        match="dataset items must contain 'source_text' and 'target_text' keys",
+        match="dataset items must contain 'prompt' and 'completion' keys",
     ):
         PreTrainer(project_config)
 

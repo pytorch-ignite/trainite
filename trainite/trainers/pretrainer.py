@@ -1,8 +1,9 @@
+import inspect
 import logging
 from collections.abc import Sized
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Any
 
 import torch
 from ignite.engine import Engine, Events
@@ -37,16 +38,6 @@ from trainite.config.base import (
 from trainite.utils import dump_config, get_target, instantiate
 
 
-class GenerativeModel(Protocol):
-    def generate(
-        self,
-        prompt: list[str],
-        max_new_tokens: int,
-        tokenizer: object,
-        eos_token_id: int | None = None,
-    ) -> list[str]: ...
-
-
 class PreTrainerConfig(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     epochs: int = Field(default=3, gt=0)
@@ -75,6 +66,11 @@ class PreTrainer:
         self.logger: logging.Logger = setup_logger("trainer", level=logging.INFO)
         torch.manual_seed(config.seed)
         self.config: ProjectConfig = config
+
+        self.train_loader: DataLoader
+        self.val_loader: DataLoader | None = None
+        self.test_loader: DataLoader | None = None
+        self.tokenizer: Any = self._resolve_tokenizer()
 
         self.device: str | torch.device = self._resolve_device()
         self.epochs: int = config.trainer.epochs
@@ -105,14 +101,37 @@ class PreTrainer:
             resolved = "cuda" if torch.cuda.is_available() else "cpu"
         return resolved
 
+    def _resolve_tokenizer(self) -> Any:
+        try:
+            model_class = get_target(self.config.model.target)
+            tokenizer = getattr(model_class, "tokenizer", None)
+            tokenizer = tokenizer or getattr(self.model, "tokenizer", None)
+            return tokenizer
+        except Exception:
+            return None
+
     def _get_underlying_dataset(self, dataset: Dataset) -> Dataset:
         while hasattr(dataset, "dataset"):
             dataset = getattr(dataset, "dataset")
         return dataset
 
     def _resolve_vocab_size(self) -> int:
-        train_dataset = self._get_underlying_dataset(self.train_loader.dataset)
-        vocab_size = getattr(train_dataset, "vocab_size", 0)
+        vocab_size = 0
+        if self.tokenizer is not None and hasattr(self.tokenizer, "vocab_size"):
+            vocab_size = getattr(self.tokenizer, "vocab_size", 0)
+
+        if vocab_size <= 0:
+            train_dataset = self._get_underlying_dataset(self.train_loader.dataset)
+            vocab_size = getattr(train_dataset, "vocab_size", 0)
+
+        if vocab_size <= 0:
+            try:
+                target_symbol = get_target(self.config.model.target)
+                if hasattr(target_symbol, "vocab_size"):
+                    vocab_size = getattr(target_symbol, "vocab_size")
+            except Exception:
+                pass
+
         model_params = self.config.model.model_dump(by_alias=True)
         configured_vocab_size: int | None = model_params.get("vocab_size")
         if configured_vocab_size is not None:
@@ -133,7 +152,21 @@ class PreTrainer:
         return vocab_size
 
     def _build_model(self) -> nn.Module:
-        model = instantiate(self.config.model, vocab_size=self.vocab_size)
+        target_path = self.config.model.target
+        target_symbol = get_target(target_path)
+
+        has_vocab_size_param = False
+        try:
+            sig = inspect.signature(target_symbol)
+            if "vocab_size" in sig.parameters:
+                has_vocab_size_param = True
+        except Exception:
+            pass
+
+        if has_vocab_size_param:
+            model = instantiate(self.config.model, vocab_size=self.vocab_size)
+        else:
+            model = instantiate(self.config.model)
         model.to(self.device)
         return model
 
@@ -159,9 +192,7 @@ class PreTrainer:
         if collate_config:
             target_symbol = get_target(collate_config.target)
             if isinstance(target_symbol, type):
-                underlying_dataset = self._get_underlying_dataset(dataset)
-                tokenizer = getattr(underlying_dataset, "tokenizer", None)
-                collate_fn = instantiate(collate_config, tokenizer=tokenizer)
+                collate_fn = instantiate(collate_config, tokenizer=self.tokenizer)
             else:
                 collate_fn = target_symbol
 
@@ -479,17 +510,15 @@ class PreTrainer:
 
     def _validate_dataloader_for_inference(self, loader: DataLoader, name: str) -> None:
         dataset = loader.dataset
-        if not isinstance(dataset, Sized) or len(dataset) == 0:
+        if not isinstance(dataset, Sized) or len(dataset) == 0:  # type: ignore
             return
 
         item = dataset[0]
         if not isinstance(item, dict):
+            raise ValueError(f"{name} dataset items must be dicts with 'prompt' and 'completion' keys.")
+        if "prompt" not in item or "completion" not in item:
             raise ValueError(
-                f"{name} dataset items must be dictionaries containing 'source_text' and 'target_text' keys for inference logging."
-            )
-        if not all(key in item for key in ["source_text", "target_text"]):
-            raise ValueError(
-                f"{name} dataset items must contain 'source_text' and 'target_text' keys for inference logging."
+                f"{name} dataset items must contain 'prompt' and 'completion' keys. Got: {list(item.keys())}"
             )
 
     def _setup_inference(self) -> object:
@@ -517,11 +546,15 @@ class PreTrainer:
         if not hasattr(self.model, "generate"):
             raise ValueError("Model must implement 'generate' method for inference logging.")
 
-        # Retrieve and check training tokenizer
-        train_ds = self._get_underlying_dataset(self.train_loader.dataset)
-        if not hasattr(train_ds, "tokenizer"):
-            raise ValueError("Dataset must have a 'tokenizer' attribute for inference logging.")
-        inference_tokenizer = getattr(train_ds, "tokenizer")
+        # Retrieve and check tokenizer from model
+        if self.tokenizer is None:
+            self.tokenizer = getattr(self.model, "tokenizer", None)
+
+        if self.tokenizer is None:
+            raise ValueError("Model must have a 'tokenizer' attribute for inference logging.")
+        tokenizer: Any = self.tokenizer
+        if not hasattr(tokenizer, "apply_chat_template") and not hasattr(tokenizer, "decode"):
+            raise ValueError("Tokenizer must implement 'apply_chat_template' or 'decode' method for inference logging.")
 
         # Validate active loaders
         self._validate_dataloader_for_inference(self.train_loader, "Train")
@@ -542,22 +575,70 @@ class PreTrainer:
         eos_token_id = getattr(tokenizer, "eos_token_id", None)
 
         dataset = loader.dataset
-        if not isinstance(dataset, Sized):
+        if not isinstance(dataset, Sized):  # type: ignore
             raise TypeError(f"{name} dataset must be Sized to run inference logging.")
-        total_samples = len(dataset)
+        total_samples = len(dataset)  # type: ignore
         num_samples = min(self.inference_num_samples, total_samples)
         samples = [dataset[i] for i in range(num_samples)]
-        prompts = [sample["source_text"] for sample in samples]
-        targets = [sample["target_text"] for sample in samples]
 
-        self.model.eval()
-        generative_model = cast(GenerativeModel, self.model)
-        decoded_strs = generative_model.generate(
-            prompts,
+        prompts = []
+        targets = []
+        for sample in samples:
+            prompt = sample.get("prompt")
+            target = sample.get("completion")
+            prompts.append(prompt)
+            targets.append(target)
+
+        model: Any = self.model
+        model.eval()
+        encoded_prompts = []
+        for prompt in prompts:
+            ids = None
+            if hasattr(tokenizer, "apply_chat_template"):
+                try:
+                    ids = tokenizer.apply_chat_template(prompt, tokenize=True, add_generation_prompt=True)
+                except Exception:
+                    pass
+
+            if ids is None:
+                if hasattr(tokenizer, "encode"):
+                    ids = tokenizer.encode(prompt)
+                else:
+                    try:
+                        ids = tokenizer(prompt)["input_ids"]
+                    except Exception:
+                        ids = []
+
+            encoded_prompts.append(ids)
+
+        max_len = max(len(ids) for ids in encoded_prompts)
+        pad_id = getattr(tokenizer, "pad_token_id", 0)
+
+        padded_prompts = []
+        for ids in encoded_prompts:
+            pad_len = max_len - len(ids)
+            padded_prompts.append([pad_id] * pad_len + ids)
+
+        input_ids = torch.tensor(padded_prompts, dtype=torch.long, device=self.device)
+        attention_mask = input_ids.ne(pad_id).to(torch.long)
+
+        output = model.generate(
+            input_ids=input_ids,
             max_new_tokens=self.max_inference_new_tokens,
-            tokenizer=tokenizer,
+            attention_mask=attention_mask,
             eos_token_id=eos_token_id,
+            pad_token_id=pad_id,
         )
+        sequences = output.sequences if hasattr(output, "sequences") else output
+        new_tokens = sequences[:, input_ids.shape[1] :]
+        decoded_strs = [
+            tokenizer.decode(
+                tokens.tolist() if hasattr(tokens, "tolist") else tokens,
+                skip_special_tokens=True,
+            )
+            for tokens in new_tokens
+        ]
+
         for idx in range(num_samples):
             self.logger.info(
                 "    Sample %d | Prompt: %r | Target: %r | Prediction: %r",

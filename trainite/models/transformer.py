@@ -1,12 +1,40 @@
 import math
-from typing import Protocol
+import string
+from typing import Any, Protocol
 
 import torch
+from pydantic import BaseModel, ConfigDict, Field
 from torch import nn
 from torch.nn.utils.rnn import pad_sequence
-from pydantic import Field
 
 from trainite.config.base import ComponentConfig
+
+# Hardcoded universal vocabulary: all printable ASCII characters
+UNIVERSAL_VOCAB = string.ascii_letters + string.digits + string.punctuation + " "
+
+CHARSET_PRESETS = {
+    "@universal": UNIVERSAL_VOCAB,
+    "@alpha": string.ascii_letters,
+    "@digits": string.digits,
+    "@alphanumeric": string.ascii_letters + string.digits,
+}
+
+
+class GenerateOutput(BaseModel):
+    """Output of TransformerModel.generate().
+
+    Attributes:
+        sequences: Full token IDs tensor of shape (batch, prompt_len + new_tokens),
+            including the original prompt tokens.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    sequences: torch.Tensor
+
+    def __getitem__(self, idx: int) -> torch.Tensor:
+        """Convenience: index directly into sequences (batch dim)."""
+        return self.sequences[idx]
 
 
 class Tokenizer(Protocol):
@@ -25,6 +53,172 @@ class Tokenizer(Protocol):
     def encode(self, text: str) -> list[int]: ...
 
     def decode(self, ids: list[int]) -> str: ...
+
+
+class CharTokenizer:
+    """A simple character-level tokenizer with a hardcoded universal vocabulary.
+
+    Maps each character in UNIVERSAL_VOCAB to a unique integer ID.
+    ID 0 is reserved as the <PAD> token.
+    ID 1 is reserved as the <BOS> token.
+    ID 2 is reserved as the <SEP> token.
+    ID 3 is reserved as the <EOS> token.
+    ID 4 is reserved as the <UNK> token.
+    """
+
+    def __init__(self) -> None:
+        self.pad_token_id = 0
+        self.bos_token_id = 1
+        self.sep_token_id = 2
+        self.eos_token_id = 3
+        self.unk_token_id = 4
+
+        self.char_to_id: dict[str, int] = {
+            c: i + 5 for i, c in enumerate(UNIVERSAL_VOCAB)
+        }
+        self.id_to_char: dict[int, str] = {
+            i + 5: c for i, c in enumerate(UNIVERSAL_VOCAB)
+        }
+
+        self.special_tokens: dict[int, str] = {
+            self.pad_token_id: "<PAD>",
+            self.bos_token_id: "<BOS>",
+            self.sep_token_id: "<SEP>",
+            self.eos_token_id: "<EOS>",
+            self.unk_token_id: "<UNK>",
+        }
+
+        for k, v in self.special_tokens.items():
+            self.id_to_char[k] = v
+
+    @property
+    def vocab_size(self) -> int:
+        """Number of unique tokens in the vocabulary (includes special tokens)."""
+        return len(UNIVERSAL_VOCAB) + len(self.special_tokens)
+
+    def encode(self, text: str) -> list[int]:
+        """Convert a string to a list of token IDs, mapping unrecognized characters to UNK."""
+        return [self.char_to_id.get(c, self.unk_token_id) for c in text]
+
+    def decode(
+        self,
+        ids: list[int] | torch.Tensor,
+        skip_special_tokens: bool = True,
+        ignore_index: int = -100,
+    ) -> str:
+        """Convert a list of token IDs back to a string.
+
+        Args:
+            ids: List or tensor of token IDs to decode.
+            skip_special_tokens: If True, skips printing special tokens like <bos> and <eos>.
+            ignore_index: The token ID used for loss masking. These are silently ignored.
+        """
+        if isinstance(ids, torch.Tensor):
+            ids = ids.tolist()
+
+        decoded_chars = []
+        for i in ids:
+            if i == ignore_index:
+                continue
+            if i in self.special_tokens:
+                if not skip_special_tokens or i == self.unk_token_id:
+                    decoded_chars.append(self.special_tokens[i])
+            elif i in self.id_to_char:
+                decoded_chars.append(self.id_to_char[i])
+            else:
+                decoded_chars.append(self.special_tokens[self.unk_token_id])
+        return "".join(decoded_chars)
+
+    def __call__(
+        self,
+        text: str | list[str],
+        padding: bool | str = False,
+        truncation: bool = False,
+        max_length: int | None = None,
+        return_tensors: str | None = None,
+        add_special_tokens: bool = True,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        if isinstance(text, str):
+            is_batched = False
+            texts = [text]
+        else:
+            is_batched = True
+            texts = text
+
+        batch_input_ids = []
+        batch_attention_mask = []
+
+        for t in texts:
+            ids = self.encode(t)
+            if add_special_tokens:
+                prefix = [self.bos_token_id]
+                suffix = [self.eos_token_id]
+                ids = prefix + ids + suffix
+
+            if truncation and max_length is not None:
+                ids = ids[:max_length]
+
+            batch_input_ids.append(ids)
+            batch_attention_mask.append([1] * len(ids))
+
+        if padding:
+            if padding == "max_length" and max_length is not None:
+                target_len = max_length
+            else:
+                target_len = max(len(ids) for ids in batch_input_ids)
+
+            for i in range(len(batch_input_ids)):
+                current_len = len(batch_input_ids[i])
+                if current_len < target_len:
+                    pad_len = target_len - current_len
+                    batch_input_ids[i] = [
+                        self.pad_token_id
+                    ] * pad_len + batch_input_ids[i]
+                    batch_attention_mask[i] = [0] * pad_len + batch_attention_mask[i]
+                elif current_len > target_len:
+                    batch_input_ids[i] = batch_input_ids[i][-target_len:]
+                    batch_attention_mask[i] = batch_attention_mask[i][-target_len:]
+
+        if not is_batched:
+            out = {
+                "input_ids": batch_input_ids[0],
+                "attention_mask": batch_attention_mask[0],
+            }
+        else:
+            out = {
+                "input_ids": batch_input_ids,
+                "attention_mask": batch_attention_mask,
+            }
+
+        if return_tensors == "pt":
+            tensor_out = {
+                "input_ids": torch.tensor(batch_input_ids, dtype=torch.long),
+                "attention_mask": torch.tensor(batch_attention_mask, dtype=torch.long),
+            }
+            return tensor_out
+
+        return out
+
+    def apply_chat_template(
+        self,
+        conversation: str,
+        tokenize: bool = True,
+        add_generation_prompt: bool = True,
+        **kwargs: Any,
+    ) -> Any:
+        if isinstance(conversation, str):
+            prompt = conversation
+        else:
+            raise ValueError("Unsupported conversation format")
+
+        if tokenize:
+            ids = self.encode(prompt)
+            prefix = [self.bos_token_id]
+            suffix = [self.sep_token_id]
+            return prefix + ids + suffix
+        else:
+            return f"<BOS>{prompt}<SEP>"
 
 
 class RotaryEmbedding(nn.Module):
@@ -162,18 +356,24 @@ class TransformerBlock(nn.Module):
 
 
 class TransformerModel(nn.Module):
+    tokenizer = CharTokenizer()
+
     def __init__(
         self,
-        vocab_size: int = 32,
+        vocab_size: int | None = None,
         hidden_size: int = 64,
         num_layers: int = 2,
         num_heads: int = 2,
         feedforward_dim: int = 128,
         dropout: float = 0.1,
         max_seq_len: int = 128,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         super().__init__()
+        self.tokenizer = CharTokenizer()
+        if vocab_size is None or vocab_size == 32:
+            vocab_size = self.tokenizer.vocab_size
+
         self.embedding = nn.Embedding(vocab_size, hidden_size, padding_idx=0)
         self.rotary_emb = RotaryEmbedding(dim=hidden_size // num_heads, max_seq_len=max_seq_len)
         self.blocks = nn.ModuleList(
@@ -190,11 +390,15 @@ class TransformerModel(nn.Module):
         self.proj = nn.Linear(hidden_size, vocab_size)
         self.norm = nn.LayerNorm(hidden_size)
 
-    def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, input_ids: torch.Tensor, attention_mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
         B, S = input_ids.shape
         x = self.embedding(input_ids) * math.sqrt(self.embedding.embedding_dim)
         cos, sin = self.rotary_emb(x, seq_len=S)
-        if (input_ids == self.embedding.padding_idx).any():
+        if attention_mask is not None:
+            padding_mask = attention_mask.reshape(B, 1, 1, S).to(torch.bool)
+        elif (input_ids == self.embedding.padding_idx).any():
             padding_mask = (input_ids != self.embedding.padding_idx).reshape(B, 1, 1, S)
         else:
             padding_mask = None
@@ -206,29 +410,30 @@ class TransformerModel(nn.Module):
     @torch.no_grad()
     def generate(
         self,
-        prompts: list[str],
+        input_ids: torch.Tensor,
         max_new_tokens: int,
-        tokenizer: Tokenizer,
+        attention_mask: torch.Tensor | None = None,
         bos_token_id: int | None = None,
-        sep_token_id: int | None = None,
         eos_token_id: int | None = None,
         pad_token_id: int | None = None,
-    ) -> list[str]:
-        """Generate text from a raw text prompts.
+        **kwargs: Any,
+    ) -> GenerateOutput:
+        """Generate text token IDs from prompt input_ids.
 
         Args:
-            prompt: Prompt text (list of str).
+            input_ids: Prompt token IDs of shape (batch, seq_len).
             max_new_tokens: Maximum number of new tokens to generate.
-            tokenizer: Tokenizer to use for encoding/decoding.
+            attention_mask: Optional attention mask of shape (batch, seq_len).
             bos_token_id: Optional token ID that signals beginning-of-sequence.
-            sep_token_id: Optional token ID that signals separation between prompt and generated text.
             eos_token_id: Optional token ID that signals end-of-sequence.
             pad_token_id: Optional token ID used for padding sequences.
 
         Returns:
-            The generated text (str or list of str).
+            GenerateOutput with ``sequences`` containing the full token IDs
+            (prompt + newly generated tokens) of shape (batch, prompt_len + new_tokens).
         """
         self.eval()
+<<<<<<< HEAD
         bos_id = bos_token_id or getattr(tokenizer, "bos_token_id", None)
         sep_id = sep_token_id or getattr(tokenizer, "sep_token_id", None)
         eos_id = eos_token_id or getattr(tokenizer, "eos_token_id", None)
@@ -249,12 +454,19 @@ class TransformerModel(nn.Module):
 
         # left-pad sequences and flip back to (B, S) for processing
         input_ids = pad_sequence(encoded, batch_first=True, padding_value=pad_id).flip(1).to(device)
+=======
+        eos_id = (
+            eos_token_id
+            if eos_token_id is not None
+            else getattr(self.tokenizer, "eos_token_id", None)
+        )
+>>>>>>> 76b5974 (code refactor for the inference)
 
+        device = input_ids.device
         generated = input_ids.clone()
-        prompt_len = input_ids.size(1)
 
         for _ in range(max_new_tokens):
-            logits = self(generated)
+            logits = self(generated, attention_mask=attention_mask)
             next_token_logits = logits[:, -1, :]
             next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
             if eos_id is not None:
@@ -262,12 +474,25 @@ class TransformerModel(nn.Module):
                 next_token = torch.where(eos_mask, torch.tensor(eos_id, device=device), next_token)
             generated = torch.cat([generated, next_token], dim=-1)
 
+            if attention_mask is not None:
+                next_mask = torch.ones(
+                    (attention_mask.shape[0], 1),
+                    dtype=attention_mask.dtype,
+                    device=device,
+                )
+                if eos_id is not None:
+                    already_ended = generated[:, -2:-1].eq(eos_id)
+                    next_mask = torch.where(
+                        already_ended,
+                        torch.tensor(0, dtype=attention_mask.dtype, device=device),
+                        next_mask,
+                    )
+                attention_mask = torch.cat([attention_mask, next_mask], dim=-1)
+
             if eos_id is not None and generated[:, -1].eq(eos_id).all():
                 break
 
-        new_tokens = generated[:, prompt_len:].tolist()
-        decoded = [tokenizer.decode(tokens) for tokens in new_tokens]
-        return decoded
+        return GenerateOutput(sequences=generated)
 
 
 class CausalLMCollateFn:
@@ -287,19 +512,24 @@ class CausalLMCollateFn:
         input_ids_list = []
         labels_list = []
         for item in batch:
-            source_text = item["source_text"]
-            target_text = item["target_text"]
+            prompt = item.get("prompt")
+            completion = item.get("completion")
+
+            if prompt is None or completion is None:
+                raise KeyError(
+                    f"Dataset item must contain 'prompt' and 'completion' keys. Got: {list(item.keys())}"
+                )
 
             # Tokenize using the tokenizer
-            source_ids = self.tokenizer.encode(source_text)
-            target_ids = self.tokenizer.encode(target_text)
+            prompt_ids = self.tokenizer.encode(prompt)
+            completion_ids = self.tokenizer.encode(completion)
 
             # Format sequence: <bos> source <eos> target <eos>
             bos_t = torch.tensor([self.tokenizer.bos_token_id])
             eos_t = torch.tensor([self.tokenizer.eos_token_id])
             sep_t = torch.tensor([self.tokenizer.sep_token_id])
-            src_t = torch.tensor(source_ids)
-            tgt_t = torch.tensor(target_ids)
+            src_t = torch.tensor(prompt_ids)
+            tgt_t = torch.tensor(completion_ids)
 
             src = torch.cat([bos_t, src_t, sep_t])
             tgt = torch.cat([tgt_t, eos_t])

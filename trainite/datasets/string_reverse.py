@@ -2,7 +2,6 @@ import random
 import string
 import warnings
 
-import torch
 from pydantic import ConfigDict, Field, model_validator
 from torch.utils.data import Dataset
 
@@ -19,6 +18,7 @@ CHARSET_PRESETS = {
 }
 
 
+<<<<<<< HEAD
 class CharTokenizer:
     """A simple character-level tokenizer with a hardcoded universal vocabulary.
 
@@ -90,12 +90,14 @@ class CharTokenizer:
         return "".join(decoded_chars)
 
 
+=======
+>>>>>>> 76b5974 (code refactor for the inference)
 class StringReverseDataset(Dataset):
     """Generates unique random strings and their reversals.
 
     Each sample is returned as a dictionary containing:
-        - 'source_text': the original random string
-        - 'target_text': the reversed string
+        - 'prompt': the original random string
+        - 'completion': the reversed string
     """
 
     def __init__(
@@ -107,9 +109,6 @@ class StringReverseDataset(Dataset):
         charset: str | None = None,
         seed: int = 42,
     ) -> None:
-        self.tokenizer: CharTokenizer = CharTokenizer()
-        self.vocab_size = self.tokenizer.vocab_size
-
         if charset is None:
             chars = UNIVERSAL_VOCAB
         elif charset in CHARSET_PRESETS:
@@ -117,10 +116,14 @@ class StringReverseDataset(Dataset):
         else:
             chars = charset
 
+<<<<<<< HEAD
         self.valid_token_ids = [self.tokenizer.char_to_id[c] for c in chars if c in self.tokenizer.char_to_id]
+=======
+        self.chars = chars
+>>>>>>> 76b5974 (code refactor for the inference)
 
-        if not self.valid_token_ids:
-            raise ValueError(f"Charset '{charset}' resulted in empty token IDs.")
+        if not self.chars:
+            raise ValueError(f"Charset '{charset}' resulted in empty characters.")
 
         if seq_len is not None and (min_seq_len is not None or max_seq_len is not None):
             raise ValueError("Cannot specify both seq_len and min_seq_len/max_seq_len.")
@@ -133,7 +136,7 @@ class StringReverseDataset(Dataset):
             lengths = list(range(min_seq_len, max_seq_len + 1))
 
         rng = random.Random(seed)
-        vocab_size = len(self.valid_token_ids)
+        num_chars = len(self.chars)
 
         self.source_texts = []
         self.target_texts = []
@@ -141,7 +144,7 @@ class StringReverseDataset(Dataset):
         # Generate per_seq_size unique sequences for each length bucket
         for length in lengths:
             unique_sequences: set[str] = set()
-            max_possible_combinations = vocab_size**length
+            max_possible_combinations = num_chars**length
             target = min(per_seq_size, max_possible_combinations)
 
             # Safety cap to avoid infinite loops when the space is small
@@ -149,7 +152,7 @@ class StringReverseDataset(Dataset):
             max_attempts = target * 20
 
             while len(unique_sequences) < target and attempts < max_attempts:
-                seq = "".join(rng.choices(chars, k=length))
+                seq = "".join(rng.choices(self.chars, k=length))
                 unique_sequences.add(seq)
                 attempts += 1
 
@@ -180,10 +183,11 @@ class StringReverseDataset(Dataset):
 
     def __getitem__(self, index: int) -> dict[str, str]:
         return {
-            "source_text": self.source_texts[index],
-            "target_text": self.target_texts[index],
+            "prompt": self.source_texts[index],
+            "completion": self.target_texts[index],
         }
 
+<<<<<<< HEAD
     def decode(
         self,
         ids: torch.Tensor,
@@ -192,6 +196,8 @@ class StringReverseDataset(Dataset):
     ) -> str:
         return self.tokenizer.decode(ids, skip_special_tokens=skip_special_tokens, ignore_index=ignore_index)
 
+=======
+>>>>>>> 76b5974 (code refactor for the inference)
 
 class StringReverseDatasetConfig(ComponentConfig):
     model_config = ConfigDict(validate_assignment=True)

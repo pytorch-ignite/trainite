@@ -2,11 +2,11 @@ import pytest
 from torch.utils.data import DataLoader
 
 from trainite.config.registry import get_dataset_spec
-from trainite.datasets.string_reverse import (
+from trainite.datasets.string_reverse import StringReverseDataset
+from trainite.models.transformer import (
     CHARSET_PRESETS,
     UNIVERSAL_VOCAB,
     CharTokenizer,
-    StringReverseDataset,
 )
 from trainite.utils import get_target, instantiate
 
@@ -37,11 +37,11 @@ def test_string_reverse_dataset():
 
     assert len(dataset) == per_seq_size
     item = dataset[0]
-    assert "source_text" in item
-    assert "target_text" in item
+    assert "prompt" in item
+    assert "completion" in item
 
-    source_text = item["source_text"]
-    target_text = item["target_text"]
+    source_text = item["prompt"]
+    target_text = item["completion"]
 
     # seq len is 5.
     assert len(source_text) == 5
@@ -78,9 +78,9 @@ def test_string_reverse_fixed_lengths_and_presets():
 def test_string_reverse_dataset_charset_presets(preset: str):
     dataset = StringReverseDataset(per_seq_size=10, seed=42, charset=preset, min_seq_len=1, max_seq_len=5)
     if preset in CHARSET_PRESETS:
-        assert len(dataset.valid_token_ids) == len(CHARSET_PRESETS[preset])
+        assert len(dataset.chars) == len(CHARSET_PRESETS[preset])
     else:
-        assert len(dataset.valid_token_ids) == len(preset)
+        assert len(dataset.chars) == len(preset)
 
 
 def test_build_string_reverse_dataset():
@@ -126,7 +126,13 @@ def test_config_build_string_reverse_dataset():
     from trainite.config.registry import get_model_spec
 
     model_spec = get_model_spec("transformer")
+<<<<<<< HEAD
     collate_fn_obj = get_target(model_spec.collate_fn_target)(tokenizer=dataset.tokenizer)
+=======
+    model_conf = model_spec.config_cls()
+    model = instantiate(model_conf)
+    collate_fn_obj = get_target(model_spec.collate_fn_target)(tokenizer=model.tokenizer)
+>>>>>>> 76b5974 (code refactor for the inference)
 
     dataloader_conf = dataset_conf.dataloader
     dataloader_kwargs = dataloader_conf.model_dump(exclude={"collate_fn"})
