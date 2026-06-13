@@ -26,6 +26,7 @@ from trainite.config.base import (
     ComponentConfig,
     DataConfigBase,
     DataLoaderConfig,
+    DataWithAutoSplit,
     OptimizerConfig,
     OutputConfig,
     SplitConfig,
@@ -62,7 +63,7 @@ class ProjectConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
     model: ComponentConfig
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
-    data: DataConfigBase
+    data: DataConfigBase | DataWithAutoSplit
     trainer: PreTrainerConfig
     output: OutputConfig
     seed: int = 42
@@ -172,12 +173,8 @@ class PreTrainer:
         return DataLoader(dataset, shuffle=shuffle, collate_fn=collate_fn, **dl_kwargs)
 
     def _build_loaders_from_ratios(
-        self, data_config: DataConfigBase
-    ) -> tuple[DataLoader, DataLoader | None, DataLoader | None]:
-        if data_config.dataset is None:
-            raise ValueError(
-                "Dataset config must not be None for automatic ratio splitting."
-            )
+        self, data_config: DataWithAutoSplit
+    ) -> tuple[DataLoader, DataLoader, DataLoader | None]:
         dataset = instantiate(data_config.dataset)
         total_len = len(dataset)
 
@@ -186,10 +183,9 @@ class PreTrainer:
                 "Training dataset is empty. Cannot perform train/val/test split."
             )
 
-        train_ratio = (
-            data_config.train_ratio if data_config.train_ratio is not None else 1.0
-        )
-        val_ratio = data_config.val_ratio if data_config.val_ratio is not None else 0.0
+        test_ratio = data_config.test_ratio
+        val_ratio = data_config.val_ratio
+        train_ratio = 1.0 - test_ratio - val_ratio
 
         train_len = int(total_len * train_ratio)
         val_len = int(total_len * val_ratio)
@@ -201,14 +197,10 @@ class PreTrainer:
             generator=torch.Generator().manual_seed(self.config.seed),
         )
 
-        dl_config = data_config.dataloader or DataLoaderConfig()
+        dl_config = data_config.dataloader
 
         train_loader = self._create_dataloader(train_ds, dl_config, shuffle=True)
-        val_loader = (
-            self._create_dataloader(val_ds, dl_config, shuffle=False)
-            if val_len > 0
-            else None
-        )
+        val_loader = self._create_dataloader(val_ds, dl_config, shuffle=False)
         test_loader = (
             self._create_dataloader(test_ds, dl_config, shuffle=False)
             if test_len > 0
@@ -218,7 +210,7 @@ class PreTrainer:
         return train_loader, val_loader, test_loader
 
     def set_loaders(self) -> None:
-        if self.config.data.train:
+        if isinstance(self.config.data, DataConfigBase):
             self.train_loader = self._build_dataloader(self.config.data.train)
             self.val_loader = (
                 self._build_dataloader(self.config.data.val)
@@ -230,20 +222,15 @@ class PreTrainer:
                 if self.config.data.test
                 else None
             )
-        elif self.config.data.dataset:
+        elif isinstance(self.config.data, DataWithAutoSplit):
             self.logger.info(
-                "Automatic splitting requested with ratios: train=%s, val=%s",
-                self.config.data.train_ratio,
+                "Automatic splitting requested with ratios: train=%s, val=%s, test=%s",
+                1.0 - self.config.data.test_ratio - self.config.data.val_ratio,
                 self.config.data.val_ratio,
+                self.config.data.test_ratio,
             )
             self.train_loader, self.val_loader, self.test_loader = (
                 self._build_loaders_from_ratios(self.config.data)
-            )
-
-        if self.val_loader is None:
-            self.logger.warning(
-                "Validation config not provided. Early stopping and best model checkpointing will be disabled. "
-                "Only the last model will be saved."
             )
 
     def _make_run_dir(self) -> Path:

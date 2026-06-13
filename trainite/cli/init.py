@@ -14,6 +14,7 @@ from trainite.config import (
     ComponentConfig,
     DataConfigBase,
     DataLoaderConfig,
+    DataWithAutoSplit,
     OptimizerConfig,
     OutputConfig,
     SplitConfig,
@@ -31,7 +32,7 @@ class ProjectConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
     model: ComponentConfig
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
-    data: DataConfigBase
+    data: DataConfigBase | DataWithAutoSplit
     trainer: BaseModel
     output: OutputConfig
     seed: int = 42
@@ -215,7 +216,10 @@ def _build_templates(
     trainer_replacements = [
         *trainer_spec.template_replacements,
         ("model: ComponentConfig", f"model: {model_spec.config_cls.__name__}"),
-        ("data: DataConfigBase", f"data: {dataset_spec.config_cls.__name__}"),
+        (
+            "data: DataConfigBase | DataWithAutoSplit",
+            f"data: {dataset_spec.config_cls.__name__}",
+        ),
         (
             "# __MODEL_IMPORT__",
             f"from models.{model_spec.name} import {model_spec.config_cls.__name__}",
@@ -317,9 +321,8 @@ def _update_targets(
     old_prefix: str,
     new_prefix: str,
 ) -> None:
-    if isinstance(config, ComponentConfig):
-        if config.target.startswith(old_prefix):
-            config.target = config.target.replace(old_prefix, new_prefix, 1)
+    if isinstance(config, ComponentConfig) and config.target.startswith(old_prefix):
+        config.target = config.target.replace(old_prefix, new_prefix, 1)
     elif isinstance(config, ProjectConfig):
         # Recursively update all components in ProjectConfig
         for field in config.model_fields:
@@ -327,12 +330,11 @@ def _update_targets(
     elif isinstance(config, DataConfigBase):
         for field in config.model_fields:
             _update_targets(getattr(config, field), old_prefix, new_prefix)
-    elif isinstance(config, SplitConfig):
+    elif isinstance(config, (SplitConfig, DataWithAutoSplit)):
         _update_targets(config.dataset, old_prefix, new_prefix)
         _update_targets(config.dataloader, old_prefix, new_prefix)
-    elif isinstance(config, DataLoaderConfig):
-        if config.collate_fn:
-            _update_targets(config.collate_fn, old_prefix, new_prefix)
+    elif isinstance(config, DataLoaderConfig) and config.collate_fn:
+        _update_targets(config.collate_fn, old_prefix, new_prefix)
 
 
 def init_project(args: argparse.Namespace) -> None:
