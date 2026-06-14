@@ -3,7 +3,7 @@ import string
 from typing import Any
 
 import torch
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 from torch import nn
 from torch.nn.utils.rnn import pad_sequence
 
@@ -18,23 +18,6 @@ CHARSET_PRESETS = {
     "@digits": string.digits,
     "@alphanumeric": string.ascii_letters + string.digits,
 }
-
-
-class GenerateOutput(BaseModel):
-    """Output of TransformerModel.generate().
-
-    Attributes:
-        sequences: Full token IDs tensor of shape (batch, prompt_len + new_tokens),
-            including the original prompt tokens.
-    """
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    sequences: torch.Tensor
-
-    def __getitem__(self, idx: int) -> torch.Tensor:
-        """Convenience: index directly into sequences (batch dim)."""
-        return self.sequences[idx]
 
 
 class CharTokenizer:

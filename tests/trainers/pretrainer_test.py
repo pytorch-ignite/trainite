@@ -17,7 +17,6 @@ from trainite.config import (
     OutputConfig,
     SplitConfig,
 )
-from trainite.models.transformer import GenerateOutput
 from trainite.trainers.pretrainer import PreTrainer, PreTrainerConfig, ProjectConfig
 
 
@@ -133,7 +132,7 @@ class GenerativeModel(SimpleModel):
         dummy_new = torch.tensor(
             [[7]], dtype=torch.long, device=input_ids.device
         ).repeat(input_ids.shape[0], 1)
-        return GenerateOutput(sequences=torch.cat([input_ids, dummy_new], dim=-1))
+        return torch.cat([input_ids, dummy_new], dim=-1)
 
 
 class GenerativeDataset(SimpleDataset):
@@ -151,7 +150,7 @@ class GenerativeModelNoTokenizer(SimpleModel):
         dummy_new = torch.tensor(
             [[7]], dtype=torch.long, device=input_ids.device
         ).repeat(input_ids.shape[0], 1)
-        return GenerateOutput(sequences=torch.cat([input_ids, dummy_new], dim=-1))
+        return torch.cat([input_ids, dummy_new], dim=-1)
 
 
 def dummy_collate_fn(batch):
