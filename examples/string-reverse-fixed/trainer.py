@@ -558,6 +558,22 @@ class PreTrainer:
         if self.test_loader is not None:
             self._validate_dataloader_for_inference(self.test_loader, "Test")
 
+    @staticmethod
+    def _escape_md_cell(text: str) -> str:
+        """Wrap in a markdown code span so content is treated as literal text."""
+        content = text.strip() or "(empty)"
+        # Code spans prevent ALL markdown/HTML interpretation of the content.
+        if "`" not in content:
+            return f"`{content}`"
+        # If content contains backticks, delimit with one more than the
+        # longest consecutive run so the delimiter cannot match inside.
+        longest = run = 0
+        for ch in content:
+            run = run + 1 if ch == "`" else 0
+            longest = max(longest, run)
+        delim = "`" * (longest + 1)
+        return f"{delim} {content} {delim}"
+
     def _log_inference(
         self,
         engine: Engine,
@@ -613,11 +629,9 @@ class PreTrainer:
                 "|---|---|---|---|",
             ]
             for idx in range(num_samples):
-                prompt_escaped = prompts[idx].replace("|", "\\|").replace("\n", "<br>")
-                target_escaped = targets[idx].replace("|", "\\|").replace("\n", "<br>")
-                pred_escaped = (
-                    decoded_strs[idx].replace("|", "\\|").replace("\n", "<br>")
-                )
+                prompt_escaped = self._escape_md_cell(prompts[idx])
+                target_escaped = self._escape_md_cell(targets[idx])
+                pred_escaped = self._escape_md_cell(decoded_strs[idx])
                 tb_table.append(
                     f"| {idx + 1} | {prompt_escaped} | {target_escaped} | {pred_escaped} |"
                 )

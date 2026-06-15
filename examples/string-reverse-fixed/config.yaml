@@ -8,7 +8,7 @@ model:
     max_seq_len: 128
 optimizer:
     _target_: torch.optim.AdamW
-    lr: 0.001
+    lr: 0.0003
 data:
     dataset:
         _target_: datasets.string_reverse.StringReverseDataset
@@ -43,4 +43,4 @@ output:
     root: outputs
     run_name: transformer__string-reverse
 seed: 42
-device: auto
+device: cuda:0

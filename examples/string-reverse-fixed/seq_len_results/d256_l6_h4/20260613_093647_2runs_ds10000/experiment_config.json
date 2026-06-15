@@ -1,0 +1,26 @@
+{
+  "NUM_RUNS": 2,
+  "TIME_LIMIT_SECONDS": 7200,
+  "TEST_SEQ_LENGTHS": [
+    8,
+    16,
+    32,
+    64,
+    96,
+    128,
+    192,
+    256,
+    384,
+    512,
+    768,
+    1024
+  ],
+  "FIXED_DATASET_SIZE": 10000,
+  "model_info": {
+    "hidden_size": 256,
+    "num_layers": 6,
+    "num_heads": 4,
+    "feedforward_dim": 1024,
+    "max_seq_len": 3072
+  }
+}

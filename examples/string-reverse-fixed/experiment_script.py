@@ -12,9 +12,9 @@ from config import ProjectConfig, load_config
 from ignite.engine import Engine, Events
 from trainer import PreTrainer
 
-NUM_RUNS: int = 2
+NUM_RUNS: int = 3
 TIME_LIMIT_SECONDS: float = 3600 * 2
-TEST_SEQ_LENGTHS: list[int] = [8, 16, 32, 64, 96, 128, 192, 256, 384, 512, 768, 1024]
+TEST_SEQ_LENGTHS: list[int] = [64, 128, 256, 320, 512, 600, 750, 900, 1024]
 
 MODEL_HIDDEN_SIZE: int = 64
 MODEL_NUM_LAYERS: int = 6
@@ -22,7 +22,6 @@ MODEL_NUM_HEADS: int = 4
 MODEL_FEEDFORWARD_DIM: int = 256
 MODEL_MAX_SEQ_LEN: int = max(TEST_SEQ_LENGTHS) * 3
 FIXED_DATASET_SIZE: int = 10000
-
 _MODEL_OVERRIDES = {
     "hidden_size": MODEL_HIDDEN_SIZE,
     "num_layers": MODEL_NUM_LAYERS,
@@ -31,7 +30,7 @@ _MODEL_OVERRIDES = {
     "max_seq_len": MODEL_MAX_SEQ_LEN,
 }
 
-_OUTPUT_ROOT = f"outputs/d{MODEL_HIDDEN_SIZE}_l{MODEL_NUM_LAYERS}_h{MODEL_NUM_HEADS}"
+_OUTPUT_ROOT = f"outputs_1/d{MODEL_HIDDEN_SIZE}_l{MODEL_NUM_LAYERS}_h{MODEL_NUM_HEADS}"
 
 
 def _make_run_name(seq_len: int, seed: int) -> str:

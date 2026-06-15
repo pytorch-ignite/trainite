@@ -1,0 +1,139 @@
+2026-06-15 20:15:22,859 trainer INFO: starting run in outputs_1/d64_l6_h4/sl64/s42/20260615_201522
+2026-06-15 20:15:22,860 trainer INFO: Train: start epoch [1/9999]
+2026-06-15 20:15:29,369 trainer INFO: Train: Epoch [1/9999]  Total time: 0:00:06  (0.0275 s / it)
+2026-06-15 20:15:29,370 trainer INFO: Evaluating on training set...
+2026-06-15 20:15:30,973 trainer INFO: Evaluating on validation set...
+2026-06-15 20:15:31,480 trainer INFO: epoch=1 train_loss=4.5676 train_exact_match_acc=0.0000 train_token_acc=0.0153 val_loss=4.5687 val_exact_match_acc=0.0000 val_token_acc=0.0151
+2026-06-15 20:15:31,501 trainer INFO: Train: start epoch [2/9999]
+2026-06-15 20:15:37,515 trainer INFO: Train: Epoch [2/9999]  Total time: 0:00:06  (0.0256 s / it)
+2026-06-15 20:15:37,515 trainer INFO: Evaluating on training set...
+2026-06-15 20:15:38,964 trainer INFO: Evaluating on validation set...
+2026-06-15 20:15:39,422 trainer INFO: epoch=2 train_loss=4.5653 train_exact_match_acc=0.0000 train_token_acc=0.0154 val_loss=4.5662 val_exact_match_acc=0.0000 val_token_acc=0.0154
+2026-06-15 20:15:39,446 trainer INFO: Train: start epoch [3/9999]
+2026-06-15 20:15:45,318 trainer INFO: Train: Epoch [3/9999]  Total time: 0:00:05  (0.0250 s / it)
+2026-06-15 20:15:45,319 trainer INFO: Evaluating on training set...
+2026-06-15 20:15:46,741 trainer INFO: Evaluating on validation set...
+2026-06-15 20:15:47,218 trainer INFO: epoch=3 train_loss=4.5644 train_exact_match_acc=0.0000 train_token_acc=0.0154 val_loss=4.5654 val_exact_match_acc=0.0000 val_token_acc=0.0154
+2026-06-15 20:15:47,242 trainer INFO: Train: start epoch [4/9999]
+2026-06-15 20:15:52,689 trainer INFO: Train: Epoch [4/9999]  Total time: 0:00:05  (0.0232 s / it)
+2026-06-15 20:15:52,690 trainer INFO: Evaluating on training set...
+2026-06-15 20:15:54,161 trainer INFO: Evaluating on validation set...
+2026-06-15 20:15:54,647 trainer INFO: epoch=4 train_loss=4.5494 train_exact_match_acc=0.0000 train_token_acc=0.0177 val_loss=4.5506 val_exact_match_acc=0.0000 val_token_acc=0.0176
+2026-06-15 20:15:54,671 trainer INFO: Train: start epoch [5/9999]
+2026-06-15 20:15:56,375 trainer INFO: Epoch [5/9999]  [60/235]:  ETA: 0:00:04  lr: 0.00030  loss: 4.5003    Iter time: 0.0270 s  Data prep time: 0.0038 s  GPU Max Mem: 155 MB
+2026-06-15 20:16:00,885 trainer INFO: Train: Epoch [5/9999]  Total time: 0:00:06  (0.0264 s / it)
+2026-06-15 20:16:00,885 trainer INFO: Evaluating on training set...
+2026-06-15 20:16:02,320 trainer INFO: Evaluating on validation set...
+2026-06-15 20:16:02,796 trainer INFO: epoch=5 train_loss=4.4775 train_exact_match_acc=0.0000 train_token_acc=0.0354 val_loss=4.4794 val_exact_match_acc=0.0000 val_token_acc=0.0355
+2026-06-15 20:16:02,796 trainer INFO: Epoch 5: Running inference on Train samples...
+2026-06-15 20:16:03,025 trainer INFO:     Sample 1 | Prompt: '\'jAhD^r~xJQc"9u&\\%HA]$6r9Rk^>0:[?tXW`I7(/5G+3)GT2f%r/Tv)#bT1@gP:' | Target: ':Pg@1Tb#)vT/r%f2TG)3+G5/(7I`WXt?[:0>^kR9r6$]AH%\\&u9"cQJx~r^DhAj\'' | Prediction: ']@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@'
+2026-06-15 20:16:03,025 trainer INFO:     Sample 2 | Prompt: '{I!<fLfK:"JSlNWjTXO8\'Zuc6;k8Ry rJ3ID>2rPNaO@tDJPYP6CXOzZb?;I"m}T' | Target: 'T}m"I;?bZzOXC6PYPJDt@OaNPr2>DI3Jr yR8k;6cuZ\'8OXTjWNlSJ":KfLf<!I{' | Prediction: '/@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@'
+2026-06-15 20:16:03,025 trainer INFO:     Sample 3 | Prompt: "owkL27YRgE#\\ax7aA%P`{KpG)6~ /DBOHx[p_>G;5jK,N[7P'm<$/v,N1]-SDuW=" | Target: "=WuDS-]1N,v/$<m'P7[N,Kj5;G>_p[xHOBD/ ~6)GpK{`P%Aa7xa\\#EgRY72Lkwo" | Prediction: '/mmmmmmmmmmmml/mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmwmmmmmmm'
+2026-06-15 20:16:03,025 trainer INFO:     Sample 4 | Prompt: 's>Pjlgl41e8yrq6.mhO?!"6]VMni{(f(p){!5:cAD2E{>d69hg.a`O[4Mtwud%hq' | Target: 'qh%duwtM4[O`a.gh96d>{E2DAc:5!{)p(f({inMV]6"!?Ohm.6qry8e14lgljP>s' | Prediction: '/mmmmmmmmmmmmmmmmmmmmmmmmmmmml/mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmml/'
+2026-06-15 20:16:03,025 trainer INFO:     Sample 5 | Prompt: 'HS/`={[:9h>}]k8.oDAiNf$!I6RMz;*OzE?3SgcH}Ha6ew^w?sx"%:y3.2/svYMd' | Target: 'dMYvs/2.3y:%"xs?w^we6aH}HcgS3?EzO*;zMR6I!$fNiADo.8k]}>h9:[{=`/SH' | Prediction: '/333333333333333333333333333333333333333333333333333333333333333'
+2026-06-15 20:16:03,026 trainer INFO: Epoch 5: Running inference on Val samples...
+2026-06-15 20:16:03,232 trainer INFO:     Sample 1 | Prompt: "8`sShz>lu(E'SC?o{w/=S^{e:Z.$IyPZXB-+D>|vjM8~FKt%B}26=tR.>z,C{%%Y" | Target: "Y%%{C,z>.Rt=62}B%tKF~8Mjv|>D+-BXZPyI$.Z:e{^S=/w{o?CS'E(ul>zhSs`8" | Prediction: ']}//////////////////////////////////////////////////////2/2/2/2/'
+2026-06-15 20:16:03,232 trainer INFO:     Sample 2 | Prompt: "=\\ZlE>aiuixse0yK^0mHIx[*V~QSP'S8-MY+Oi8F?d<|~8144z|CCvz[,l+,gY-l" | Target: "l-Yg,+l,[zvCC|z4418~|<d?F8iO+YM-8S'PSQ~V*[xIHm0^Ky0esxiuia>ElZ\\=" | Prediction: 'l/mmmmmmml/mml/mmmmmmmmmmmmmmmmmmmmmmmmmmml/mmmmmml/mm]/ml/mmml/'
+2026-06-15 20:16:03,232 trainer INFO:     Sample 3 | Prompt: 'bwHk.~45k#50)*9pU:W9iGz>zH8bTbQ/ylhnGPY-!w6nfgB4LpK(NnSc.)meD`e<' | Target: '<e`Dem).cSnN(KpL4Bgfn6w!-YPGnhly/QbTb8Hz>zGi9W:Up9*)05#k54~.kHwb' | Prediction: '/mmmmmmmmmml/mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmml/mmmml/'
+2026-06-15 20:16:03,232 trainer INFO:     Sample 4 | Prompt: '\\K{4kd.X-##ayCKgUqSM;e9nZNJ(/^f~rm@79Xn][idJT7/J9xMTyyufeuLR`R@e' | Target: 'e@R`RLuefuyyTMx9J/7TJdi[]nX97@mr~f^/(JNZn9e;MSqUgKCya##-X.dk4{K\\' | Prediction: '/@@@@@@@@@@@@@@@@@@@@@@/@/@/@/@/@/@/@/@/@/@/@/@/@@@@@@@@@@@@@@@@'
+2026-06-15 20:16:03,232 trainer INFO:     Sample 5 | Prompt: '#\'>K/#Wo:U-4M0RT@M+gl^e@"2o!v\\,nc)pQ/a`g+U*e1Ux(OTgOt:  x7\'qC{iw' | Target: 'wi{Cq\'7x  :tOgTO(xU1e*U+g`a/Qp)cn,\\v!o2"@e^lg+M@TR0M4-U:oW#/K>\'#' | Prediction: ']@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@'
+2026-06-15 20:16:03,232 trainer INFO: Epoch 5: Running inference on Test samples...
+2026-06-15 20:16:03,437 trainer INFO:     Sample 1 | Prompt: 'X;?Y!?+u8,z%0r3"{*1<?1&?64.^\\B,V;|q0;~$a@n6aIGiEi\'.&[v5^*5##==C]' | Target: ']C==##5*^5v[&.\'iEiGIa6n@a$~;0q|;V,B\\^.46?&1?<1*{"3r0%z,8u+?!Y?;X' | Prediction: ']@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@3333333333333333'
+2026-06-15 20:16:03,437 trainer INFO:     Sample 2 | Prompt: 'vNKaotD<p?EQ-Rw#&VRh.Da+3"x;lAI]$h{D5h=z.GD\'6W %PjD;*@C:YMmbwNKV' | Target: 'VKNwbmMY:C@*;DjP% W6\'DG.z=h5D{h$]IAl;x"3+aD.hRV&#wR-QE?p<DtoaKNv' | Prediction: ']@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@3333333333333333333333333'
+2026-06-15 20:16:03,437 trainer INFO:     Sample 3 | Prompt: '{%S% pGgs"r+9DC.*+%CYDkA?.&8XkjJOsY<$OT0JkyJx>8!&{HC)tF];Mn$]mnV' | Target: 'Vnm]$nM;]Ft)CH{&!8>xJykJ0TO$<YsOJjkX8&.?AkDYC%+*.CD9+r"sgGp %S%{' | Prediction: ']}l}l}l}l}l}l}l}l}l}l}l}l}l}l}l}l}l}l}l}l}l}l}l}l}l}l}l}l}l}l}l/'
+2026-06-15 20:16:03,437 trainer INFO:     Sample 4 | Prompt: '"!AEzr+?diP$I&^RV7a^6{7"Uc^Ckv6-$V/v(/m5H*T)MQc#oHLOg$Q==$:}m+~^' | Target: '^~+m}:$==Q$gOLHo#cQM)T*H5m/(v/V$-6vkC^cU"7{6^a7VR^&I$Pid?+rzEA!"' | Prediction: '/mmmmmmw/ml/ml/mmmmmmmmmmmmmml/m]/m]/ml/mmml/mml/ml/m]/mml/mmmml'
+2026-06-15 20:16:03,437 trainer INFO:     Sample 5 | Prompt: 'g@<m:}8G"UtIRu|"\'K:!;Nm/j2F1]vk`Rm)8_^ZY[W7EVy8V--w)x\'{&IHd^^zKY' | Target: 'YKz^^dHI&{\'x)w--V8yVE7W[YZ^_8)mR`kv]1F2j/mN;!:K\'"|uRItU"G8}:m<@g' | Prediction: 'mmw/@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@'
+2026-06-15 20:16:03,462 trainer INFO: Train: start epoch [6/9999]
+2026-06-15 20:16:09,621 trainer INFO: Train: Epoch [6/9999]  Total time: 0:00:06  (0.0262 s / it)
+2026-06-15 20:16:09,622 trainer INFO: Evaluating on training set...
+2026-06-15 20:16:11,030 trainer INFO: Evaluating on validation set...
+2026-06-15 20:16:11,536 trainer INFO: epoch=6 train_loss=4.4638 train_exact_match_acc=0.0000 train_token_acc=0.0409 val_loss=4.4663 val_exact_match_acc=0.0000 val_token_acc=0.0408
+2026-06-15 20:16:11,559 trainer INFO: Train: start epoch [7/9999]
+2026-06-15 20:16:17,915 trainer INFO: Train: Epoch [7/9999]  Total time: 0:00:06  (0.0270 s / it)
+2026-06-15 20:16:17,915 trainer INFO: Evaluating on training set...
+2026-06-15 20:16:19,319 trainer INFO: Evaluating on validation set...
+2026-06-15 20:16:19,784 trainer INFO: epoch=7 train_loss=4.4399 train_exact_match_acc=0.0000 train_token_acc=0.0491 val_loss=4.4437 val_exact_match_acc=0.0000 val_token_acc=0.0489
+2026-06-15 20:16:19,808 trainer INFO: Train: start epoch [8/9999]
+2026-06-15 20:16:25,916 trainer INFO: Train: Epoch [8/9999]  Total time: 0:00:06  (0.0260 s / it)
+2026-06-15 20:16:25,916 trainer INFO: Evaluating on training set...
+2026-06-15 20:16:27,368 trainer INFO: Evaluating on validation set...
+2026-06-15 20:16:27,843 trainer INFO: epoch=8 train_loss=4.4201 train_exact_match_acc=0.0000 train_token_acc=0.0541 val_loss=4.4255 val_exact_match_acc=0.0000 val_token_acc=0.0532
+2026-06-15 20:16:27,866 trainer INFO: Train: start epoch [9/9999]
+2026-06-15 20:16:31,065 trainer INFO: Epoch [9/9999]  [120/235]:  ETA: 0:00:02  lr: 0.00030  loss: 4.4272    Iter time: 0.0249 s  Data prep time: 0.0026 s  GPU Max Mem: 155 MB
+2026-06-15 20:16:34,023 trainer INFO: Train: Epoch [9/9999]  Total time: 0:00:06  (0.0262 s / it)
+2026-06-15 20:16:34,024 trainer INFO: Evaluating on training set...
+2026-06-15 20:16:35,468 trainer INFO: Evaluating on validation set...
+2026-06-15 20:16:35,961 trainer INFO: epoch=9 train_loss=4.4037 train_exact_match_acc=0.0000 train_token_acc=0.0591 val_loss=4.4101 val_exact_match_acc=0.0000 val_token_acc=0.0589
+2026-06-15 20:16:35,993 trainer INFO: Train: start epoch [10/9999]
+2026-06-15 20:16:41,892 trainer INFO: Train: Epoch [10/9999]  Total time: 0:00:05  (0.0251 s / it)
+2026-06-15 20:16:41,892 trainer INFO: Evaluating on training set...
+2026-06-15 20:16:43,338 trainer INFO: Evaluating on validation set...
+2026-06-15 20:16:43,825 trainer INFO: epoch=10 train_loss=4.3742 train_exact_match_acc=0.0000 train_token_acc=0.0665 val_loss=4.3832 val_exact_match_acc=0.0000 val_token_acc=0.0657
+2026-06-15 20:16:43,826 trainer INFO: Epoch 10: Running inference on Train samples...
+2026-06-15 20:16:44,032 trainer INFO:     Sample 1 | Prompt: '\'jAhD^r~xJQc"9u&\\%HA]$6r9Rk^>0:[?tXW`I7(/5G+3)GT2f%r/Tv)#bT1@gP:' | Target: ':Pg@1Tb#)vT/r%f2TG)3+G5/(7I`WXt?[:0>^kR9r6$]AH%\\&u9"cQJx~r^DhAj\'' | Prediction: '/@/@/:///:/:/3/3/3/3/3/3/3/3/3/3/3/3/3/3/3/3/3/n/n/D>9/n/D>9n>9n'
+2026-06-15 20:16:44,033 trainer INFO:     Sample 2 | Prompt: '{I!<fLfK:"JSlNWjTXO8\'Zuc6;k8Ry rJ3ID>2rPNaO@tDJPYP6CXOzZb?;I"m}T' | Target: 'T}m"I;?bZzOXC6PYPJDt@OaNPr2>DI3Jr yR8k;6cuZ\'8OXTjWNlSJ":KfLf<!I{' | Prediction: 'm>>>>m>>>>>>>>>>+@3:3333333333333:3D3D3D3D3D3D3D3D:::::{:{:{:{{{'
+2026-06-15 20:16:44,033 trainer INFO:     Sample 3 | Prompt: "owkL27YRgE#\\ax7aA%P`{KpG)6~ /DBOHx[p_>G;5jK,N[7P'm<$/v,N1]-SDuW=" | Target: "=WuDS-]1N,v/$<m'P7[N,Kj5;G>_p[xHOBD/ ~6)GpK{`P%Aa7xa\\#EgRY72Lkwo" | Prediction: '//////m>/////////////////w>//////////////wwwwwwwwwwwwwwwwwwwwwww'
+2026-06-15 20:16:44,033 trainer INFO:     Sample 4 | Prompt: 's>Pjlgl41e8yrq6.mhO?!"6]VMni{(f(p){!5:cAD2E{>d69hg.a`O[4Mtwud%hq' | Target: 'qh%duwtM4[O`a.gh96d>{E2DAc:5!{)p(f({inMV]6"!?Ohm.6qry8e14lgljP>s' | Prediction: '$w>w>w>>>>>>>>w>>>>>>>>>>>>>7{{{{{{{m:{{D{D{D{D>DmnD{>>>>>>>>>>>'
+2026-06-15 20:16:44,033 trainer INFO:     Sample 5 | Prompt: 'HS/`={[:9h>}]k8.oDAiNf$!I6RMz;*OzE?3SgcH}Ha6ew^w?sx"%:y3.2/svYMd' | Target: 'dMYvs/2.3y:%"xs?w^we6aH}HcgS3?EzO*;zMR6I!$fNiADo.8k]}>h9:[{=`/SH' | Prediction: '/3/3/3/3/3/3/3/3/3/3/3/3w3w3w3wwwww}3}3/3/Kw////////////////////'
+2026-06-15 20:16:44,033 trainer INFO: Epoch 10: Running inference on Val samples...
+2026-06-15 20:16:44,238 trainer INFO:     Sample 1 | Prompt: "8`sShz>lu(E'SC?o{w/=S^{e:Z.$IyPZXB-+D>|vjM8~FKt%B}26=tR.>z,C{%%Y" | Target: "Y%%{C,z>.Rt=62}B%tKF~8Mjv|>D+-BXZPyI$.Z:e{^S=/w{o?CS'E(ul>zhSs`8" | Prediction: '{>}{>}{>>>>>>w>>>>>>w:w///////////////////////w/wwwwwwwww>w>}{>>'
+2026-06-15 20:16:44,238 trainer INFO:     Sample 2 | Prompt: "=\\ZlE>aiuixse0yK^0mHIx[*V~QSP'S8-MY+Oi8F?d<|~8144z|CCvz[,l+,gY-l" | Target: "l-Yg,+l,[zvCC|z4418~|<d?F8iO+YM-8S'PSQ~V*[xIHm0^Ky0esxiuia>ElZ\\=" | Prediction: '${>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>m>>>>>>>>>>>>>>>>>>'
+2026-06-15 20:16:44,238 trainer INFO:     Sample 3 | Prompt: 'bwHk.~45k#50)*9pU:W9iGz>zH8bTbQ/ylhnGPY-!w6nfgB4LpK(NnSc.)meD`e<' | Target: '<e`Dem).cSnN(KpL4Bgfn6w!-YPGnhly/QbTb8Hz>zGi9W:Up9*)05#k54~.kHwb' | Prediction: 'm>wwww>w>www/w////w/////////////////////////w/wwwwwwwwwwwwwwwwww'
+2026-06-15 20:16:44,238 trainer INFO:     Sample 4 | Prompt: '\\K{4kd.X-##ayCKgUqSM;e9nZNJ(/^f~rm@79Xn][idJT7/J9xMTyyufeuLR`R@e' | Target: 'e@R`RLuefuyyTMx9J/7TJdi[]nX97@mr~f^/(JNZn9e;MSqUgKCya##-X.dk4{K\\' | Prediction: '@/@/////////////////m@////////n/n//n/n/n/nnnnnnnnnnnnj{{{pn{pnV{'
+2026-06-15 20:16:44,238 trainer INFO:     Sample 5 | Prompt: '#\'>K/#Wo:U-4M0RT@M+gl^e@"2o!v\\,nc)pQ/a`g+U*e1Ux(OTgOt:  x7\'qC{iw' | Target: 'wi{Cq\'7x  :tOgTO(xU1e*U+g`a/Qp)cn,\\v!o2"@e^lg+M@TR0M4-U:oW#/K>\'#' | Prediction: '/wwwwwwwwww/w////////////////////////@//////////////////////////'
+2026-06-15 20:16:44,238 trainer INFO: Epoch 10: Running inference on Test samples...
+2026-06-15 20:16:44,443 trainer INFO:     Sample 1 | Prompt: 'X;?Y!?+u8,z%0r3"{*1<?1&?64.^\\B,V;|q0;~$a@n6aIGiEi\'.&[v5^*5##==C]' | Target: ']C==##5*^5v[&.\'iEiGIa6n@a$~;0q|;V,B\\^.46?&1?<1*{"3r0%z,8u+?!Y?;X' | Prediction: ']8ub8DV{DV{DV{DVDVDVD@ DV3D3D3D3D3D3D3D3D3D3D3D3D3D3D3{3{3X3{x9n'
+2026-06-15 20:16:44,443 trainer INFO:     Sample 2 | Prompt: 'vNKaotD<p?EQ-Rw#&VRh.Da+3"x;lAI]$h{D5h=z.GD\'6W %PjD;*@C:YMmbwNKV' | Target: 'VKNwbmMY:C@*;DjP% W6\'DG.z=h5D{h$]IAl;x"3+aD.hRV&#wR-QE?p<DtoaKNv' | Prediction: 'Vmwwwwwwww@:w:w::::w:w:w:w:w:3:w:w:3:ww:3:3:w:3:3:w:w:w:w:whpDVD'
+2026-06-15 20:16:44,443 trainer INFO:     Sample 3 | Prompt: '{%S% pGgs"r+9DC.*+%CYDkA?.&8XkjJOsY<$OT0JkyJx>8!&{HC)tF];Mn$]mnV' | Target: 'Vnm]$nM;]Ft)CH{&!8>xJykJ0TO$<YsOJjkX8&.?AkDYC%+*.CD9+r"sgGp %S%{' | Prediction: '{m>V{{{{{{{{{{{{{{{{{DV{DV{DV{DVDV{DV{DV{DV{DV{DV{DV{DV{{{{{{{{{'
+2026-06-15 20:16:44,443 trainer INFO:     Sample 4 | Prompt: '"!AEzr+?diP$I&^RV7a^6{7"Uc^Ckv6-$V/v(/m5H*T)MQc#oHLOg$Q==$:}m+~^' | Target: '^~+m}:$==Q$gOLHo#cQM)T*H5m/(v/V$-6vkC^cU"7{6^a7VR^&I$Pid?+rzEA!"' | Prediction: 'm:m:::::::::::::::::::/:/:/:/:/:////////////m:/:/:/:}/:}/:}dddd*'
+2026-06-15 20:16:44,443 trainer INFO:     Sample 5 | Prompt: 'g@<m:}8G"UtIRu|"\'K:!;Nm/j2F1]vk`Rm)8_^ZY[W7EVy8V--w)x\'{&IHd^^zKY' | Target: 'YKz^^dHI&{\'x)w--V8yVE7W[YZ^_8)mR`kv]1F2j/mN;!:K\'"|uRItU"G8}:m<@g' | Prediction: '{ww:w:w:w:w:w:w:w::::::m:://///////////mw//////w/w/w:@m:@@@:@:@:'
+2026-06-15 20:16:44,468 trainer INFO: Train: start epoch [11/9999]
+2026-06-15 20:16:50,707 trainer INFO: Train: Epoch [11/9999]  Total time: 0:00:06  (0.0265 s / it)
+2026-06-15 20:16:50,707 trainer INFO: Evaluating on training set...
+2026-06-15 20:16:52,129 trainer INFO: Evaluating on validation set...
+2026-06-15 20:16:52,589 trainer INFO: epoch=11 train_loss=4.3327 train_exact_match_acc=0.0000 train_token_acc=0.0775 val_loss=4.3445 val_exact_match_acc=0.0000 val_token_acc=0.0768
+2026-06-15 20:16:52,613 trainer INFO: Train: start epoch [12/9999]
+2026-06-15 20:16:58,767 trainer INFO: Train: Epoch [12/9999]  Total time: 0:00:06  (0.0262 s / it)
+2026-06-15 20:16:58,767 trainer INFO: Evaluating on training set...
+2026-06-15 20:17:00,222 trainer INFO: Evaluating on validation set...
+2026-06-15 20:17:00,706 trainer INFO: epoch=12 train_loss=4.2825 train_exact_match_acc=0.0000 train_token_acc=0.0901 val_loss=4.2969 val_exact_match_acc=0.0000 val_token_acc=0.0887
+2026-06-15 20:17:00,743 trainer INFO: Train: start epoch [13/9999]
+2026-06-15 20:17:05,658 trainer INFO: Epoch [13/9999]  [180/235]:  ETA: 0:00:01  lr: 0.00030  loss: 4.2768    Iter time: 0.0255 s  Data prep time: 0.0024 s  GPU Max Mem: 155 MB
+2026-06-15 20:17:07,121 trainer INFO: Train: Epoch [13/9999]  Total time: 0:00:06  (0.0271 s / it)
+2026-06-15 20:17:07,122 trainer INFO: Evaluating on training set...
+2026-06-15 20:17:08,563 trainer INFO: Evaluating on validation set...
+2026-06-15 20:17:09,036 trainer INFO: epoch=13 train_loss=4.2252 train_exact_match_acc=0.0000 train_token_acc=0.1023 val_loss=4.2429 val_exact_match_acc=0.0000 val_token_acc=0.1008
+2026-06-15 20:17:09,060 trainer INFO: Train: start epoch [14/9999]
+2026-06-15 20:17:15,247 trainer INFO: Train: Epoch [14/9999]  Total time: 0:00:06  (0.0263 s / it)
+2026-06-15 20:17:15,247 trainer INFO: Evaluating on training set...
+2026-06-15 20:17:16,748 trainer INFO: Evaluating on validation set...
+2026-06-15 20:17:17,235 trainer INFO: epoch=14 train_loss=4.1539 train_exact_match_acc=0.0000 train_token_acc=0.1177 val_loss=4.1734 val_exact_match_acc=0.0000 val_token_acc=0.1157
+2026-06-15 20:17:17,259 trainer INFO: Train: start epoch [15/9999]
+2026-06-15 20:17:23,417 trainer INFO: Train: Epoch [15/9999]  Total time: 0:00:06  (0.0262 s / it)
+2026-06-15 20:17:23,417 trainer INFO: Evaluating on training set...
+2026-06-15 20:17:24,889 trainer INFO: Evaluating on validation set...
+2026-06-15 20:17:25,363 trainer INFO: epoch=15 train_loss=4.0597 train_exact_match_acc=0.0000 train_token_acc=0.1342 val_loss=4.0817 val_exact_match_acc=0.0000 val_token_acc=0.1313
+2026-06-15 20:17:25,364 trainer INFO: Epoch 15: Running inference on Train samples...
+2026-06-15 20:17:25,572 trainer INFO:     Sample 1 | Prompt: '\'jAhD^r~xJQc"9u&\\%HA]$6r9Rk^>0:[?tXW`I7(/5G+3)GT2f%r/Tv)#bT1@gP:' | Target: ':Pg@1Tb#)vT/r%f2TG)3+G5/(7I`WXt?[:0>^kR9r6$]AH%\\&u9"cQJx~r^DhAj\'' | Prediction: ':@/l/P/P/P/P/3/3/3/3/3/|/:/:>:[:[:[:[:[:[:>GOG*x]G*xGxhxDjhjDjDj'
+2026-06-15 20:17:25,572 trainer INFO:     Sample 2 | Prompt: '{I!<fLfK:"JSlNWjTXO8\'Zuc6;k8Ry rJ3ID>2rPNaO@tDJPYP6CXOzZb?;I"m}T' | Target: 'T}m"I;?bZzOXC6PYPJDt@OaNPr2>DI3Jr yR8k;6cuZ\'8OXTjWNlSJ":KfLf<!I{' | Prediction: 'm2m}Xm]m]Ym]YDYD]YD@D]D]D]D]D3>D]D]D]GDPGXPGXjPG79T:I:M:I{II{I{I'
+2026-06-15 20:17:25,572 trainer INFO:     Sample 3 | Prompt: "owkL27YRgE#\\ax7aA%P`{KpG)6~ /DBOHx[p_>G;5jK,N[7P'm<$/v,N1]-SDuW=" | Target: "=WuDS-]1N,v/$<m'P7[N,Kj5;G>_p[xHOBD/ ~6)GpK{`P%Aa7xa\\#EgRY72Lkwo" | Prediction: '=D]D]D/D1>mD#/D#/|jXjX[>jgjgD[D[m[pD8[p{p{8ppppppYgxxxxMw8Vw8www'
+2026-06-15 20:17:25,572 trainer INFO:     Sample 4 | Prompt: 's>Pjlgl41e8yrq6.mhO?!"6]VMni{(f(p){!5:cAD2E{>d69hg.a`O[4Mtwud%hq' | Target: 'qh%duwtM4[O`a.gh96d>{E2DAc:5!{)p(f({inMV]6"!?Ohm.6qry8e14lgljP>s' | Prediction: 'Gw4w[pw[p{[[[{[{D{>:{D{D{D{h{D{]{]{]]]]]m]h]hhhmhh4hphpjgjg>>>>>'
+2026-06-15 20:17:25,572 trainer INFO:     Sample 5 | Prompt: 'HS/`={[:9h>}]k8.oDAiNf$!I6RMz;*OzE?3SgcH}Ha6ew^w?sx"%:y3.2/svYMd' | Target: 'dMYvs/2.3y:%"xs?w^we6aH}HcgS3?EzO*;zMR6I!$fNiADo.8k]}>h9:[{=`/SH' | Prediction: '*/333/M:M:w]3w}/:w3wwwwwwwwwwwiwiwiwiMiD}iDiDiD{DDD>:D>}/[>:[/[/'
+2026-06-15 20:17:25,573 trainer INFO: Epoch 15: Running inference on Val samples...
+2026-06-15 20:17:25,778 trainer INFO:     Sample 1 | Prompt: "8`sShz>lu(E'SC?o{w/=S^{e:Z.$IyPZXB-+D>|vjM8~FKt%B}26=tR.>z,C{%%Y" | Target: "Y%%{C,z>.Rt=62}B%tKF~8Mjv|>D+-BXZPyI$.Z:e{^S=/w{o?CS'E(ul>zhSs`8" | Prediction: 'Y>{]{]Y{X{X{M}XM=e>M=eMjMD>MDFD#.D.:.:w.whw{w{w8w8w8&8]8hp 8h888'
+2026-06-15 20:17:25,778 trainer INFO:     Sample 2 | Prompt: "=\\ZlE>aiuixse0yK^0mHIx[*V~QSP'S8-MY+Oi8F?d<|~8144z|CCvz[,l+,gY-l" | Target: "l-Yg,+l,[zvCC|z4418~|<d?F8iO+YM-8S'PSQ~V*[xIHm0^Ky0esxiuia>ElZ\\=" | Prediction: 'GYYYYYYYY[Y[FYFYFYF4FFFFFFFFFFYFYF8F8[8[8[m8I8Ijgjgiiiiiiiii>>>>'
+2026-06-15 20:17:25,778 trainer INFO:     Sample 3 | Prompt: 'bwHk.~45k#50)*9pU:W9iGz>zH8bTbQ/ylhnGPY-!w6nfgB4LpK(NnSc.)meD`e<' | Target: '<e`Dem).cSnN(KpL4Bgfn6w!-YPGnhly/QbTb8Hz>zGi9W:Up9*)05#k54~.kHwb' | Prediction: '.DmDeDeDeDnjn4n/n/nwn/n/n/4n/n/n/2iiii:i>i:i:::i:_:5:5:wfw4w`w`w'
+2026-06-15 20:17:25,778 trainer INFO:     Sample 4 | Prompt: '\\K{4kd.X-##ayCKgUqSM;e9nZNJ(/^f~rm@79Xn][idJT7/J9xMTyyufeuLR`R@e' | Target: 'e@R`RLuefuyyTMx9J/7TJdi[]nX97@mr~f^/(JNZn9e;MSqUgKCya##-X.dk4{K\\' | Prediction: 'e@e/eIi@Ii/2/2/n]i]i]n]in/nmnnnnnnnnnnnnMnMnM/MMjgjgD######4{4{4'
+2026-06-15 20:17:25,778 trainer INFO:     Sample 5 | Prompt: '#\'>K/#Wo:U-4M0RT@M+gl^e@"2o!v\\,nc)pQ/a`g+U*e1Ux(OTgOt:  x7\'qC{iw' | Target: 'wi{Cq\'7x  :tOgTO(xU1e*U+g`a/Qp)cn,\\v!o2"@e^lg+M@TR0M4-U:oW#/K>\'#' | Prediction: 'w{:{:{:g:g:g:g:g:g/gigigigigi/ngi92/2@_2M2MMMMMMM:M:@/:4:M/:/>/>'
+2026-06-15 20:17:25,778 trainer INFO: Epoch 15: Running inference on Test samples...
+2026-06-15 20:17:25,983 trainer INFO:     Sample 1 | Prompt: 'X;?Y!?+u8,z%0r3"{*1<?1&?64.^\\B,V;|q0;~$a@n6aIGiEi\'.&[v5^*5##==C]' | Target: ']C==##5*^5v[&.\'iEiGIa6n@a$~;0q|;V,B\\^.46?&1?<1*{"3r0%z,8u+?!Y?;X' | Prediction: ']Y.Y.3.+.+.+*.n.n.n.n.n@in.n.nV4.nV={.Y3.4.`{383]Y$q38]8]8YPYYMF'
+2026-06-15 20:17:25,984 trainer INFO:     Sample 2 | Prompt: 'vNKaotD<p?EQ-Rw#&VRh.Da+3"x;lAI]$h{D5h=z.GD\'6W %PjD;*@C:YMmbwNKV' | Target: 'VKNwbmMY:C@*;DjP% W6\'DG.z=h5D{h$]IAl;x"3+aD.hRV&#wR-QE?p<DtoaKNv' | Prediction: 'VwmwVwVw{w@:D:DDDhDhDhDhDhDhDhDhD]D]D]h3D]hD]h3DwDwDwDDDDD.D.+vv'
+2026-06-15 20:17:25,984 trainer INFO:     Sample 3 | Prompt: '{%S% pGgs"r+9DC.*+%CYDkA?.&8XkjJOsY<$OT0JkyJx>8!&{HC)tF];Mn$]mnV' | Target: 'Vnm]$nM;]Ft)CH{&!8>xJykJ0TO$<YsOJjkX8&.?AkDYC%+*.CD9+r"sgGp %S%{' | Prediction: 'V]m]]]]F>F{F{F{F{F{{{>{{{{{{.{D{D{D{D{D{DVDVDVDDDDDDpDp{g{g{p{p{'
+2026-06-15 20:17:25,984 trainer INFO:     Sample 4 | Prompt: '"!AEzr+?diP$I&^RV7a^6{7"Uc^Ckv6-$V/v(/m5H*T)MQc#oHLOg$Q==$:}m+~^' | Target: '^~+m}:$==Q$gOLHo#cQM)T*H5m/(v/V$-6vkC^cU"7{6^a7VR^&I$Pid?+rzEA!"' | Prediction: ':m:}:}::::::M:M/Mm}MMMMMMMM/MMVMVVmVVVV/V{V{V{IPI8IViiiiiiiiiveA'
+2026-06-15 20:17:25,984 trainer INFO:     Sample 5 | Prompt: 'g@<m:}8G"UtIRu|"\'K:!;Nm/j2F1]vk`Rm)8_^ZY[W7EVy8V--w)x\'{&IHd^^zKY' | Target: 'YKz^^dHI&{\'x)w--V8yVE7W[YZ^_8)mR`kv]1F2j/mN;!:K\'"|uRItU"G8}:m<@g' | Prediction: 'Yw{V{w{w{w{w{w{w{w{w{w{w{8[F[FmFFFFFFFFF/FmF:I:I:I:I:Im@}@:@:@m@'
+2026-06-15 20:17:26,008 trainer INFO: Train: start epoch [16/9999]
+2026-06-15 20:17:32,099 trainer INFO: Train: Epoch [16/9999]  Total time: 0:00:06  (0.0259 s / it)
+2026-06-15 20:17:32,100 trainer INFO: Evaluating on training set...
+2026-06-15 20:17:33,504 trainer INFO: Evaluating on validation set...
+2026-06-15 20:17:33,997 trainer INFO: epoch=16 train_loss=3.9300 train_exact_match_acc=0.0000 train_token_acc=0.1588 val_loss=3.9535 val_exact_match_acc=0.0000 val_token_acc=0.1547
+2026-06-15 20:17:34,021 trainer INFO: Train: start epoch [17/9999]

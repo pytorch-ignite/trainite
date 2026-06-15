@@ -1,0 +1,47 @@
+model:
+  _target_: models.transformer.TransformerModel
+  hidden_size: 64
+  num_layers: 6
+  num_heads: 4
+  feedforward_dim: 256
+  dropout: 0.1
+  max_seq_len: 3072
+  vocab_size: null
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 0.0003
+data:
+  dataset:
+    _target_: datasets.string_reverse.StringReverseDataset
+    per_seq_size: 10000
+    charset: '@universal'
+    min_seq_len: null
+    max_seq_len: null
+    seq_len: 64
+    seed: 42
+  dataloader:
+    batch_size: 32
+    shuffle: true
+    num_workers: 2
+    collate_fn:
+      _target_: models.transformer.CausalLMCollateFn
+  train_ratio: 0.75
+  val_ratio: 0.2
+trainer:
+  log_every_steps: 1000
+  epochs: 9999
+  early_stopping_patience: 3
+  scheduler:
+    patience: 5
+    factor: 0.5
+    min_lr: 1.0e-06
+    mode: min
+  inference_every_epochs: 5
+  inference_num_samples: 5
+  max_inference_new_tokens: 65
+  grad_clip_norm: null
+output:
+  root: outputs_1/d64_l6_h4
+  run_name: sl64/s42
+seed: 42
+device: cuda:0
