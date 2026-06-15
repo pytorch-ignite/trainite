@@ -10,9 +10,9 @@ Instead of wrapping your code in a runtime framework, Trainite generates a clean
 my-experiment/
 ├── config.yaml     # YAML configuration (edit hyperparameters here)
 ├── config.py       # Pydantic validation models (IDE autocomplete)
-├── models/         # Model architecture templates (fully editable)
-├── datasets/       # Dataset and tokenization templates (fully editable)
-├── trainer.py      # Training loop built on PyTorch-Ignite (fully editable)
+├── models/         # Model architecture templates
+├── datasets/       # Dataset and tokenization templates
+├── trainer.py      # Training loop built on PyTorch-Ignite
 ├── utils.py        # Config loading and instantiation helpers
 ├── main.py         # Project entrypoint (runs training)
 ├── pyproject.toml  # Isolated package dependencies
@@ -124,20 +124,36 @@ trainite init
 
 ### Initialize a Project
 
-```bash
-trainite init <project-name> --model <model> --dataset <dataset>
-```
-
-You can pass all options as flags:
+You can generate a starter project by passing configuration options as command-line flags:
 
 ```bash
 trainite init my-experiment --model transformer --dataset string-reverse
 ```
 
-Or run it interactively — Trainite will prompt you step by step:
+Or run it interactively (Trainite will walk you through the options step-by-step):
 
 ```bash
 trainite init
+```
+
+Interactive prompt preview:
+```text
+? Project directory: my-experiment
+? Model: transformer
+? Dataset: string-reverse
+? Trainer: pretrainer
+? Output directory: outputs
+? Run name: transformer__string-reverse
+
+✔ Generated config.yaml
+✔ Generated models/transformer.py
+✔ Generated datasets/string_reverse.py
+✔ Generated trainer.py
+✔ Generated utils.py
+✔ Generated main.py
+✔ Generated README.md
+✔ Generated config.py
+✔ Generated pyproject.toml
 ```
 
 ### Run Training
