@@ -106,7 +106,7 @@ class PreTrainer:
         tokenizer = getattr(model_class, "tokenizer", None)
         if tokenizer is None:
             raise ValueError(
-                "Failed to resolve tokenizer from model. Please ensure your model class has a 'tokenizer' attribute or specify a tokenizer in your config."
+                "Failed to resolve tokenizer from model. Please ensure your model class has a 'tokenizer' attribute."
             )
         return tokenizer
 
