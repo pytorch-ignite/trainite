@@ -15,7 +15,7 @@ from ignite.handlers import (
 from ignite.handlers.fbresearch_logger import FBResearchLogger
 from ignite.handlers.param_scheduler import ParamScheduler
 from ignite.handlers.tensorboard_logger import OptimizerParamsHandler, TensorboardLogger
-from ignite.metrics import Accuracy, Loss, RunningAverage
+from ignite.metrics import Accuracy, Loss, Metric, RunningAverage
 from ignite.utils import setup_logger
 from pydantic import BaseModel, ConfigDict, Field
 from torch import nn
@@ -81,9 +81,7 @@ class PreTrainer:
         self.grad_clip_norm: float | None = getattr(
             config.trainer, "grad_clip_norm", None
         )
-        self.train_loader, self.val_loader, self.test_loader = self._build_dataloaders(
-            config.data
-        )
+        self.train_loader, self.val_loader, self.test_loader = self._build_dataloaders()
         self.vocab_size: int = self._resolve_vocab_size()
         self.model: nn.Module = self._build_model()
 
@@ -210,18 +208,15 @@ class PreTrainer:
 
         return train_loader, val_loader, test_loader
 
-    def _build_dataloaders(
-        self, data_config: DataConfigBase | DataWithAutoSplit
-    ) -> tuple[DataLoader, DataLoader | None, DataLoader | None]:
+    def _build_dataloaders(self) -> tuple[DataLoader, DataLoader, DataLoader | None]:
         train_loader: DataLoader
-        val_loader: DataLoader | None = None
+        val_loader: DataLoader
         test_loader: DataLoader | None = None
+        data_config = self.config.data
 
         if isinstance(data_config, DataConfigBase):
             train_loader = self._build_dataloader(data_config.train)
-            val_loader = (
-                self._build_dataloader(data_config.val) if data_config.val else None
-            )
+            val_loader = self._build_dataloader(data_config.val)
             test_loader = (
                 self._build_dataloader(data_config.test) if data_config.test else None
             )
@@ -310,7 +305,7 @@ class PreTrainer:
         logits = self.model(inputs)
         return {"logits": logits, "targets": targets}
 
-    def _attach_metrics(self) -> dict[str, Loss | Accuracy]:
+    def _attach_metrics(self) -> dict[str, Metric]:
         RunningAverage(output_transform=lambda output: output["loss"]).attach(
             self.engine, "loss"
         )
