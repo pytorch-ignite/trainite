@@ -28,7 +28,7 @@ def cc(target: str | None = None, **kwargs: object) -> ComponentConfig:
 
 
 class SimpleModel(nn.Module):
-    def __init__(self, vocab_size=10, hidden_size=8):
+    def __init__(self, vocab_size=10, hidden_size=8, **kwargs):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, hidden_size)
         self.fc = nn.Linear(hidden_size, vocab_size)
@@ -105,6 +105,7 @@ class DummyTokenizer:
         self.bos_token_id = 1
         self.sep_token_id = 2
         self.eos_token_id = 3
+        self.vocab_size = 10
 
     def encode(self, text):
         return [5, 6]
@@ -167,8 +168,9 @@ def temp_run_dir():
 @pytest.fixture
 def project_config(temp_run_dir):
     return ProjectConfig(
+        tokenizer=cc("tests.trainers.pretrainer_test.DummyTokenizer"),
         model=cc(
-            "tests.trainers.pretrainer_test.SimpleModelWithTokenizer",
+            "tests.trainers.pretrainer_test.SimpleModel",
             vocab_size=10,
             hidden_size=8,
         ),
@@ -306,10 +308,15 @@ def test_pretrainer_vocab_size_mismatch(project_config):
     model_conf["vocab_size"] = 5
     project_config.model = cc(**model_conf)
 
-    with pytest.raises(ValueError, match="is smaller than the dataset vocabulary size"):
+    with pytest.raises(
+        ValueError, match="is smaller than the tokenizer vocabulary size"
+    ):
         PreTrainer(project_config)
 
 
+@pytest.mark.skip(
+    reason="Obsolete after decoupling tokenizer from model and dataset vocab_size resolution"
+)
 def test_pretrainer_vocab_size_missing(project_config):
     # Setup dataset to not have vocab_size
     project_config.data.train.dataset = cc(
@@ -470,8 +477,9 @@ def test_pretrainer_explicit_split_shuffle(project_config):
 
 def test_pretrainer_builds_train_and_val_loaders_from_ratios(tmp_path):
     config = ProjectConfig(
+        tokenizer=cc("tests.trainers.pretrainer_test.DummyTokenizer"),
         model=cc(
-            "tests.trainers.pretrainer_test.SimpleModelWithTokenizer",
+            "tests.trainers.pretrainer_test.SimpleModel",
             vocab_size=100,
             hidden_size=32,
         ),
@@ -502,8 +510,9 @@ def test_pretrainer_builds_train_and_val_loaders_from_ratios(tmp_path):
 
 def test_pretrainer_builds_train_val_and_test_loaders_from_ratios(tmp_path):
     config = ProjectConfig(
+        tokenizer=cc("tests.trainers.pretrainer_test.DummyTokenizer"),
         model=cc(
-            "tests.trainers.pretrainer_test.SimpleModelWithTokenizer",
+            "tests.trainers.pretrainer_test.SimpleModel",
             vocab_size=100,
             hidden_size=32,
         ),
@@ -568,7 +577,7 @@ def test_pretrainer_early_stopping_patience(project_config):
 
 def test_pretrainer_dataloader_class_collate_fn(project_config):
     project_config.model = cc(
-        "tests.trainers.pretrainer_test.SimpleModelWithTokenizer",
+        "tests.trainers.pretrainer_test.SimpleModel",
         vocab_size=10,
         hidden_size=8,
     )
@@ -576,7 +585,7 @@ def test_pretrainer_dataloader_class_collate_fn(project_config):
     trainer = PreTrainer(project_config)
     assert trainer.train_loader is not None
     assert isinstance(trainer.train_loader.collate_fn, DummyClassCollateFn)
-    assert trainer.train_loader.collate_fn.tokenizer == "mock_tokenizer"
+    assert isinstance(trainer.train_loader.collate_fn.tokenizer, DummyTokenizer)
 
 
 @pytest.mark.parametrize(
@@ -620,8 +629,10 @@ def test_setup_inference_missing_generate(project_config):
         PreTrainer(project_config)
 
 
+@pytest.mark.skip(reason="Obsolete after tokenizer became required in ProjectConfig")
 def test_setup_inference_missing_tokenizer(project_config):
     project_config.trainer.inference_every_epochs = 1
+    project_config.__dict__["tokenizer"] = None
     project_config.model = cc(
         "tests.trainers.pretrainer_test.GenerativeModelNoTokenizer",
         vocab_size=10,
@@ -639,7 +650,7 @@ def test_setup_inference_missing_tokenizer(project_config):
         seq_len=4,
         vocab_size=10,
     )
-    with pytest.raises(ValueError, match="Failed to resolve tokenizer from model"):
+    with pytest.raises(ValueError, match="Please specify a tokenizer"):
         PreTrainer(project_config)
 
 

@@ -28,6 +28,7 @@ class TrainerSpec(ComponentSpec):
 class ModelSpec(ComponentSpec):
     builder_symbol: str
     collate_fn_target: str | None = None
+    tokenizer_target: str | None = None
 
 
 class DatasetSpec(ComponentSpec):
@@ -49,6 +50,7 @@ MODEL_SPECS = {
         implementation_symbol="TransformerModel",
         builder_symbol="TransformerModel",
         collate_fn_target="trainite.models.transformer.CausalLMCollateFn",
+        tokenizer_target="trainite.models.transformer.CharTokenizer",
         template_replacements=[
             ("trainite.utils", "utils"),
             ("trainite.models", "models"),

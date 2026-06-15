@@ -126,13 +126,7 @@ def test_config_build_string_reverse_dataset():
     from trainite.config.registry import get_model_spec
 
     model_spec = get_model_spec("transformer")
-<<<<<<< HEAD
-    collate_fn_obj = get_target(model_spec.collate_fn_target)(tokenizer=dataset.tokenizer)
-=======
-    model_conf = model_spec.config_cls()
-    model = instantiate(model_conf)
-    collate_fn_obj = get_target(model_spec.collate_fn_target)(tokenizer=model.tokenizer)
->>>>>>> 76b5974 (code refactor for the inference)
+    collate_fn_obj = get_target(model_spec.collate_fn_target)(tokenizer=CharTokenizer())
 
     dataloader_conf = dataset_conf.dataloader
     dataloader_kwargs = dataloader_conf.model_dump(exclude={"collate_fn"})

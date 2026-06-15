@@ -30,6 +30,7 @@ from trainite.utils import dump_config
 
 class ProjectConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
+    tokenizer: ComponentConfig
     model: ComponentConfig
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
     data: DataConfigBase | DataWithAutoSplit
@@ -359,6 +360,10 @@ def init_project(args: argparse.Namespace) -> None:
     data_config = dataset_spec.config_cls()
     trainer_component = trainer_spec.config_cls()
 
+    tokenizer_component = None
+    if model_spec.tokenizer_target:
+        tokenizer_component = ComponentConfig(_target_=model_spec.tokenizer_target)
+
     # Inject model collator into data config dataloaders
     if model_spec.collate_fn_target:
         collate_target = model_spec.collate_fn_target
@@ -375,6 +380,7 @@ def init_project(args: argparse.Namespace) -> None:
         _inject_collate(data_config)
 
     starter_config = ProjectConfig(
+        tokenizer=tokenizer_component,
         model=model_component,
         data=data_config,
         trainer=trainer_component,

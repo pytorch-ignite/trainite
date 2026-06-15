@@ -52,10 +52,11 @@ class PreTrainerConfig(BaseModel):
 
 class ProjectConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
+    tokenizer: ComponentConfig
     model: ComponentConfig
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
     data: DataConfigBase | DataWithAutoSplit
-    trainer: PreTrainerConfig
+    trainer: PreTrainerConfig = Field(default_factory=PreTrainerConfig)
     output: OutputConfig
     seed: int = 42
     device: str = "auto"
@@ -70,7 +71,7 @@ class PreTrainer:
         self.train_loader: DataLoader
         self.val_loader: DataLoader | None = None
         self.test_loader: DataLoader | None = None
-        self.tokenizer: Any = self._resolve_tokenizer()
+        self.tokenizer: Any = instantiate(config.tokenizer)
 
         self.device: str | torch.device = self._resolve_device()
         self.epochs: int = config.trainer.epochs
@@ -101,36 +102,12 @@ class PreTrainer:
             resolved = "cuda" if torch.cuda.is_available() else "cpu"
         return resolved
 
-    def _resolve_tokenizer(self) -> Any:
-        model_class = get_target(self.config.model.target)
-        tokenizer = getattr(model_class, "tokenizer", None)
-        if tokenizer is None:
-            raise ValueError(
-                "Failed to resolve tokenizer from model. Please ensure your model class has a 'tokenizer' attribute."
-            )
-        return tokenizer
-
-    def _get_underlying_dataset(self, dataset: Dataset) -> Dataset:
-        while hasattr(dataset, "dataset"):
-            dataset = getattr(dataset, "dataset")
-        return dataset
-
     def _resolve_vocab_size(self) -> int:
-        vocab_size = 0
-        if self.tokenizer is not None and hasattr(self.tokenizer, "vocab_size"):
-            vocab_size = getattr(self.tokenizer, "vocab_size", 0)
-
-        if vocab_size <= 0:
-            train_dataset = self._get_underlying_dataset(self.train_loader.dataset)
-            vocab_size = getattr(train_dataset, "vocab_size", 0)
-
-        if vocab_size <= 0:
-            try:
-                target_symbol = get_target(self.config.model.target)
-                if hasattr(target_symbol, "vocab_size"):
-                    vocab_size = getattr(target_symbol, "vocab_size")
-            except Exception:
-                pass
+        if self.tokenizer is None or not hasattr(self.tokenizer, "vocab_size"):
+            raise ValueError(
+                "Tokenizer is missing or does not define a 'vocab_size' attribute."
+            )
+        vocab_size = self.tokenizer.vocab_size
 
         model_params = self.config.model.model_dump(by_alias=True)
         configured_vocab_size: int | None = model_params.get("vocab_size")
@@ -138,17 +115,11 @@ class PreTrainer:
             if configured_vocab_size < vocab_size:
                 raise ValueError(
                     f"Configured model vocab_size ({configured_vocab_size}) is smaller than "
-                    f"the dataset vocabulary size ({vocab_size}). "
+                    f"the tokenizer vocabulary size ({vocab_size}). "
                     f"Please increase model vocab_size or remove it from config.yaml "
                     f"to let it resolve automatically."
                 )
             vocab_size = configured_vocab_size
-        if vocab_size <= 0:
-            raise ValueError(
-                f"Resolved vocab_size is {vocab_size}. This usually means your custom dataset "
-                "class does not expose a 'vocab_size' attribute, and 'vocab_size' was not "
-                "specified in the 'model' block of config.yaml. Please define it in either place."
-            )
         return vocab_size
 
     def _build_model(self) -> nn.Module:
@@ -163,10 +134,13 @@ class PreTrainer:
         except Exception:
             pass
 
+        kwargs = {}
         if has_vocab_size_param:
-            model = instantiate(self.config.model, vocab_size=self.vocab_size)
-        else:
-            model = instantiate(self.config.model)
+            kwargs["vocab_size"] = self.vocab_size
+
+        kwargs["pad_token_id"] = self.tokenizer.pad_token_id
+
+        model = instantiate(self.config.model, **kwargs)
         model.to(self.device)
         return model
 

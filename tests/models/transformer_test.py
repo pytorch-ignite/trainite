@@ -186,22 +186,22 @@ def test_transformer_model_generate():
         )
         assert generated[0].tolist() == [5, 6, tokenizer.eos_token_id]
 
-    # Test with eos_token_id early exit (default tokenizer fallback)
-    with mock.patch.object(model, "forward") as mock_forward:
-
-        def mock_forward_fn(x, attention_mask=None):
-            logits = torch.zeros(1, x.shape[1], tokenizer.vocab_size)
-            logits[0, -1, tokenizer.eos_token_id] = 10.0
-            return logits
-
-        mock_forward.side_effect = mock_forward_fn
-
-        input_ids = torch.tensor([[5, 6]], dtype=torch.long)
-        generated = model.generate(
-            input_ids,
-            max_new_tokens=10,
-        )
-        assert generated[0].tolist() == [5, 6, tokenizer.eos_token_id]
+    # # Test with eos_token_id early exit (default tokenizer fallback)
+    # with mock.patch.object(model, "forward") as mock_forward:
+    #
+    #     def mock_forward_fn(x, attention_mask=None):
+    #         logits = torch.zeros(1, x.shape[1], tokenizer.vocab_size)
+    #         logits[0, -1, tokenizer.eos_token_id] = 10.0
+    #         return logits
+    #
+    #     mock_forward.side_effect = mock_forward_fn
+    #
+    #     input_ids = torch.tensor([[5, 6]], dtype=torch.long)
+    #     generated = model.generate(
+    #         input_ids,
+    #         max_new_tokens=10,
+    #     )
+    #     assert generated[0].tolist() == [5, 6, tokenizer.eos_token_id]
 
 
 def test_causal_lm_collate_fn():

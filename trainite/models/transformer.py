@@ -321,26 +321,24 @@ class TransformerBlock(nn.Module):
 
 
 class TransformerModel(nn.Module):
-    tokenizer = CharTokenizer()
-
     def __init__(
         self,
-        vocab_size: int | None = None,
+        vocab_size: int = 100,
         hidden_size: int = 64,
         num_layers: int = 2,
         num_heads: int = 2,
         feedforward_dim: int = 128,
         dropout: float = 0.1,
         max_seq_len: int = 128,
+        pad_token_id: int | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__()
-        self.tokenizer = CharTokenizer()
-        if vocab_size is None or vocab_size == 32:
-            vocab_size = self.tokenizer.vocab_size
-
-        self.embedding = nn.Embedding(vocab_size, hidden_size, padding_idx=0)
-        self.rotary_emb = RotaryEmbedding(dim=hidden_size // num_heads, max_seq_len=max_seq_len)
+        pad_token_id = pad_token_id if pad_token_id is not None else 0
+        self.embedding = nn.Embedding(vocab_size, hidden_size, padding_idx=pad_token_id)
+        self.rotary_emb = RotaryEmbedding(
+            dim=hidden_size // num_heads, max_seq_len=max_seq_len
+        )
         self.blocks = nn.ModuleList(
             [
                 TransformerBlock(
@@ -401,12 +399,7 @@ class TransformerModel(nn.Module):
         self.eval()
 <<<<<<< HEAD
 
-        eos_id = (
-            eos_token_id
-            if eos_token_id is not None
-            else getattr(self.tokenizer, "eos_token_id", None)
-        )
->>>>>>> 76b5974 (code refactor for the inference)
+        eos_id = eos_token_id
 
         device = input_ids.device
         generated = input_ids.clone()
