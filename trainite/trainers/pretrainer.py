@@ -2,7 +2,7 @@ import logging
 from collections.abc import Sized
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Any
 
 import torch
 from ignite.engine import Engine, Events
@@ -20,31 +20,19 @@ from ignite.utils import setup_logger
 from pydantic import BaseModel, ConfigDict, Field
 from torch import nn
 from torch.optim.lr_scheduler import LinearLR
-from torch.utils.data import DataLoader, Dataset, random_split
+from torch.utils.data import DataLoader
 
 from trainite.config.base import (
     ComponentConfig,
     DataConfigBase,
-    DataLoaderConfig,
     DataWithAutoSplit,
     OptimizerConfig,
     OutputConfig,
-    SplitConfig,
 )
 
 # __MODEL_IMPORT__
 # __DATASET_IMPORT__
-from trainite.utils import dump_config, get_target, instantiate
-
-
-class GenerativeModel(Protocol):
-    def generate(
-        self,
-        prompt: list[str],
-        max_new_tokens: int,
-        tokenizer: object,
-        eos_token_id: int | None = None,
-    ) -> list[str]: ...
+from trainite.shared.utils import dump_config
 
 
 class PreTrainerConfig(BaseModel):
@@ -61,35 +49,45 @@ class PreTrainerConfig(BaseModel):
 
 class ProjectConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
+    tokenizer: ComponentConfig
     model: ComponentConfig
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
     data: DataConfigBase | DataWithAutoSplit
-    trainer: PreTrainerConfig
+    trainer: PreTrainerConfig = Field(default_factory=PreTrainerConfig)
     output: OutputConfig
     seed: int = 42
     device: str = "auto"
 
 
 class PreTrainer:
-    def __init__(self, config: ProjectConfig) -> None:
+    def __init__(
+        self,
+        config: ProjectConfig,
+        model: nn.Module,
+        optimizer: torch.optim.Optimizer,
+        tokenizer: Any,
+        train_loader: DataLoader,
+        val_loader: DataLoader,
+        test_loader: DataLoader | None = None,
+    ) -> None:
         self.logger: logging.Logger = setup_logger("trainer", level=logging.INFO)
         torch.manual_seed(config.seed)
         self.config: ProjectConfig = config
-
+        self.tokenizer: Any = tokenizer
         self.device: str | torch.device = self._resolve_device()
         self.epochs: int = config.trainer.epochs
         self.grad_clip_norm: float | None = getattr(config.trainer, "grad_clip_norm", None)
-        self.train_loader, self.val_loader, self.test_loader = self._build_dataloaders()
-        self.vocab_size: int = self._resolve_vocab_size()
-        self.model: nn.Module = self._build_model()
+        self.train_loader = train_loader
+        self.val_loader = val_loader
+        self.test_loader = test_loader
+        self.model = model
+        self.model.to(self.device)
 
         self.inference_every_epochs = config.trainer.inference_every_epochs
         self.inference_num_samples = config.trainer.inference_num_samples
         self.max_inference_new_tokens = config.trainer.max_inference_new_tokens
-        self.inference_tokenizer = self._setup_inference() if self.inference_every_epochs is not None else None
-
         self.loss_fn: nn.CrossEntropyLoss = nn.CrossEntropyLoss()
-        self.optimizer: torch.optim.Optimizer = self._build_optimizer()
+        self.optimizer = optimizer
         self.total_iters: int = len(self.train_loader) * self.epochs
         self.run_dir: Path | None = None
         self.handlers: dict = {}
@@ -99,125 +97,14 @@ class PreTrainer:
         self.test_evaluator = Engine(self._eval_step)
         self.metrics: dict = self._attach_metrics()
 
+        if self.inference_every_epochs is not None:
+            self._setup_inference()
+
     def _resolve_device(self) -> str | torch.device:
         resolved = self.config.device
         if resolved == "auto":
             resolved = "cuda" if torch.cuda.is_available() else "cpu"
         return resolved
-
-    def _get_underlying_dataset(self, dataset: Dataset) -> Dataset:
-        while hasattr(dataset, "dataset"):
-            dataset = getattr(dataset, "dataset")
-        return dataset
-
-    def _resolve_vocab_size(self) -> int:
-        train_dataset = self._get_underlying_dataset(self.train_loader.dataset)
-        vocab_size = getattr(train_dataset, "vocab_size", 0)
-        model_params = self.config.model.model_dump(by_alias=True)
-        configured_vocab_size: int | None = model_params.get("vocab_size")
-        if configured_vocab_size is not None:
-            if configured_vocab_size < vocab_size:
-                raise ValueError(
-                    f"Configured model vocab_size ({configured_vocab_size}) is smaller than "
-                    f"the dataset vocabulary size ({vocab_size}). "
-                    f"Please increase model vocab_size or remove it from config.yaml "
-                    f"to let it resolve automatically."
-                )
-            vocab_size = configured_vocab_size
-        if vocab_size <= 0:
-            raise ValueError(
-                f"Resolved vocab_size is {vocab_size}. This usually means your custom dataset "
-                "class does not expose a 'vocab_size' attribute, and 'vocab_size' was not "
-                "specified in the 'model' block of config.yaml. Please define it in either place."
-            )
-        return vocab_size
-
-    def _build_model(self) -> nn.Module:
-        model = instantiate(self.config.model, vocab_size=self.vocab_size)
-        model.to(self.device)
-        return model
-
-    def _build_optimizer(self) -> torch.optim.Optimizer:
-        return instantiate(self.config.optimizer, params=self.model.parameters())
-
-    def _build_dataloader(self, split_config: SplitConfig) -> DataLoader:
-        dataset = instantiate(split_config.dataset)
-        return self._create_dataloader(dataset, split_config.dataloader)
-
-    def _create_dataloader(
-        self,
-        dataset: Dataset,
-        dl_config: DataLoaderConfig,
-        shuffle: bool | None = None,
-    ) -> DataLoader:
-        dl_kwargs = dl_config.model_dump(exclude={"collate_fn", "shuffle"})
-        if shuffle is None:
-            shuffle = getattr(dl_config, "shuffle", False)
-
-        collate_fn = None
-        collate_config = dl_config.collate_fn
-        if collate_config:
-            target_symbol = get_target(collate_config.target)
-            if isinstance(target_symbol, type):
-                underlying_dataset = self._get_underlying_dataset(dataset)
-                tokenizer = getattr(underlying_dataset, "tokenizer", None)
-                collate_fn = instantiate(collate_config, tokenizer=tokenizer)
-            else:
-                collate_fn = target_symbol
-
-        return DataLoader(dataset, shuffle=shuffle, collate_fn=collate_fn, **dl_kwargs)
-
-    def _build_loaders_from_ratios(
-        self, data_config: DataWithAutoSplit
-    ) -> tuple[DataLoader, DataLoader, DataLoader | None]:
-        dataset = instantiate(data_config.dataset)
-        total_len = len(dataset)
-
-        if total_len == 0:
-            raise ValueError("Training dataset is empty. Cannot perform train/val/test split.")
-
-        test_ratio = data_config.test_ratio
-        val_ratio = data_config.val_ratio
-        train_ratio = 1.0 - test_ratio - val_ratio
-
-        train_len = int(total_len * train_ratio)
-        val_len = int(total_len * val_ratio)
-        test_len = total_len - train_len - val_len
-
-        train_ds, val_ds, test_ds = random_split(
-            dataset,
-            [train_len, val_len, test_len],
-            generator=torch.Generator().manual_seed(self.config.seed),
-        )
-
-        dl_config = data_config.dataloader
-
-        train_loader = self._create_dataloader(train_ds, dl_config, shuffle=True)
-        val_loader = self._create_dataloader(val_ds, dl_config, shuffle=False)
-        test_loader = self._create_dataloader(test_ds, dl_config, shuffle=False) if test_len > 0 else None
-
-        return train_loader, val_loader, test_loader
-
-    def _build_dataloaders(self) -> tuple[DataLoader, DataLoader, DataLoader | None]:
-        train_loader: DataLoader
-        val_loader: DataLoader
-        test_loader: DataLoader | None = None
-        data_config = self.config.data
-
-        if isinstance(data_config, DataConfigBase):
-            train_loader = self._build_dataloader(data_config.train)
-            val_loader = self._build_dataloader(data_config.val)
-            test_loader = self._build_dataloader(data_config.test) if data_config.test else None
-        else:  # Assumed to be DataWithAutoSplit
-            self.logger.info(
-                "Automatic splitting requested with ratios: train=%s, val=%s, test=%s",
-                1.0 - data_config.test_ratio - data_config.val_ratio,
-                data_config.val_ratio,
-                data_config.test_ratio,
-            )
-            train_loader, val_loader, test_loader = self._build_loaders_from_ratios(data_config)
-
-        return train_loader, val_loader, test_loader
 
     def _make_run_dir(self) -> Path:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -479,17 +366,15 @@ class PreTrainer:
 
     def _validate_dataloader_for_inference(self, loader: DataLoader, name: str) -> None:
         dataset = loader.dataset
-        if not isinstance(dataset, Sized) or len(dataset) == 0:
+        if not isinstance(dataset, Sized) or len(dataset) == 0:  # type: ignore
             return
 
         item = dataset[0]
         if not isinstance(item, dict):
+            raise ValueError(f"{name} dataset items must be dicts with 'prompt' and 'completion' keys.")
+        if "prompt" not in item or "completion" not in item:
             raise ValueError(
-                f"{name} dataset items must be dictionaries containing 'source_text' and 'target_text' keys for inference logging."
-            )
-        if not all(key in item for key in ["source_text", "target_text"]):
-            raise ValueError(
-                f"{name} dataset items must contain 'source_text' and 'target_text' keys for inference logging."
+                f"{name} dataset items must contain 'prompt' and 'completion' keys. Got: {list(item.keys())}"
             )
 
     def _setup_inference(self) -> object:
@@ -517,11 +402,9 @@ class PreTrainer:
         if not hasattr(self.model, "generate"):
             raise ValueError("Model must implement 'generate' method for inference logging.")
 
-        # Retrieve and check training tokenizer
-        train_ds = self._get_underlying_dataset(self.train_loader.dataset)
-        if not hasattr(train_ds, "tokenizer"):
-            raise ValueError("Dataset must have a 'tokenizer' attribute for inference logging.")
-        inference_tokenizer = getattr(train_ds, "tokenizer")
+        tokenizer: Any = self.tokenizer
+        if not hasattr(tokenizer, "apply_chat_template") and not hasattr(tokenizer, "decode"):
+            raise ValueError("Tokenizer must implement 'apply_chat_template' or 'decode' method for inference logging.")
 
         # Validate active loaders
         self._validate_dataloader_for_inference(self.train_loader, "Train")
@@ -530,34 +413,80 @@ class PreTrainer:
         if self.test_loader is not None:
             self._validate_dataloader_for_inference(self.test_loader, "Test")
 
-        return inference_tokenizer
-
     def _log_inference(self, engine: Engine, loader: DataLoader, name: str) -> None:
-        tokenizer = self.inference_tokenizer
-        if tokenizer is None:
+        if not self.inference_every_epochs or engine.state.epoch % self.inference_every_epochs != 0:
             return
+        tokenizer: Any = self.tokenizer
 
         self.logger.info(f"Epoch {engine.state.epoch}: Running inference on {name} samples...")
 
         eos_token_id = getattr(tokenizer, "eos_token_id", None)
 
         dataset = loader.dataset
-        if not isinstance(dataset, Sized):
+        if not isinstance(dataset, Sized):  # type: ignore
             raise TypeError(f"{name} dataset must be Sized to run inference logging.")
-        total_samples = len(dataset)
+        total_samples = len(dataset)  # type: ignore
         num_samples = min(self.inference_num_samples, total_samples)
         samples = [dataset[i] for i in range(num_samples)]
-        prompts = [sample["source_text"] for sample in samples]
-        targets = [sample["target_text"] for sample in samples]
 
-        self.model.eval()
-        generative_model = cast(GenerativeModel, self.model)
-        decoded_strs = generative_model.generate(
-            prompts,
+        prompts = []
+        targets = []
+        for sample in samples:
+            prompt = sample.get("prompt")
+            target = sample.get("completion")
+            prompts.append(prompt)
+            targets.append(target)
+
+        model: Any = self.model
+        model.eval()
+        encoded_prompts = []
+        for prompt in prompts:
+            ids = None
+            if hasattr(tokenizer, "apply_chat_template"):
+                try:
+                    ids = tokenizer.apply_chat_template(prompt, tokenize=True, add_generation_prompt=True)
+                except Exception:
+                    pass
+
+            if ids is None:
+                if hasattr(tokenizer, "encode"):
+                    ids = tokenizer.encode(prompt)
+                else:
+                    try:
+                        ids = tokenizer(prompt)["input_ids"]
+                    except Exception:
+                        ids = []
+
+            encoded_prompts.append(ids)
+
+        pad_id = getattr(tokenizer, "pad_token_id", 0)
+
+        # Left-pad efficiently: reverse → pad_sequence → reverse
+        tensors = [torch.tensor(ids, dtype=torch.long) for ids in encoded_prompts]
+        reversed_tensors = [t.flip(0) for t in tensors]
+        input_ids = (
+            torch.nn.utils.rnn.pad_sequence(reversed_tensors, batch_first=True, padding_value=pad_id)
+            .flip(1)
+            .to(self.device)
+        )
+        attention_mask = input_ids.ne(pad_id).to(torch.long)
+
+        output = model.generate(
+            input_ids=input_ids,
             max_new_tokens=self.max_inference_new_tokens,
-            tokenizer=tokenizer,
+            attention_mask=attention_mask,
             eos_token_id=eos_token_id,
         )
+        sequences = output.sequences if hasattr(output, "sequences") else output
+        new_tokens = sequences[:, input_ids.shape[1] :]
+        decoded_strs = [
+            tokenizer.decode(
+                tokens.tolist() if hasattr(tokens, "tolist") else tokens,
+                skip_special_tokens=True,
+            )
+            for tokens in new_tokens
+        ]
+
         for idx in range(num_samples):
             self.logger.info(
                 "    Sample %d | Prompt: %r | Target: %r | Prediction: %r",

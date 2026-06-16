@@ -25,11 +25,12 @@ from trainite.config.registry import (
     get_model_spec,
     get_trainer_spec,
 )
-from trainite.utils import dump_config
+from trainite.shared.utils import dump_config
 
 
 class ProjectConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
+    tokenizer: ComponentConfig
     model: ComponentConfig
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
     data: DataConfigBase | DataWithAutoSplit
@@ -225,8 +226,8 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
             "from trainite.trainers.pretrainer import PreTrainer, ProjectConfig",
             f"from trainer import {trainer_spec.implementation_symbol}, ProjectConfig",
         ),
-        ("trainite.utils", "utils"),
-        ("PreTrainer(config)", f"{trainer_spec.implementation_symbol}(config)"),
+        ("trainite.shared.utils", "utils"),
+        ("PreTrainer(", f"{trainer_spec.implementation_symbol}("),
     ]
 
     readme_replacements = [
@@ -249,8 +250,8 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
             dataset_spec.template_replacements,
         ),
         "trainer.py": _render_template(PROJECT_ROOT / trainer_spec.implementation_path, trainer_replacements),
-        "utils.py": _render_template(PROJECT_ROOT / "trainite/utils.py"),
-        "main.py": _render_template(PROJECT_ROOT / "trainite/main.py", main_replacements),
+        "utils.py": _render_template(PROJECT_ROOT / "trainite/shared/utils.py"),
+        "main.py": _render_template(PROJECT_ROOT / "trainite/shared/main.py", main_replacements),
         "README.md": _render_template(PROJECT_ROOT / "trainite/templates/project/README.md", readme_replacements),
         "config.py": _render_template(PROJECT_ROOT / "trainite/config/base.py"),
         "pyproject.toml": generate_uv_project(name=project_name, version="0.1.0", dependencies=sorted(final_deps)),
@@ -359,6 +360,10 @@ def init_project(args: argparse.Namespace) -> None:
     data_config = dataset_spec.config_cls()
     trainer_component = trainer_spec.config_cls()
 
+    tokenizer_component = None
+    if model_spec.tokenizer_target:
+        tokenizer_component = ComponentConfig(_target_=model_spec.tokenizer_target)
+
     # Inject model collator into data config dataloaders
     if model_spec.collate_fn_target:
         collate_target = model_spec.collate_fn_target
@@ -375,6 +380,7 @@ def init_project(args: argparse.Namespace) -> None:
         _inject_collate(data_config)
 
     starter_config = ProjectConfig(
+        tokenizer=tokenizer_component,
         model=model_component,
         data=data_config,
         trainer=trainer_component,
