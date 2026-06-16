@@ -90,14 +90,14 @@ def create_dataloader(
 
 
 def build_dataloader(split_config: Any, tokenizer: Any) -> DataLoader:
-    dataset = instantiate(split_config.dataset)
+    dataset = instantiate(split_config.dataset, tokenizer=tokenizer)
     return create_dataloader(dataset, split_config.dataloader, tokenizer)
 
 
 def build_loaders_from_ratios(
     data_config: Any, tokenizer: Any, seed: int
 ) -> tuple[DataLoader, DataLoader, DataLoader | None]:
-    dataset = instantiate(data_config.dataset)
+    dataset = instantiate(data_config.dataset, tokenizer=tokenizer)
     total_len = len(dataset)
 
     if total_len == 0:

@@ -7,7 +7,7 @@ from unittest import mock
 import pytest
 import torch
 import torch.nn as nn
-
+from pydantic import ValidationError
 from trainite.config import (
     ComponentConfig,
     DataConfigBase,
@@ -59,7 +59,7 @@ class SimpleModel(nn.Module):
         self.embedding = nn.Embedding(vocab_size, hidden_size)
         self.fc = nn.Linear(hidden_size, vocab_size)
 
-    def forward(self, x):
+    def forward(self, x, attention_mask=None, **kwargs):
         return self.fc(self.embedding(x))
 
 
@@ -68,7 +68,7 @@ class SimpleModelWithTokenizer(SimpleModel):
 
 
 class SimpleDataset(torch.utils.data.Dataset):
-    def __init__(self, size=16, seq_len=4, vocab_size=10):
+    def __init__(self, size=16, seq_len=4, vocab_size=10, **kwargs):
         self.size = size
         self.seq_len = seq_len
         self.vocab_size = vocab_size
@@ -84,7 +84,7 @@ class SimpleDataset(torch.utils.data.Dataset):
 
 
 class SimpleDatasetNoVocab(torch.utils.data.Dataset):
-    def __init__(self, size=16, seq_len=4):
+    def __init__(self, size=16, seq_len=4, **kwargs):
         self.size = size
         self.seq_len = seq_len
 
@@ -99,6 +99,9 @@ class SimpleDatasetNoVocab(torch.utils.data.Dataset):
 
 
 class EmptyDataset(torch.utils.data.Dataset):
+    def __init__(self, **kwargs):
+        pass
+
     def __len__(self):
         return 0
 
@@ -161,11 +164,34 @@ class GenerativeModel(SimpleModel):
 
 
 class GenerativeDataset(SimpleDataset):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
     def __getitem__(self, index):
         item = super().__getitem__(index)
         item["prompt"] = f"source_{index}"  # type: ignore[assignment]
         item["completion"] = f"target_{index}"  # type: ignore[assignment]
         return item
+
+    def get_item_inference(self, index):
+        tokenizer = getattr(self, "tokenizer", None)
+        if tokenizer:
+            bos = tokenizer.bos_token_id
+            sep = tokenizer.sep_token_id
+            source_ids = tokenizer.encode(f"source_{index}")
+            input_ids = torch.tensor([bos] + source_ids + [sep], dtype=torch.long)
+            attention_mask = torch.ones(len(input_ids), dtype=torch.long)
+            return {
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+                "target_text": f"target_{index}",
+            }
+        # Fallback for tests without tokenizer
+        return {
+            "input_ids": torch.tensor([1, 5, 6, 2], dtype=torch.long),
+            "attention_mask": torch.ones(4, dtype=torch.long),
+            "target_text": f"target_{index}",
+        }
 
 
 class GenerativeModelNoTokenizer(SimpleModel):
@@ -581,8 +607,6 @@ def test_pretrainer_dataset_is_empty(project_config):
 
 
 def test_pretrainer_early_stopping_patience(project_config):
-    from pydantic import ValidationError
-
     with pytest.raises(ValidationError):
         project_config.trainer.early_stopping_patience = 0
 
@@ -688,7 +712,7 @@ def test_setup_inference_invalid_dataset_items(project_config):
     )
     with pytest.raises(
         ValueError,
-        match="dataset items must contain 'prompt' and 'completion' keys",
+        match="Dataset must implement 'get_item_inference'",
     ):
         create_trainer_from_config(project_config)
 

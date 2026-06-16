@@ -19,12 +19,7 @@ from trainite.config import (
     OutputConfig,
     SplitConfig,
 )
-from trainite.config.registry import (
-    REGISTRY,
-    get_dataset_spec,
-    get_model_spec,
-    get_trainer_spec,
-)
+from trainite.config.registry import REGISTRY, get_dataset_spec, get_model_spec, get_tokenizer_spec, get_trainer_spec
 from trainite.shared.utils import dump_config
 
 
@@ -181,6 +176,7 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
     model_spec = get_model_spec(model_name)
     dataset_spec = get_dataset_spec(dataset_name)
     trainer_spec = get_trainer_spec(trainer_name)
+    tokenizer_spec = get_tokenizer_spec(dataset_spec.tokenizer_spec_name)
     spec_deps = set()
     for spec in [model_spec, dataset_spec, trainer_spec]:
         spec_deps.update(spec.dependencies)
@@ -211,6 +207,7 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
             "data: DataConfigBase | DataWithAutoSplit",
             f"data: {dataset_spec.config_cls.__name__}",
         ),
+        ("tokenizer: ComponentConfig", f"tokenizer: {tokenizer_spec.config_cls.__name__}"),
         (
             "# __MODEL_IMPORT__",
             f"from models.{model_spec.name} import {model_spec.config_cls.__name__}",
@@ -219,12 +216,16 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
             "# __DATASET_IMPORT__",
             f"from datasets.{dataset_spec.name} import {dataset_spec.config_cls.__name__}",
         ),
+        (
+            "# __TOKENIZER_IMPORT__",
+            f"from tokenizers.{tokenizer_spec.name} import {tokenizer_spec.config_cls.__name__}",
+        ),
     ]
 
     main_replacements = [
         (
             "from trainite.trainers.pretrainer import PreTrainer, ProjectConfig",
-            f"from trainer import {trainer_spec.implementation_symbol}, ProjectConfig",
+            f"from {trainer_spec.name} import {trainer_spec.implementation_symbol}, ProjectConfig",
         ),
         ("trainite.shared.utils", "utils"),
         ("PreTrainer(", f"{trainer_spec.implementation_symbol}("),
@@ -249,7 +250,13 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
             PROJECT_ROOT / dataset_spec.implementation_path,
             dataset_spec.template_replacements,
         ),
-        "trainer.py": _render_template(PROJECT_ROOT / trainer_spec.implementation_path, trainer_replacements),
+        f"tokenizers/{tokenizer_spec.name}.py": _render_template(
+            PROJECT_ROOT / tokenizer_spec.implementation_path,
+            tokenizer_spec.template_replacements,
+        ),
+        f"{trainer_spec.name}.py": _render_template(
+            PROJECT_ROOT / trainer_spec.implementation_path, trainer_replacements
+        ),
         "utils.py": _render_template(PROJECT_ROOT / "trainite/shared/utils.py"),
         "main.py": _render_template(PROJECT_ROOT / "trainite/shared/main.py", main_replacements),
         "README.md": _render_template(PROJECT_ROOT / "trainite/templates/project/README.md", readme_replacements),
@@ -354,15 +361,14 @@ def init_project(args: argparse.Namespace) -> None:
     model_spec = get_model_spec(model_name)
     dataset_spec = get_dataset_spec(dataset_name)
     trainer_spec = get_trainer_spec(trainer_name)
+    tokenizer_spec = get_tokenizer_spec(dataset_spec.tokenizer_spec_name)
 
     # Instantiate configs from specs
     model_component = model_spec.config_cls()
     data_config = dataset_spec.config_cls()
     trainer_component = trainer_spec.config_cls()
 
-    tokenizer_component = None
-    if model_spec.tokenizer_target:
-        tokenizer_component = ComponentConfig(_target_=model_spec.tokenizer_target)
+    tokenizer_component = tokenizer_spec.config_cls()
 
     # Inject model collator into data config dataloaders
     if model_spec.collate_fn_target:
@@ -398,6 +404,8 @@ def init_project(args: argparse.Namespace) -> None:
         f"trainite.datasets.{dataset_spec.name}",
         f"datasets.{dataset_spec.name}",
     )
+
+    _update_targets(starter_config, f"trainite.tokenizers.{tokenizer_spec.name}", f"tokenizers.{tokenizer_spec.name}")
 
     dump_config(starter_config, project_dir / "config.yaml")
     for filename, content in templates.items():

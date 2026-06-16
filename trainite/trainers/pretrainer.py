@@ -1,5 +1,4 @@
 import logging
-from collections.abc import Sized
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -32,6 +31,7 @@ from trainite.config.base import (
 
 # __MODEL_IMPORT__
 # __DATASET_IMPORT__
+# __TOKENIZER_IMPORT__
 from trainite.shared.utils import dump_config
 
 
@@ -144,9 +144,12 @@ class PreTrainer:
         self.model.train()
         inputs = batch["input_ids"].to(self.device)
         targets = batch["labels"].to(self.device)
+        attention_mask = batch.get("attention_mask")
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(self.device)
 
         self.optimizer.zero_grad(set_to_none=True)
-        logits = self.model(inputs)
+        logits = self.model(inputs, attention_mask=attention_mask)
         loss = self.loss_fn(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
         loss.backward()
 
@@ -165,7 +168,10 @@ class PreTrainer:
         self.model.eval()
         inputs = batch["input_ids"].to(self.device)
         targets = batch["labels"].to(self.device)
-        logits = self.model(inputs)
+        attention_mask = batch.get("attention_mask")
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(self.device)
+        logits = self.model(inputs, attention_mask=attention_mask)
         return {"logits": logits, "targets": targets}
 
     def _attach_metrics(self) -> dict[str, Metric]:
@@ -366,16 +372,16 @@ class PreTrainer:
 
     def _validate_dataloader_for_inference(self, loader: DataLoader, name: str) -> None:
         dataset = loader.dataset
-        if not isinstance(dataset, Sized) or len(dataset) == 0:  # type: ignore
-            return
-
-        item = dataset[0]
+        dataset = getattr(dataset, "dataset", dataset)  # Unwrap Subset if needed
+        item = dataset[0]  # type: ignore
         if not isinstance(item, dict):
-            raise ValueError(f"{name} dataset items must be dicts with 'prompt' and 'completion' keys.")
-        if "prompt" not in item or "completion" not in item:
+            raise ValueError(f"{name} dataset items must be dicts with 'input_ids' and 'labels' keys.")
+        if "input_ids" not in item or "labels" not in item:
             raise ValueError(
-                f"{name} dataset items must contain 'prompt' and 'completion' keys. Got: {list(item.keys())}"
+                f"{name} dataset items must contain 'input_ids' and 'labels' keys. Got: {list(item.keys())}"
             )
+        if not hasattr(dataset, "get_item_inference"):
+            raise ValueError("Dataset must implement 'get_item_inference' for inference logging.")
 
     def _setup_inference(self) -> object:
         inference_params = (
@@ -403,8 +409,8 @@ class PreTrainer:
             raise ValueError("Model must implement 'generate' method for inference logging.")
 
         tokenizer: Any = self.tokenizer
-        if not hasattr(tokenizer, "apply_chat_template") and not hasattr(tokenizer, "decode"):
-            raise ValueError("Tokenizer must implement 'apply_chat_template' or 'decode' method for inference logging.")
+        if not hasattr(tokenizer, "decode"):
+            raise ValueError("Tokenizer must implement 'decode' method for inference logging.")
 
         # Validate active loaders
         self._validate_dataloader_for_inference(self.train_loader, "Train")
@@ -414,8 +420,6 @@ class PreTrainer:
             self._validate_dataloader_for_inference(self.test_loader, "Test")
 
     def _log_inference(self, engine: Engine, loader: DataLoader, name: str) -> None:
-        if not self.inference_every_epochs or engine.state.epoch % self.inference_every_epochs != 0:
-            return
         tokenizer: Any = self.tokenizer
 
         self.logger.info(f"Epoch {engine.state.epoch}: Running inference on {name} samples...")
@@ -423,62 +427,55 @@ class PreTrainer:
         eos_token_id = getattr(tokenizer, "eos_token_id", None)
 
         dataset = loader.dataset
-        if not isinstance(dataset, Sized):  # type: ignore
-            raise TypeError(f"{name} dataset must be Sized to run inference logging.")
         total_samples = len(dataset)  # type: ignore
         num_samples = min(self.inference_num_samples, total_samples)
-        samples = [dataset[i] for i in range(num_samples)]
 
-        prompts = []
-        targets = []
-        for sample in samples:
-            prompt = sample.get("prompt")
-            target = sample.get("completion")
-            prompts.append(prompt)
-            targets.append(target)
+        # Extract prompt IDs via dataset.get_item_inference (validated in _setup_inference).
+        prompt_ids_list: list[torch.Tensor] = []
+        prompt_attn_list: list[torch.Tensor] = []
+        target_texts: list[str] = []
+        for i in range(num_samples):
+            inf_dataset = getattr(dataset, "dataset", dataset)  # Unwrap Subset if needed
+            inf = inf_dataset.get_item_inference(i)
+            prompt_ids = inf["input_ids"]
+            prompt_attn = inf.get("attention_mask")
+            target_text = str(inf.get("target_text", ""))
 
+            prompt_ids_list.append(prompt_ids.detach())
+            prompt_attn_list.append(prompt_attn)
+            target_texts.append(target_text)
         model: Any = self.model
         model.eval()
-        encoded_prompts = []
-        for prompt in prompts:
-            ids = None
-            if hasattr(tokenizer, "apply_chat_template"):
-                try:
-                    ids = tokenizer.apply_chat_template(prompt, tokenize=True, add_generation_prompt=True)
-                except Exception:
-                    pass
-
-            if ids is None:
-                if hasattr(tokenizer, "encode"):
-                    ids = tokenizer.encode(prompt)
-                else:
-                    try:
-                        ids = tokenizer(prompt)["input_ids"]
-                    except Exception:
-                        ids = []
-
-            encoded_prompts.append(ids)
 
         pad_id = getattr(tokenizer, "pad_token_id", 0)
 
-        # Left-pad efficiently: reverse → pad_sequence → reverse
-        tensors = [torch.tensor(ids, dtype=torch.long) for ids in encoded_prompts]
-        reversed_tensors = [t.flip(0) for t in tensors]
-        input_ids = (
-            torch.nn.utils.rnn.pad_sequence(reversed_tensors, batch_first=True, padding_value=pad_id)
+        # Left-pad for generation: reverse → pad_sequence → reverse
+        batch_input_ids = (
+            torch.nn.utils.rnn.pad_sequence(
+                [t.flip(0) for t in prompt_ids_list], batch_first=True, padding_value=pad_id
+            )
             .flip(1)
             .to(self.device)
         )
-        attention_mask = input_ids.ne(pad_id).to(torch.long)
 
-        output = model.generate(
-            input_ids=input_ids,
+        if any(a is not None for a in prompt_attn_list):
+            batch_attention_mask = (
+                torch.nn.utils.rnn.pad_sequence(
+                    [t.flip(0) for t in prompt_attn_list], batch_first=True, padding_value=0
+                )
+                .flip(1)
+                .to(self.device)
+            )
+        else:
+            batch_attention_mask = batch_input_ids.ne(pad_id).to(torch.long)
+
+        sequences = model.generate(
+            input_ids=batch_input_ids,
             max_new_tokens=self.max_inference_new_tokens,
-            attention_mask=attention_mask,
+            attention_mask=batch_attention_mask,
             eos_token_id=eos_token_id,
         )
-        sequences = output.sequences if hasattr(output, "sequences") else output
-        new_tokens = sequences[:, input_ids.shape[1] :]
+        new_tokens = sequences[:, batch_input_ids.shape[1] :]
         decoded_strs = [
             tokenizer.decode(
                 tokens.tolist() if hasattr(tokens, "tolist") else tokens,
@@ -487,12 +484,21 @@ class PreTrainer:
             for tokens in new_tokens
         ]
 
+        # Decode prompts for readable logging
+        prompt_strs = [
+            tokenizer.decode(
+                ids.tolist() if isinstance(ids, torch.Tensor) else ids,
+                skip_special_tokens=True,
+            )
+            for ids in prompt_ids_list
+        ]
+
         for idx in range(num_samples):
             self.logger.info(
                 "    Sample %d | Prompt: %r | Target: %r | Prediction: %r",
                 idx + 1,
-                prompts[idx],
-                targets[idx],
+                prompt_strs[idx],
+                target_texts[idx],
                 decoded_strs[idx],
             )
 
@@ -500,8 +506,8 @@ class PreTrainer:
             tb_writer = self.handlers["tensorboard"].writer
             lines = []
             for idx in range(num_samples):
-                prompt = prompts[idx].strip() or "(empty)"
-                target = targets[idx].strip() or "(empty)"
+                prompt = prompt_strs[idx].strip() or "(empty)"
+                target = target_texts[idx].strip() or "(empty)"
                 pred = decoded_strs[idx].strip() or "(empty)"
                 prompt = prompt.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 target = target.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
