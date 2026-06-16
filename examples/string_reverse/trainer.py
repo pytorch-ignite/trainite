@@ -50,9 +50,7 @@ class PreTrainer:
 
         self.epochs: int = config.trainer.epochs
         self.log_every_steps: int = config.trainer.log_every_steps
-        self.grad_clip_norm: float | None = getattr(
-            config.trainer, "grad_clip_norm", None
-        )
+        self.grad_clip_norm: float | None = getattr(config.trainer, "grad_clip_norm", None)
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.test_loader = test_loader

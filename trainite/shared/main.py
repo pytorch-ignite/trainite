@@ -27,9 +27,7 @@ def resolve_device(device: str) -> str | torch.device:
 
 def resolve_vocab_size(tokenizer: Any, model_config: Any) -> int:
     if tokenizer is None or not hasattr(tokenizer, "vocab_size"):
-        raise ValueError(
-            "Tokenizer is missing or does not define a 'vocab_size' attribute."
-        )
+        raise ValueError("Tokenizer is missing or does not define a 'vocab_size' attribute.")
     vocab_size = tokenizer.vocab_size
 
     model_params = model_config.model_dump(by_alias=True)
@@ -46,9 +44,7 @@ def resolve_vocab_size(tokenizer: Any, model_config: Any) -> int:
     return vocab_size
 
 
-def build_model(
-    model_config: Any, tokenizer: Any, vocab_size: int, device: str | torch.device
-) -> nn.Module:
+def build_model(model_config: Any, tokenizer: Any, vocab_size: int, device: str | torch.device) -> nn.Module:
     target_path = model_config.target
     target_symbol = get_target(target_path)
 
@@ -105,9 +101,7 @@ def build_loaders_from_ratios(
     total_len = len(dataset)
 
     if total_len == 0:
-        raise ValueError(
-            "Training dataset is empty. Cannot perform train/val/test split."
-        )
+        raise ValueError("Training dataset is empty. Cannot perform train/val/test split.")
 
     test_ratio = data_config.test_ratio
     val_ratio = data_config.val_ratio
@@ -127,28 +121,18 @@ def build_loaders_from_ratios(
 
     train_loader = create_dataloader(train_ds, dl_config, tokenizer, shuffle=True)
     val_loader = create_dataloader(val_ds, dl_config, tokenizer, shuffle=False)
-    test_loader = (
-        create_dataloader(test_ds, dl_config, tokenizer, shuffle=False)
-        if test_len > 0
-        else None
-    )
+    test_loader = create_dataloader(test_ds, dl_config, tokenizer, shuffle=False) if test_len > 0 else None
 
     return train_loader, val_loader, test_loader
 
 
-def build_dataloaders(
-    data_config: Any, tokenizer: Any, seed: int
-) -> tuple[DataLoader, DataLoader, DataLoader | None]:
+def build_dataloaders(data_config: Any, tokenizer: Any, seed: int) -> tuple[DataLoader, DataLoader, DataLoader | None]:
     if hasattr(data_config, "train"):
         train_loader = build_dataloader(data_config.train, tokenizer)
         val_loader = build_dataloader(data_config.val, tokenizer)
-        test_loader = (
-            build_dataloader(data_config.test, tokenizer) if data_config.test else None
-        )
+        test_loader = build_dataloader(data_config.test, tokenizer) if data_config.test else None
     else:
-        train_loader, val_loader, test_loader = build_loaders_from_ratios(
-            data_config, tokenizer, seed
-        )
+        train_loader, val_loader, test_loader = build_loaders_from_ratios(data_config, tokenizer, seed)
 
     return train_loader, val_loader, test_loader
 
@@ -169,9 +153,7 @@ def main() -> None:
     device = resolve_device(config.device)
     tokenizer = instantiate(config.tokenizer)
 
-    train_loader, val_loader, test_loader = build_dataloaders(
-        config.data, tokenizer, config.seed
-    )
+    train_loader, val_loader, test_loader = build_dataloaders(config.data, tokenizer, config.seed)
 
     vocab_size = resolve_vocab_size(tokenizer, config.model)
     model = build_model(config.model, tokenizer, vocab_size, device)

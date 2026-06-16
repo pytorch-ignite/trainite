@@ -76,9 +76,7 @@ class PreTrainer:
         self.tokenizer: Any = tokenizer
         self.device: str | torch.device = self._resolve_device()
         self.epochs: int = config.trainer.epochs
-        self.grad_clip_norm: float | None = getattr(
-            config.trainer, "grad_clip_norm", None
-        )
+        self.grad_clip_norm: float | None = getattr(config.trainer, "grad_clip_norm", None)
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.test_loader = test_loader
@@ -416,10 +414,7 @@ class PreTrainer:
             self._validate_dataloader_for_inference(self.test_loader, "Test")
 
     def _log_inference(self, engine: Engine, loader: DataLoader, name: str) -> None:
-        if (
-            not self.inference_every_epochs
-            or engine.state.epoch % self.inference_every_epochs != 0
-        ):
+        if not self.inference_every_epochs or engine.state.epoch % self.inference_every_epochs != 0:
             return
         tokenizer: Any = self.tokenizer
 
@@ -470,9 +465,7 @@ class PreTrainer:
         tensors = [torch.tensor(ids, dtype=torch.long) for ids in encoded_prompts]
         reversed_tensors = [t.flip(0) for t in tensors]
         input_ids = (
-            torch.nn.utils.rnn.pad_sequence(
-                reversed_tensors, batch_first=True, padding_value=pad_id
-            )
+            torch.nn.utils.rnn.pad_sequence(reversed_tensors, batch_first=True, padding_value=pad_id)
             .flip(1)
             .to(self.device)
         )

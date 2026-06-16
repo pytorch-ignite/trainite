@@ -30,9 +30,7 @@ from trainite.trainers.pretrainer import PreTrainer, PreTrainerConfig, ProjectCo
 def create_trainer_from_config(config: ProjectConfig) -> PreTrainer:
     device = resolve_device(config.device)
     tokenizer = instantiate(config.tokenizer)
-    train_loader, val_loader, test_loader = build_dataloaders(
-        config.data, tokenizer, config.seed
-    )
+    train_loader, val_loader, test_loader = build_dataloaders(config.data, tokenizer, config.seed)
     vocab_size = resolve_vocab_size(tokenizer, config.model)
     model = build_model(config.model, tokenizer, vocab_size, device)
     optimizer = instantiate(config.optimizer, params=model.parameters())
@@ -158,9 +156,7 @@ class GenerativeModel(SimpleModel):
         eos_token_id=None,
         pad_token_id=None,
     ):
-        dummy_new = torch.tensor(
-            [[7]], dtype=torch.long, device=input_ids.device
-        ).repeat(input_ids.shape[0], 1)
+        dummy_new = torch.tensor([[7]], dtype=torch.long, device=input_ids.device).repeat(input_ids.shape[0], 1)
         return torch.cat([input_ids, dummy_new], dim=-1)
 
 
@@ -176,9 +172,7 @@ class GenerativeModelNoTokenizer(SimpleModel):
     """Like GenerativeModel but without a tokenizer — used to test the missing-tokenizer error."""
 
     def generate(self, input_ids, max_new_tokens, **kwargs):
-        dummy_new = torch.tensor(
-            [[7]], dtype=torch.long, device=input_ids.device
-        ).repeat(input_ids.shape[0], 1)
+        dummy_new = torch.tensor([[7]], dtype=torch.long, device=input_ids.device).repeat(input_ids.shape[0], 1)
         return torch.cat([input_ids, dummy_new], dim=-1)
 
 
@@ -317,9 +311,7 @@ def test_device_auto_selection(project_config):
         assert device_str == "cpu"
 
 
-@pytest.mark.skip(
-    reason="Obsolete after decoupling tokenizer from model and dataset vocab_size resolution"
-)
+@pytest.mark.skip(reason="Obsolete after decoupling tokenizer from model and dataset vocab_size resolution")
 def test_pretrainer_auto_vocab_size(project_config):
     # Remove vocab_size from model config
     model_conf = project_config.model.model_dump(by_alias=True)
@@ -339,15 +331,11 @@ def test_pretrainer_vocab_size_mismatch(project_config):
     model_conf["vocab_size"] = 5
     project_config.model = cc(**model_conf)
 
-    with pytest.raises(
-        ValueError, match="is smaller than the tokenizer vocabulary size"
-    ):
+    with pytest.raises(ValueError, match="is smaller than the tokenizer vocabulary size"):
         create_trainer_from_config(project_config)
 
 
-@pytest.mark.skip(
-    reason="Obsolete after decoupling tokenizer from model and dataset vocab_size resolution"
-)
+@pytest.mark.skip(reason="Obsolete after decoupling tokenizer from model and dataset vocab_size resolution")
 def test_pretrainer_vocab_size_missing(project_config):
     # Setup dataset to not have vocab_size
     project_config.data.train.dataset = cc(
@@ -492,9 +480,7 @@ def test_pretrainer_test_without_val(project_config, temp_run_dir):
 
 
 def test_pretrainer_dataloader_collate_fn(project_config):
-    project_config.data.train.dataloader.collate_fn = cc(
-        "tests.trainers.pretrainer_test.dummy_collate_fn"
-    )
+    project_config.data.train.dataloader.collate_fn = cc("tests.trainers.pretrainer_test.dummy_collate_fn")
     trainer = create_trainer_from_config(project_config)
     assert trainer.train_loader is not None
     assert trainer.train_loader.collate_fn is dummy_collate_fn
@@ -614,9 +600,7 @@ def test_pretrainer_dataloader_class_collate_fn(project_config):
         vocab_size=10,
         hidden_size=8,
     )
-    project_config.data.train.dataloader.collate_fn = cc(
-        "tests.trainers.pretrainer_test.DummyClassCollateFn"
-    )
+    project_config.data.train.dataloader.collate_fn = cc("tests.trainers.pretrainer_test.DummyClassCollateFn")
     trainer = create_trainer_from_config(project_config)
     assert trainer.train_loader is not None
     assert isinstance(trainer.train_loader.collate_fn, DummyClassCollateFn)
@@ -638,9 +622,7 @@ def test_setup_inference_invalid_inference_params(project_config, epochs, tokens
     project_config.trainer.inference_every_epochs = epochs
     project_config.trainer.max_inference_new_tokens = tokens
     project_config.trainer.inference_num_samples = samples
-    with pytest.raises(
-        ValueError, match="Inference logging parameters must be greater than 0"
-    ):
+    with pytest.raises(ValueError, match="Inference logging parameters must be greater than 0"):
         create_trainer_from_config(project_config)
 
 
@@ -656,9 +638,7 @@ def test_setup_inference_invalid_inference_type_params(project_config, epochs, t
     project_config.trainer.__dict__["inference_every_epochs"] = epochs
     project_config.trainer.__dict__["max_inference_new_tokens"] = tokens
     project_config.trainer.__dict__["inference_num_samples"] = samples
-    with pytest.raises(
-        TypeError, match="Inference logging parameters must be integers."
-    ):
+    with pytest.raises(TypeError, match="Inference logging parameters must be integers."):
         create_trainer_from_config(project_config)
 
 

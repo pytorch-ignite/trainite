@@ -28,9 +28,7 @@ def resolve_device(device: str) -> str | torch.device:
 
 def resolve_vocab_size(tokenizer: Any, model_config: Any) -> int:
     if tokenizer is None or not hasattr(tokenizer, "vocab_size"):
-        raise ValueError(
-            "Tokenizer is missing or does not define a 'vocab_size' attribute."
-        )
+        raise ValueError("Tokenizer is missing or does not define a 'vocab_size' attribute.")
     vocab_size = tokenizer.vocab_size
 
     model_params = model_config.model_dump(by_alias=True)
@@ -47,9 +45,7 @@ def resolve_vocab_size(tokenizer: Any, model_config: Any) -> int:
     return vocab_size
 
 
-def build_model(
-    model_config: Any, tokenizer: Any, vocab_size: int, device: str | torch.device
-) -> nn.Module:
+def build_model(model_config: Any, tokenizer: Any, vocab_size: int, device: str | torch.device) -> nn.Module:
     target_path = model_config.target
     target_symbol = get_target(target_path)
 
@@ -105,20 +101,14 @@ def build_loaders_from_ratios(
     dataset = instantiate(data_config.dataset)
     total_len = len(dataset)
 
-    train_ratio = (
-        data_config.train_ratio if data_config.train_ratio is not None else 1.0
-    )
+    train_ratio = data_config.train_ratio if data_config.train_ratio is not None else 1.0
     val_ratio = data_config.val_ratio if data_config.val_ratio is not None else 0.0
 
     if train_ratio <= 0.0 or val_ratio < 0:
-        raise ValueError(
-            f"train_ratio must be between 0 and 1. Got train_ratio={train_ratio}, val_ratio={val_ratio}"
-        )
+        raise ValueError(f"train_ratio must be between 0 and 1. Got train_ratio={train_ratio}, val_ratio={val_ratio}")
 
     if train_ratio + val_ratio > 1.0:
-        raise ValueError(
-            f"Sum of train_ratio ({train_ratio}) and val_ratio ({val_ratio}) exceeds 1.0"
-        )
+        raise ValueError(f"Sum of train_ratio ({train_ratio}) and val_ratio ({val_ratio}) exceeds 1.0")
 
     train_len = int(total_len * train_ratio)
     val_len = int(total_len * val_ratio)
@@ -133,16 +123,8 @@ def build_loaders_from_ratios(
     dl_config = data_config.dataloader or instantiate(None)  # fallback or default
 
     train_loader = create_dataloader(train_ds, dl_config, tokenizer, shuffle=True)
-    val_loader = (
-        create_dataloader(val_ds, dl_config, tokenizer, shuffle=False)
-        if val_len > 0
-        else None
-    )
-    test_loader = (
-        create_dataloader(test_ds, dl_config, tokenizer, shuffle=False)
-        if test_len > 0
-        else None
-    )
+    val_loader = create_dataloader(val_ds, dl_config, tokenizer, shuffle=False) if val_len > 0 else None
+    test_loader = create_dataloader(test_ds, dl_config, tokenizer, shuffle=False) if test_len > 0 else None
 
     return train_loader, val_loader, test_loader
 
@@ -152,16 +134,10 @@ def build_dataloaders(
 ) -> tuple[DataLoader, DataLoader | None, DataLoader | None]:
     if data_config.train:
         train_loader = build_dataloader(data_config.train, tokenizer)
-        val_loader = (
-            build_dataloader(data_config.val, tokenizer) if data_config.val else None
-        )
-        test_loader = (
-            build_dataloader(data_config.test, tokenizer) if data_config.test else None
-        )
+        val_loader = build_dataloader(data_config.val, tokenizer) if data_config.val else None
+        test_loader = build_dataloader(data_config.test, tokenizer) if data_config.test else None
     else:
-        train_loader, val_loader, test_loader = build_loaders_from_ratios(
-            data_config, tokenizer, seed
-        )
+        train_loader, val_loader, test_loader = build_loaders_from_ratios(data_config, tokenizer, seed)
 
     return train_loader, val_loader, test_loader
 
@@ -207,9 +183,7 @@ def main() -> None:
     # 5. Build optimizer.
     # 6. Run PreTrainer.
 
-    train_loader, val_loader, test_loader = build_dataloaders(
-        config.data, None, config.seed
-    )
+    train_loader, val_loader, test_loader = build_dataloaders(config.data, None, config.seed)
 
     train_dataset = train_loader.dataset
     if isinstance(train_dataset, torch.utils.data.Subset):
