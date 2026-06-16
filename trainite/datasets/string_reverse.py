@@ -18,80 +18,6 @@ CHARSET_PRESETS = {
 }
 
 
-<<<<<<< HEAD
-class CharTokenizer:
-    """A simple character-level tokenizer with a hardcoded universal vocabulary.
-
-    Maps each character in UNIVERSAL_VOCAB to a unique integer ID.
-    ID 0 is reserved as the <PAD> token.
-    ID 1 is reserved as the <BOS> token.
-    ID 2 is reserved as the <SEP> token.
-    ID 3 is reserved as the <EOS> token.
-    ID 4 is reserved as the <UNK> token.
-    """
-
-    def __init__(self) -> None:
-        self.pad_token_id = 0
-        self.bos_token_id = 1
-        self.sep_token_id = 2
-        self.eos_token_id = 3
-        self.unk_token_id = 4
-
-        self.char_to_id: dict[str, int] = {c: i + 5 for i, c in enumerate(UNIVERSAL_VOCAB)}
-        self.id_to_char: dict[int, str] = {i + 5: c for i, c in enumerate(UNIVERSAL_VOCAB)}
-
-        self.special_tokens: dict[int, str] = {
-            self.pad_token_id: "<PAD>",
-            self.bos_token_id: "<BOS>",
-            self.sep_token_id: "<SEP>",
-            self.eos_token_id: "<EOS>",
-            self.unk_token_id: "<UNK>",
-        }
-
-        for k, v in self.special_tokens.items():
-            self.id_to_char[k] = v
-
-    @property
-    def vocab_size(self) -> int:
-        """Number of unique tokens in the vocabulary (includes special tokens)."""
-        return len(UNIVERSAL_VOCAB) + len(self.special_tokens)
-
-    def encode(self, text: str) -> list[int]:
-        """Convert a string to a list of token IDs, mapping unrecognized characters to UNK."""
-        return [self.char_to_id.get(c, self.unk_token_id) for c in text]
-
-    def decode(
-        self,
-        ids: list[int] | torch.Tensor,
-        skip_special_tokens: bool = True,
-        ignore_index: int = -100,
-    ) -> str:
-        """Convert a list of token IDs back to a string.
-
-        Args:
-            ids: List or tensor of token IDs to decode.
-            skip_special_tokens: If True, skips printing special tokens like <bos> and <eos>.
-            ignore_index: The token ID used for loss masking. These are silently ignored.
-        """
-        if isinstance(ids, torch.Tensor):
-            ids = ids.tolist()
-
-        decoded_chars = []
-        for i in ids:
-            if i == ignore_index:
-                continue
-            if i in self.special_tokens:
-                if not skip_special_tokens or i == self.unk_token_id:
-                    decoded_chars.append(self.special_tokens[i])
-            elif i in self.id_to_char:
-                decoded_chars.append(self.id_to_char[i])
-            else:
-                decoded_chars.append(self.special_tokens[self.unk_token_id])
-        return "".join(decoded_chars)
-
-
-=======
->>>>>>> 76b5974 (code refactor for the inference)
 class StringReverseDataset(Dataset):
     """Generates unique random strings and their reversals.
 
@@ -116,11 +42,7 @@ class StringReverseDataset(Dataset):
         else:
             chars = charset
 
-<<<<<<< HEAD
-        self.valid_token_ids = [self.tokenizer.char_to_id[c] for c in chars if c in self.tokenizer.char_to_id]
-=======
         self.chars = chars
->>>>>>> 76b5974 (code refactor for the inference)
 
         if not self.chars:
             raise ValueError(f"Charset '{charset}' resulted in empty characters.")
@@ -187,17 +109,6 @@ class StringReverseDataset(Dataset):
             "completion": self.target_texts[index],
         }
 
-<<<<<<< HEAD
-    def decode(
-        self,
-        ids: torch.Tensor,
-        skip_special_tokens: bool = True,
-        ignore_index: int = -100,
-    ) -> str:
-        return self.tokenizer.decode(ids, skip_special_tokens=skip_special_tokens, ignore_index=ignore_index)
-
-=======
->>>>>>> 76b5974 (code refactor for the inference)
 
 class StringReverseDatasetConfig(ComponentConfig):
     model_config = ConfigDict(validate_assignment=True)

@@ -38,12 +38,8 @@ class CharTokenizer:
         self.eos_token_id = 3
         self.unk_token_id = 4
 
-        self.char_to_id: dict[str, int] = {
-            c: i + 5 for i, c in enumerate(UNIVERSAL_VOCAB)
-        }
-        self.id_to_char: dict[int, str] = {
-            i + 5: c for i, c in enumerate(UNIVERSAL_VOCAB)
-        }
+        self.char_to_id: dict[str, int] = {c: i + 5 for i, c in enumerate(UNIVERSAL_VOCAB)}
+        self.id_to_char: dict[int, str] = {i + 5: c for i, c in enumerate(UNIVERSAL_VOCAB)}
 
         self.special_tokens: dict[int, str] = {
             self.pad_token_id: "<PAD>",
@@ -137,9 +133,7 @@ class CharTokenizer:
                 current_len = len(batch_input_ids[i])
                 if current_len < target_len:
                     pad_len = target_len - current_len
-                    batch_input_ids[i] = [
-                        self.pad_token_id
-                    ] * pad_len + batch_input_ids[i]
+                    batch_input_ids[i] = [self.pad_token_id] * pad_len + batch_input_ids[i]
                     batch_attention_mask[i] = [0] * pad_len + batch_attention_mask[i]
                 elif current_len > target_len:
                     batch_input_ids[i] = batch_input_ids[i][-target_len:]
@@ -336,9 +330,7 @@ class TransformerModel(nn.Module):
         super().__init__()
         pad_token_id = pad_token_id if pad_token_id is not None else 0
         self.embedding = nn.Embedding(vocab_size, hidden_size, padding_idx=pad_token_id)
-        self.rotary_emb = RotaryEmbedding(
-            dim=hidden_size // num_heads, max_seq_len=max_seq_len
-        )
+        self.rotary_emb = RotaryEmbedding(dim=hidden_size // num_heads, max_seq_len=max_seq_len)
         self.blocks = nn.ModuleList(
             [
                 TransformerBlock(
@@ -353,9 +345,7 @@ class TransformerModel(nn.Module):
         self.proj = nn.Linear(hidden_size, vocab_size)
         self.norm = nn.LayerNorm(hidden_size)
 
-    def forward(
-        self, input_ids: torch.Tensor, attention_mask: torch.Tensor | None = None
-    ) -> torch.Tensor:
+    def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor | None = None) -> torch.Tensor:
         B, S = input_ids.shape
         x = self.embedding(input_ids) * math.sqrt(self.embedding.embedding_dim)
         cos, sin = self.rotary_emb(x, seq_len=S)
@@ -397,7 +387,6 @@ class TransformerModel(nn.Module):
             of shape (batch, prompt_len + new_tokens).
         """
         self.eval()
-<<<<<<< HEAD
 
         eos_id = eos_token_id
 
@@ -455,9 +444,7 @@ class CausalLMCollateFn:
             completion = item.get("completion")
 
             if prompt is None or completion is None:
-                raise KeyError(
-                    f"Dataset item must contain 'prompt' and 'completion' keys. Got: {list(item.keys())}"
-                )
+                raise KeyError(f"Dataset item must contain 'prompt' and 'completion' keys. Got: {list(item.keys())}")
 
             # Tokenize using the tokenizer
             prompt_ids = self.tokenizer.encode(prompt)
