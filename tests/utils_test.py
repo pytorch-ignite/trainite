@@ -1,7 +1,7 @@
 import pytest
 
 from trainite.config import ComponentConfig
-from trainite.utils import get_target, instantiate
+from trainite.shared.utils import get_target, instantiate
 
 
 def cc(target: str | None = None, **kwargs: object) -> ComponentConfig:
@@ -12,7 +12,7 @@ def cc(target: str | None = None, **kwargs: object) -> ComponentConfig:
 
 
 def test_get_target_success():
-    target = get_target("trainite.utils.get_target")
+    target = get_target("trainite.shared.utils.get_target")
     assert target is get_target
 
 
@@ -32,13 +32,16 @@ def test_instantiate_non_component_config():
 
 
 def test_instantiate_import_error():
-    config = cc("trainite.utils.Nope")
+    config = cc("trainite.shared.utils.Nope")
     with pytest.raises(ImportError, match="Could not locate target"):
         instantiate(config)
 
 
 def test_instantiate_get_target():
-    config = cc("trainite.utils.get_target", target_path="trainite.utils.get_target")
+    config = cc(
+        "trainite.shared.utils.get_target",
+        target_path="trainite.shared.utils.get_target",
+    )
     target = instantiate(config)
     assert target is get_target
 

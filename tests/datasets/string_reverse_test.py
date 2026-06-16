@@ -8,7 +8,7 @@ from trainite.models.transformer import (
     UNIVERSAL_VOCAB,
     CharTokenizer,
 )
-from trainite.utils import get_target, instantiate
+from trainite.shared.utils import get_target, instantiate
 
 
 def test_char_tokenizer():

@@ -1,4 +1,3 @@
-import inspect
 import logging
 from collections.abc import Sized
 from datetime import datetime
@@ -21,21 +20,19 @@ from ignite.utils import setup_logger
 from pydantic import BaseModel, ConfigDict, Field
 from torch import nn
 from torch.optim.lr_scheduler import LinearLR
-from torch.utils.data import DataLoader, Dataset, random_split
+from torch.utils.data import DataLoader
 
 from trainite.config.base import (
     ComponentConfig,
     DataConfigBase,
-    DataLoaderConfig,
     DataWithAutoSplit,
     OptimizerConfig,
     OutputConfig,
-    SplitConfig,
 )
 
 # __MODEL_IMPORT__
 # __DATASET_IMPORT__
-from trainite.utils import dump_config, get_target, instantiate
+from trainite.shared.utils import dump_config
 
 
 class PreTrainerConfig(BaseModel):
@@ -63,30 +60,36 @@ class ProjectConfig(BaseModel):
 
 
 class PreTrainer:
-    def __init__(self, config: ProjectConfig) -> None:
+    def __init__(
+        self,
+        config: ProjectConfig,
+        model: nn.Module,
+        optimizer: torch.optim.Optimizer,
+        tokenizer: Any,
+        train_loader: DataLoader,
+        val_loader: DataLoader,
+        test_loader: DataLoader | None = None,
+    ) -> None:
         self.logger: logging.Logger = setup_logger("trainer", level=logging.INFO)
         torch.manual_seed(config.seed)
         self.config: ProjectConfig = config
-
-        self.train_loader: DataLoader
-        self.val_loader: DataLoader | None = None
-        self.test_loader: DataLoader | None = None
-        self.tokenizer: Any = instantiate(config.tokenizer)
-
+        self.tokenizer: Any = tokenizer
         self.device: str | torch.device = self._resolve_device()
         self.epochs: int = config.trainer.epochs
-        self.grad_clip_norm: float | None = getattr(config.trainer, "grad_clip_norm", None)
-        self.train_loader, self.val_loader, self.test_loader = self._build_dataloaders()
-        self.vocab_size: int = self._resolve_vocab_size()
-        self.model: nn.Module = self._build_model()
+        self.grad_clip_norm: float | None = getattr(
+            config.trainer, "grad_clip_norm", None
+        )
+        self.train_loader = train_loader
+        self.val_loader = val_loader
+        self.test_loader = test_loader
+        self.model = model
+        self.model.to(self.device)
 
         self.inference_every_epochs = config.trainer.inference_every_epochs
         self.inference_num_samples = config.trainer.inference_num_samples
         self.max_inference_new_tokens = config.trainer.max_inference_new_tokens
-        self.inference_tokenizer = self._setup_inference() if self.inference_every_epochs is not None else None
-
         self.loss_fn: nn.CrossEntropyLoss = nn.CrossEntropyLoss()
-        self.optimizer: torch.optim.Optimizer = self._build_optimizer()
+        self.optimizer = optimizer
         self.total_iters: int = len(self.train_loader) * self.epochs
         self.run_dir: Path | None = None
         self.handlers: dict = {}
@@ -96,133 +99,14 @@ class PreTrainer:
         self.test_evaluator = Engine(self._eval_step)
         self.metrics: dict = self._attach_metrics()
 
+        if self.inference_every_epochs is not None:
+            self._setup_inference()
+
     def _resolve_device(self) -> str | torch.device:
         resolved = self.config.device
         if resolved == "auto":
             resolved = "cuda" if torch.cuda.is_available() else "cpu"
         return resolved
-
-    def _resolve_vocab_size(self) -> int:
-        if self.tokenizer is None or not hasattr(self.tokenizer, "vocab_size"):
-            raise ValueError(
-                "Tokenizer is missing or does not define a 'vocab_size' attribute."
-            )
-        vocab_size = self.tokenizer.vocab_size
-
-        model_params = self.config.model.model_dump(by_alias=True)
-        configured_vocab_size: int | None = model_params.get("vocab_size")
-        if configured_vocab_size is not None:
-            if configured_vocab_size < vocab_size:
-                raise ValueError(
-                    f"Configured model vocab_size ({configured_vocab_size}) is smaller than "
-                    f"the tokenizer vocabulary size ({vocab_size}). "
-                    f"Please increase model vocab_size or remove it from config.yaml "
-                    f"to let it resolve automatically."
-                )
-            vocab_size = configured_vocab_size
-        return vocab_size
-
-    def _build_model(self) -> nn.Module:
-        target_path = self.config.model.target
-        target_symbol = get_target(target_path)
-
-        has_vocab_size_param = False
-        try:
-            sig = inspect.signature(target_symbol)
-            if "vocab_size" in sig.parameters:
-                has_vocab_size_param = True
-        except Exception:
-            pass
-
-        kwargs = {}
-        if has_vocab_size_param:
-            kwargs["vocab_size"] = self.vocab_size
-
-        kwargs["pad_token_id"] = self.tokenizer.pad_token_id
-
-        model = instantiate(self.config.model, **kwargs)
-        model.to(self.device)
-        return model
-
-    def _build_optimizer(self) -> torch.optim.Optimizer:
-        return instantiate(self.config.optimizer, params=self.model.parameters())
-
-    def _build_dataloader(self, split_config: SplitConfig) -> DataLoader:
-        dataset = instantiate(split_config.dataset)
-        return self._create_dataloader(dataset, split_config.dataloader)
-
-    def _create_dataloader(
-        self,
-        dataset: Dataset,
-        dl_config: DataLoaderConfig,
-        shuffle: bool | None = None,
-    ) -> DataLoader:
-        dl_kwargs = dl_config.model_dump(exclude={"collate_fn", "shuffle"})
-        if shuffle is None:
-            shuffle = getattr(dl_config, "shuffle", False)
-
-        collate_fn = None
-        collate_config = dl_config.collate_fn
-        if collate_config:
-            target_symbol = get_target(collate_config.target)
-            if isinstance(target_symbol, type):
-                collate_fn = instantiate(collate_config, tokenizer=self.tokenizer)
-            else:
-                collate_fn = target_symbol
-
-        return DataLoader(dataset, shuffle=shuffle, collate_fn=collate_fn, **dl_kwargs)
-
-    def _build_loaders_from_ratios(
-        self, data_config: DataWithAutoSplit
-    ) -> tuple[DataLoader, DataLoader, DataLoader | None]:
-        dataset = instantiate(data_config.dataset)
-        total_len = len(dataset)
-
-        if total_len == 0:
-            raise ValueError("Training dataset is empty. Cannot perform train/val/test split.")
-
-        test_ratio = data_config.test_ratio
-        val_ratio = data_config.val_ratio
-        train_ratio = 1.0 - test_ratio - val_ratio
-
-        train_len = int(total_len * train_ratio)
-        val_len = int(total_len * val_ratio)
-        test_len = total_len - train_len - val_len
-
-        train_ds, val_ds, test_ds = random_split(
-            dataset,
-            [train_len, val_len, test_len],
-            generator=torch.Generator().manual_seed(self.config.seed),
-        )
-
-        dl_config = data_config.dataloader
-
-        train_loader = self._create_dataloader(train_ds, dl_config, shuffle=True)
-        val_loader = self._create_dataloader(val_ds, dl_config, shuffle=False)
-        test_loader = self._create_dataloader(test_ds, dl_config, shuffle=False) if test_len > 0 else None
-
-        return train_loader, val_loader, test_loader
-
-    def _build_dataloaders(self) -> tuple[DataLoader, DataLoader, DataLoader | None]:
-        train_loader: DataLoader
-        val_loader: DataLoader
-        test_loader: DataLoader | None = None
-        data_config = self.config.data
-
-        if isinstance(data_config, DataConfigBase):
-            train_loader = self._build_dataloader(data_config.train)
-            val_loader = self._build_dataloader(data_config.val)
-            test_loader = self._build_dataloader(data_config.test) if data_config.test else None
-        else:  # Assumed to be DataWithAutoSplit
-            self.logger.info(
-                "Automatic splitting requested with ratios: train=%s, val=%s, test=%s",
-                1.0 - data_config.test_ratio - data_config.val_ratio,
-                data_config.val_ratio,
-                data_config.test_ratio,
-            )
-            train_loader, val_loader, test_loader = self._build_loaders_from_ratios(data_config)
-
-        return train_loader, val_loader, test_loader
 
     def _make_run_dir(self) -> Path:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

@@ -25,7 +25,7 @@ from trainite.config.registry import (
     get_model_spec,
     get_trainer_spec,
 )
-from trainite.utils import dump_config
+from trainite.shared.utils import dump_config
 
 
 class ProjectConfig(BaseModel):
@@ -226,8 +226,8 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
             "from trainite.trainers.pretrainer import PreTrainer, ProjectConfig",
             f"from trainer import {trainer_spec.implementation_symbol}, ProjectConfig",
         ),
-        ("trainite.utils", "utils"),
-        ("PreTrainer(config)", f"{trainer_spec.implementation_symbol}(config)"),
+        ("trainite.shared.utils", "utils"),
+        ("PreTrainer(", f"{trainer_spec.implementation_symbol}("),
     ]
 
     readme_replacements = [
@@ -249,10 +249,16 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
             PROJECT_ROOT / dataset_spec.implementation_path,
             dataset_spec.template_replacements,
         ),
-        "trainer.py": _render_template(PROJECT_ROOT / trainer_spec.implementation_path, trainer_replacements),
-        "utils.py": _render_template(PROJECT_ROOT / "trainite/utils.py"),
-        "main.py": _render_template(PROJECT_ROOT / "trainite/main.py", main_replacements),
-        "README.md": _render_template(PROJECT_ROOT / "trainite/templates/project/README.md", readme_replacements),
+        "trainer.py": _render_template(
+            PROJECT_ROOT / trainer_spec.implementation_path, trainer_replacements
+        ),
+        "utils.py": _render_template(PROJECT_ROOT / "trainite/shared/utils.py"),
+        "main.py": _render_template(
+            PROJECT_ROOT / "trainite/shared/main.py", main_replacements
+        ),
+        "README.md": _render_template(
+            PROJECT_ROOT / "trainite/templates/project/README.md", readme_replacements
+        ),
         "config.py": _render_template(PROJECT_ROOT / "trainite/config/base.py"),
         "pyproject.toml": generate_uv_project(name=project_name, version="0.1.0", dependencies=sorted(final_deps)),
     }

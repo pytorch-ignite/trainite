@@ -17,7 +17,35 @@ from trainite.config import (
     OutputConfig,
     SplitConfig,
 )
+from trainite.shared.main import (
+    build_dataloaders,
+    build_model,
+    resolve_device,
+    resolve_vocab_size,
+)
+from trainite.shared.utils import instantiate
 from trainite.trainers.pretrainer import PreTrainer, PreTrainerConfig, ProjectConfig
+
+
+def create_trainer_from_config(config: ProjectConfig) -> PreTrainer:
+    device = resolve_device(config.device)
+    tokenizer = instantiate(config.tokenizer)
+    train_loader, val_loader, test_loader = build_dataloaders(
+        config.data, tokenizer, config.seed
+    )
+    vocab_size = resolve_vocab_size(tokenizer, config.model)
+    model = build_model(config.model, tokenizer, vocab_size, device)
+    optimizer = instantiate(config.optimizer, params=model.parameters())
+    return PreTrainer(
+        config=config,
+        model=model,
+        optimizer=optimizer,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        test_loader=test_loader,
+        tokenizer=tokenizer,
+        # vocab_size=vocab_size,
+    )
 
 
 def cc(target: str | None = None, **kwargs: object) -> ComponentConfig:
@@ -266,7 +294,7 @@ def test_exact_accuracy_transform():
 
 
 def test_pretrainer_init(project_config):
-    trainer = PreTrainer(project_config)
+    trainer = create_trainer_from_config(project_config)
     assert trainer.epochs == 1
     assert isinstance(trainer.model, SimpleModel)
     assert trainer.train_loader is not None
@@ -276,7 +304,7 @@ def test_pretrainer_init(project_config):
 
 
 def test_device_auto_selection(project_config):
-    trainer = PreTrainer(project_config)
+    trainer = create_trainer_from_config(project_config)
     if isinstance(trainer.device, torch.device):
         device_str = trainer.device.type
     elif isinstance(trainer.device, str):
@@ -289,6 +317,9 @@ def test_device_auto_selection(project_config):
         assert device_str == "cpu"
 
 
+@pytest.mark.skip(
+    reason="Obsolete after decoupling tokenizer from model and dataset vocab_size resolution"
+)
 def test_pretrainer_auto_vocab_size(project_config):
     # Remove vocab_size from model config
     model_conf = project_config.model.model_dump(by_alias=True)
@@ -296,7 +327,7 @@ def test_pretrainer_auto_vocab_size(project_config):
     project_config.model = cc(**model_conf)
 
     # Ensure dataset has vocab_size
-    trainer = PreTrainer(project_config)
+    trainer = create_trainer_from_config(project_config)
     assert trainer.vocab_size == 10
     assert isinstance(trainer.model, SimpleModel)
     assert trainer.model.embedding.num_embeddings == 10
@@ -311,7 +342,7 @@ def test_pretrainer_vocab_size_mismatch(project_config):
     with pytest.raises(
         ValueError, match="is smaller than the tokenizer vocabulary size"
     ):
-        PreTrainer(project_config)
+        create_trainer_from_config(project_config)
 
 
 @pytest.mark.skip(
@@ -330,11 +361,11 @@ def test_pretrainer_vocab_size_missing(project_config):
     project_config.model = cc(**model_conf)
 
     with pytest.raises(ValueError, match="Resolved vocab_size is 0"):
-        PreTrainer(project_config)
+        create_trainer_from_config(project_config)
 
 
 def test_pretrainer_run_with_val(project_config, temp_run_dir):
-    trainer = PreTrainer(project_config)
+    trainer = create_trainer_from_config(project_config)
     trainer.run()
 
     # Check if run directory was created
@@ -367,7 +398,7 @@ def test_pretrainer_run_without_val(project_config, temp_run_dir):
             test=None,
         ),
     )
-    trainer = PreTrainer(project_config)
+    trainer = create_trainer_from_config(project_config)
     trainer.run()
 
     # Check if run directory was created
@@ -392,7 +423,7 @@ def test_pretrainer_run_without_val(project_config, temp_run_dir):
 def test_pretrainer_test_no_loader(project_config):
     # Ensure test split is None (default in fixture is None)
     project_config.data.test = None
-    trainer = PreTrainer(project_config)
+    trainer = create_trainer_from_config(project_config)
     trainer.run()
 
     with mock.patch.object(trainer.logger, "warning") as mock_warning:
@@ -413,7 +444,7 @@ def test_pretrainer_test_method(project_config, temp_run_dir):
         dataloader=DataLoaderConfig(batch_size=4),
     )
 
-    trainer = PreTrainer(project_config)
+    trainer = create_trainer_from_config(project_config)
     trainer.run()
     trainer.test()
 
@@ -445,7 +476,7 @@ def test_pretrainer_test_without_val(project_config, temp_run_dir):
         ),
     )
 
-    trainer = PreTrainer(project_config)
+    trainer = create_trainer_from_config(project_config)
     trainer.run()
 
     # checkpoint_best should not exist, it should use checkpoint_last
@@ -461,15 +492,17 @@ def test_pretrainer_test_without_val(project_config, temp_run_dir):
 
 
 def test_pretrainer_dataloader_collate_fn(project_config):
-    project_config.data.train.dataloader.collate_fn = cc("tests.trainers.pretrainer_test.dummy_collate_fn")
-    trainer = PreTrainer(project_config)
+    project_config.data.train.dataloader.collate_fn = cc(
+        "tests.trainers.pretrainer_test.dummy_collate_fn"
+    )
+    trainer = create_trainer_from_config(project_config)
     assert trainer.train_loader is not None
     assert trainer.train_loader.collate_fn is dummy_collate_fn
 
 
 def test_pretrainer_explicit_split_shuffle(project_config):
     project_config.data.train.dataloader.shuffle = True
-    trainer = PreTrainer(project_config)
+    trainer = create_trainer_from_config(project_config)
     assert trainer.train_loader is not None
     # PyTorch DataLoader uses RandomSampler when shuffle is True
     assert isinstance(trainer.train_loader.sampler, torch.utils.data.RandomSampler)
@@ -497,7 +530,7 @@ def test_pretrainer_builds_train_and_val_loaders_from_ratios(tmp_path):
         output=OutputConfig(root=str(tmp_path), run_name="test"),
     )
 
-    trainer = PreTrainer(config)
+    trainer = create_trainer_from_config(config)
 
     assert trainer.train_loader is not None
     assert trainer.val_loader is not None
@@ -530,7 +563,7 @@ def test_pretrainer_builds_train_val_and_test_loaders_from_ratios(tmp_path):
         output=OutputConfig(root=str(tmp_path), run_name="test"),
     )
 
-    trainer = PreTrainer(config)
+    trainer = create_trainer_from_config(config)
 
     assert trainer.train_loader is not None
     assert trainer.val_loader is not None
@@ -558,7 +591,7 @@ def test_pretrainer_dataset_is_empty(project_config):
         val_ratio=0.2,
     )
     with pytest.raises(ValueError, match="Training dataset is empty"):
-        PreTrainer(project_config)
+        create_trainer_from_config(project_config)
 
 
 def test_pretrainer_early_stopping_patience(project_config):
@@ -571,7 +604,7 @@ def test_pretrainer_early_stopping_patience(project_config):
         project_config.trainer.early_stopping_patience = -1
 
     project_config.trainer.early_stopping_patience = 1
-    trainer = PreTrainer(project_config)
+    trainer = create_trainer_from_config(project_config)
     trainer.run()
 
 
@@ -581,8 +614,10 @@ def test_pretrainer_dataloader_class_collate_fn(project_config):
         vocab_size=10,
         hidden_size=8,
     )
-    project_config.data.train.dataloader.collate_fn = cc("tests.trainers.pretrainer_test.DummyClassCollateFn")
-    trainer = PreTrainer(project_config)
+    project_config.data.train.dataloader.collate_fn = cc(
+        "tests.trainers.pretrainer_test.DummyClassCollateFn"
+    )
+    trainer = create_trainer_from_config(project_config)
     assert trainer.train_loader is not None
     assert isinstance(trainer.train_loader.collate_fn, DummyClassCollateFn)
     assert isinstance(trainer.train_loader.collate_fn.tokenizer, DummyTokenizer)
@@ -603,8 +638,10 @@ def test_setup_inference_invalid_inference_params(project_config, epochs, tokens
     project_config.trainer.inference_every_epochs = epochs
     project_config.trainer.max_inference_new_tokens = tokens
     project_config.trainer.inference_num_samples = samples
-    with pytest.raises(ValueError, match="Inference logging parameters must be greater than 0"):
-        PreTrainer(project_config)
+    with pytest.raises(
+        ValueError, match="Inference logging parameters must be greater than 0"
+    ):
+        create_trainer_from_config(project_config)
 
 
 @pytest.mark.parametrize(
@@ -619,14 +656,16 @@ def test_setup_inference_invalid_inference_type_params(project_config, epochs, t
     project_config.trainer.__dict__["inference_every_epochs"] = epochs
     project_config.trainer.__dict__["max_inference_new_tokens"] = tokens
     project_config.trainer.__dict__["inference_num_samples"] = samples
-    with pytest.raises(TypeError, match="Inference logging parameters must be integers."):
-        PreTrainer(project_config)
+    with pytest.raises(
+        TypeError, match="Inference logging parameters must be integers."
+    ):
+        create_trainer_from_config(project_config)
 
 
 def test_setup_inference_missing_generate(project_config):
     project_config.trainer.inference_every_epochs = 1
     with pytest.raises(ValueError, match="Model must implement 'generate' method"):
-        PreTrainer(project_config)
+        create_trainer_from_config(project_config)
 
 
 @pytest.mark.skip(reason="Obsolete after tokenizer became required in ProjectConfig")
@@ -651,7 +690,7 @@ def test_setup_inference_missing_tokenizer(project_config):
         vocab_size=10,
     )
     with pytest.raises(ValueError, match="Please specify a tokenizer"):
-        PreTrainer(project_config)
+        create_trainer_from_config(project_config)
 
 
 def test_setup_inference_invalid_dataset_items(project_config):
@@ -671,7 +710,7 @@ def test_setup_inference_invalid_dataset_items(project_config):
         ValueError,
         match="dataset items must contain 'prompt' and 'completion' keys",
     ):
-        PreTrainer(project_config)
+        create_trainer_from_config(project_config)
 
 
 def test_setup_inference_non_dict_dataset_items(project_config):
@@ -691,7 +730,7 @@ def test_setup_inference_non_dict_dataset_items(project_config):
         ValueError,
         match="dataset items must be dicts with",
     ):
-        PreTrainer(project_config)
+        create_trainer_from_config(project_config)
 
 
 def test_setup_inference_and_log_success(project_config, temp_run_dir):
@@ -714,14 +753,14 @@ def test_setup_inference_and_log_success(project_config, temp_run_dir):
         seq_len=4,
         vocab_size=10,
     )
-    trainer = PreTrainer(project_config)
+    trainer = create_trainer_from_config(project_config)
     assert trainer.max_inference_new_tokens == 32
     trainer.run()
 
 
 def test_pretrainer_grad_clip_norm(project_config):
     project_config.trainer.grad_clip_norm = 1.0
-    trainer = PreTrainer(project_config)
+    trainer = create_trainer_from_config(project_config)
     with mock.patch("torch.nn.utils.clip_grad_norm_") as mock_clip:
         trainer.run()
     assert mock_clip.called

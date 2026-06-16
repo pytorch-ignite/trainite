@@ -2,7 +2,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from trainite.utils import get_target
+from trainite.shared.utils import get_target
 
 
 class ComponentSpec(BaseModel):
@@ -37,7 +37,7 @@ class DatasetSpec(ComponentSpec):
 
     @property
     def dataset_config_cls(self) -> type:
-        from trainite.utils import get_target
+        from trainite.shared.utils import get_target
 
         return get_target(self.dataset_config_cls_path)
 
@@ -52,7 +52,7 @@ MODEL_SPECS = {
         collate_fn_target="trainite.models.transformer.CausalLMCollateFn",
         tokenizer_target="trainite.models.transformer.CharTokenizer",
         template_replacements=[
-            ("trainite.utils", "utils"),
+            ("trainite.shared.utils", "utils"),
             ("trainite.models", "models"),
             ("trainite.config.base", "config"),
         ],
@@ -69,7 +69,7 @@ DATASET_SPECS = {
         implementation_symbol="StringReverseDataset",
         builder_symbol="StringReverseDataset",
         template_replacements=[
-            ("trainite.utils", "utils"),
+            ("trainite.shared.utils", "utils"),
             ("trainite.datasets", "datasets"),
             ("trainite.config.base", "config"),
         ],
@@ -84,7 +84,7 @@ TRAINER_SPECS = {
         config_cls_path="trainite.trainers.pretrainer.PreTrainerConfig",
         implementation_symbol="PreTrainer",
         template_replacements=[
-            ("trainite.utils", "utils"),
+            ("trainite.shared.utils", "utils"),
             ("trainite.config.base", "config"),
         ],
         readme_template_path=Path("trainite/templates/components/trainers/pretrainer.md"),

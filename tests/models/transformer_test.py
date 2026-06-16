@@ -12,7 +12,7 @@ from trainite.models.transformer import (
     TransformerBlock,
     TransformerModel,
 )
-from trainite.utils import instantiate
+from trainite.shared.utils import instantiate
 
 
 def test_rotary_embedding():
