@@ -1,169 +1,226 @@
 # Trainite
 
-**Trainite** is a cookiecutter toolbox for training language models with PyTorch-Ignite. Generate a clean, working project — model, dataset, config, trainer, entrypoint — and get out of the way. Zero to running training loop in minutes.
+**Trainite** gives you a complete, working training project as your starting point. Built on [PyTorch-Ignite](https://github.com/pytorch/ignite), the generated code is yours — read it, modify it, extend it however your research needs.
+
+### Concretely, Trainite generates:
+
+```
+my-experiment/
+├── config.yaml     # YAML configuration (edit hyperparameters here)
+├── config.py       # Pydantic validation models (IDE autocomplete)
+├── models/         # Model architecture templates
+├── datasets/       # Dataset and tokenization templates
+├── trainer.py      # Training loop built on PyTorch-Ignite
+├── utils.py        # Config loading and instantiation helpers
+├── main.py         # Project entrypoint (runs training)
+├── pyproject.toml  # Isolated package dependencies
+└── README.md       # Documentation tailored to your selected components
+```
+
+### Dynamic Configuration
+
+Swap components (like models, optimizers, or datasets) dynamically via config using dotted import paths (`_target_`):
+
+```yaml
+model:
+  _target_: models.transformer.TransformerModel
+  hidden_size: 64
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 0.001
+```
+
+**Trainite is explicitly not:**
+- A replacement for HuggingFace Trainer.
+- A tool for training large models on massive corpora.
+- A framework that forces you into its runtime abstractions.
+
+---
+
+## Table of Contents
+
+- [Quickstart](#quickstart)
+- [Usage](#usage)
+  - [Initialize a Project](#initialize-a-project)
+  - [Run Training](#run-training)
+  - [Monitor & Iterate](#monitor--iterate)
+- [Built-in Components](#built-in-components)
+- [Configuration](#configuration)
+- [Customizing Your Project](#customizing-your-project)
+- [Examples](#examples)
 
 ---
 
 ## Quickstart
 
+Requires Python >= 3.10.
+
+**Option 1 — uv (recommended):**
+
 ```bash
-git clone <repo-url>
-cd trainite_prototype
+git clone https://github.com/pytorch-ignite/trainite.git
+cd trainite
 uv sync
 
-# Initialize a project from built-in components
-uv run trainite init my-experiment --model transformer --dataset string-reverse --trainer pretrainer
-
-cd my-experiment
-uv run python main.py config.yaml
-```
-
----
-
-## Design Overview
-
-### Cookiecutter, Not Framework
-`trainite init` generates real, readable Python files. You own them. No hidden imports, no sealed abstractions. Modify anything — model, dataset, train step, metrics — without touching the rest.
-
-### Registry System
-Centralized registry (`trainite/config/registry.py`) manages built-in components via `ComponentSpec`:
-
-| Field | Purpose |
-|---|---|
-| `implementation_path` | Source file used as template |
-| `config_cls` | Pydantic class for hyperparameters |
-| `builder_symbol` | Class name or factory function (e.g., `TransformerModel`) |
-| `readme_template_path` | Per-component documentation template |
-| `collate_fn_symbol` | (Datasets only) Collate function for DataLoader |
-
-Registry enables CLI to dynamically discover and compose any combination of components.
-
-### Dynamic Config Generation
-When `trainite init` runs, it uses `inspect.getsource(cls)` to extract Pydantic model source code and inlines it into a local `config.py`. Result: fully typed, IDE-friendly configuration with zero runtime dependency on the `trainite` library.
-
-### Template Adaptation
-The CLI rewrites imports on the fly: `from trainite.config import ...` → `from config import ...`, and normalizes builder function references so `main.py` stays generic across architectures.
-
-### Dataset Configuration Styles
-
-Trainite supports two ways to define your data:
-
-#### Option 1: Explicit Splits
-Manually define every split. Each split gets its own dataset instance and dataloader config.
-```yaml
-data:
-  train:
-    dataset: { _target_: ..., size: 1000 }
-    dataloader: { batch_size: 32, shuffle: true }
-  val:
-    dataset: { _target_: ..., size: 200 }
-    dataloader: { batch_size: 32 }
-```
-
-#### Option 2: Automatic Splitting
-Define one dataset and let Trainite handle the math. Useful for quick prototyping.
-```yaml
-data:
-  dataset: { _target_: ..., size: 1200 }
-  test_ratio: 0.1
-  val_ratio: 0.1
-  dataloader: { batch_size: 32 } # Applied to all splits
-```
-
-**Hierarchy:**
-
-```
-ProjectConfig
-├── model: ComponentConfig          (TransformerModelConfig)
-├── optimizer: OptimizerConfig      (torch.optim.AdamW, lr, etc.)
-├── data: DataConfig
-│   ├── train: SplitConfig
-│   │   ├── dataset: ComponentConfig   (StringReverseDatasetConfig)
-│   │   └── dataloader: DataLoaderConfig
-│   ├── val: SplitConfig | None
-│   └── test: SplitConfig | None
-├── trainer: TrainerConfig          (PreTrainerConfig)
-├── output: OutputConfig            (root, run_name)
-├── seed: int
-└── device: str                     ("auto" | "cpu" | "cuda")
-```
-
-`ComponentConfig` uses `_target_` key for late binding: the string `"module.path.ClassName"` is resolved via `importlib`, enabling config-driven instantiation without hardcoded imports.
-
-```python
-# trainite/utils.py
-def instantiate(config: ComponentConfig, **kwargs) -> Any:
-    target_path = config._target_    # "trainite.models.transformer.TransformerModel"
-    target_symbol = get_target(target_path)
-    return target_symbol(**config_params, **kwargs)
-```
-
-`dump_config(config, path)` writes the full resolved config back to YAML for reproducibility.
-
----
-### Generated project (`trainite init`)
-```
-<project>/
-├── config.yaml     # YAML config — edit this
-├── config.py       # Generated Pydantic models (typed, IDE-friendly)
-├── models/         # Model architecture (your copy, editable)
-├── datasets/       # Dataset + collate (your copy, editable)
-├── trainer.py      # Training loop (your copy, editable)
-├── utils.py        # Config helpers
-├── main.py         # Entrypoint
-├── pyproject.toml  # Dependencies
-└── README.md       # Tailored to selected components
-```
-
----
-
-## Extending
-
-| Layer | How |
-|---|---|
-| Model | Edit `models/{model_name}.py`, add new architecture class |
-| Dataset | Edit `datasets/{dataset_name}.py`, add new Dataset subclass |
-| Train step | Override `Pretrainer._train_step` or set `train_step` in config |
-| Metrics | Add Ignite metrics in `_attach_metrics` |
-| Handlers | Attach Ignite event handlers to `trainer.engine` |
-| Config | Add fields to Pydantic model + YAML — explicit, no magic |
-
----
-
-## Getting Started
-
-### 1. Installation
-
-Requires [uv](https://github.com/astral-sh/uv) for dependency management.
-
-```bash
-git clone <repo-url>
-cd trainite_prototype
-uv sync
-```
-
-### 2. Initialize a Project
-
-Create a new, isolated training project using the CLI:
-
-```bash
-# General syntax: uv run trainite init <project-name> --model <model> --dataset <dataset>
 uv run trainite init my-experiment --model transformer --dataset string-reverse
-```
-
-### 3. Run Training
-
-Your generated project is a standalone application. Navigate to it and run:
-
-```bash
 cd my-experiment
 uv run python main.py config.yaml
 ```
 
-### 4. Monitor & Iterate
+**Option 2 — pip:**
 
-- **TensorBoard**: `uv run tensorboard --logdir outputs`
-- **Edit Code**: Open `my-experiment/models/transformer.py` to change architecture.
-- **Edit Config**: Open `my-experiment/config.yaml` to change learning rates or data splits.
+```bash
+git clone https://github.com/pytorch-ignite/trainite.git
+cd trainite
+pip install -e .
+
+trainite init my-experiment --model transformer --dataset string-reverse
+cd my-experiment
+python main.py config.yaml
+```
 
 ---
+
+## Usage
+
+> [!NOTE]
+> If you are using the `uv` workflow, prefix commands with `uv run` (e.g., `uv run trainite init` or `uv run python main.py config.yaml`). If you are using standard `pip`/`venv`, run them directly (e.g., `trainite init` or `python main.py config.yaml`).
+
+### Initialize a Project
+
+You can generate a starter project by passing configuration options as command-line flags:
+
+```bash
+trainite init my-experiment --model transformer --dataset string-reverse
+```
+
+Or run it interactively (Trainite will walk you through the options step-by-step):
+
+```bash
+trainite init
+```
+
+Interactive prompt preview:
+```text
+? Project directory: my-experiment
+? Model: transformer
+? Dataset: string-reverse
+? Trainer: pretrainer
+? Output directory: outputs
+? Run name: transformer__string-reverse
+
+✔ Generated config.yaml
+✔ Generated models/transformer.py
+✔ Generated datasets/string_reverse.py
+✔ Generated trainer.py
+✔ Generated utils.py
+✔ Generated main.py
+✔ Generated README.md
+✔ Generated config.py
+✔ Generated pyproject.toml
+```
+
+### Run Training
+
+Your generated project is a standalone application with no runtime dependency on Trainite. Navigate to it and run:
+
+```bash
+cd my-experiment
+python main.py config.yaml
+```
+
+### Monitor & Iterate
+
+- **TensorBoard**: `tensorboard --logdir outputs`
+- **Edit architecture**: Open `models/transformer.py` and modify the model.
+- **Edit hyperparameters**: Open `config.yaml` and change learning rates, batch sizes, data splits, etc.
+
+Training outputs are organized by run:
+
+```
+outputs/
+└── transformer__string-reverse/
+    └── 20260611_1430/
+        ├── output.log          # Training logs
+        ├── config.yaml         # Exact config used for this run
+        ├── best_checkpoint_*.pt
+        ├── last_checkpoint_*.pt
+        └── tensorboard/        # TensorBoard event files
+```
+
+
+
+## Built-in Components
+
+### Models
+
+| Name | Architecture | Description |
+|---|---|---|
+| `transformer` | Decoder-only Transformer | Causal LM with rotary position embeddings (RoPE) and multi-head attention. |
+
+### Datasets
+
+| Name | Task | Description |
+|---|---|---|
+| `string-reverse` | Reverse a random string | Synthetic, CPU-generatable. No downloads required. Ships with a character-level tokenizer. |
+
+### Trainers
+
+| Name | Description |
+|---|---|
+| `pretrainer` | Standard supervised training (next-token prediction). Includes LR warmup + linear decay, checkpointing, early stopping, TensorBoard logging, and inference sample logging. |
+
+---
+
+## Configuration
+
+All configuration lives in `config.yaml`. Every key maps to a validated Pydantic model in `config.py`, giving you type checking, clear error messages, and IDE autocomplete.
+
+### Swapping Components with `_target_`
+
+Components (such as models, datasets, optimizers, or collation functions) are specified via the `_target_` key. This key holds a dotted import path resolved at runtime, allowing you to swap components directly from config without altering training scripts:
+
+```yaml
+model:
+  _target_: models.transformer.TransformerModel
+  hidden_size: 64
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 0.001
+```
+
+For detailed configuration parameters and data splitting options (e.g., automatic splitting vs. explicit splits) specific to your selected components, refer to the generated `README.md` inside your initialized project.
+
+---
+
+## Customizing Your Project
+
+Since the generated code is yours, you can override at any layer without touching the others:
+
+| What to change | How |
+|---|---|
+| Model architecture | Edit `models/<model_name>.py`, or add a new file and update `_target_` in config |
+| Dataset | Edit `datasets/<dataset_name>.py`, or add a new file and update `_target_` in config |
+| Train step | Override `_train_step()` in `trainer.py` |
+| Eval step | Override `_eval_step()` in `trainer.py` |
+| Metrics | Add Ignite metrics in `_attach_metrics()` in `trainer.py` |
+| Handlers | Attach Ignite event handlers to `self.engine` in `trainer.py` |
+| Config fields | Add fields to the Pydantic models in `config.py` and corresponding keys in `config.yaml` |
+
+---
+
+## Examples
+
+Working examples are in the [`examples/`](examples/) directory:
+
+| Example | Description |
+|---|---|
+| [`string_reverse`](examples/string_reverse/) | Train a decoder-only transformer to reverse strings. Demonstrates the full pipeline: data generation, training, evaluation, and inference logging. |
+
+Each example is a standalone project — `cd` into it, install dependencies, and run `python main.py config.yaml`.
+
+---
+
+> For contributor and development docs, see [CONTRIBUTING.md](CONTRIBUTING.md).
