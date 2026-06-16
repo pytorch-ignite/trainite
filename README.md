@@ -1,8 +1,6 @@
 # Trainite
 
-**Trainite** is a cookiecutter project generator for training language models using [PyTorch-Ignite](https://github.com/pytorch/ignite).
-
-Instead of wrapping your code in a runtime framework, Trainite generates a clean, standalone, zero-dependency project folder containing standard PyTorch code that you fully own.
+**Trainite** gives you a complete, working training project as your starting point. Built on [PyTorch-Ignite](https://github.com/pytorch/ignite), the generated code is yours — read it, modify it, extend it however your research needs.
 
 ### Concretely, Trainite generates:
 
@@ -34,7 +32,7 @@ optimizer:
 ```
 
 **Trainite is explicitly not:**
-- A replacement for HuggingFace Trainer or Accelerate.
+- A replacement for HuggingFace Trainer.
 - A tool for training large models on massive corpora.
 - A framework that forces you into its runtime abstractions.
 
@@ -43,7 +41,6 @@ optimizer:
 ## Table of Contents
 
 - [Quickstart](#quickstart)
-- [Installation](#installation)
 - [Usage](#usage)
   - [Initialize a Project](#initialize-a-project)
   - [Run Training](#run-training)
@@ -52,67 +49,35 @@ optimizer:
 - [Configuration](#configuration)
 - [Customizing Your Project](#customizing-your-project)
 - [Examples](#examples)
-- [Development](#development)
-  - [Architecture Overview](#architecture-overview)
-  - [Testing](#testing)
 
 ---
 
 ## Quickstart
 
+Requires Python >= 3.10.
+
+**Option 1 — uv (recommended):**
+
 ```bash
-# Clone the repository
 git clone https://github.com/pytorch-ignite/trainite.git
 cd trainite
+uv sync
 
-# Install the package in editable mode
+uv run trainite init my-experiment --model transformer --dataset string-reverse
+cd my-experiment
+uv run python main.py config.yaml
+```
+
+**Option 2 — pip:**
+
+```bash
+git clone https://github.com/pytorch-ignite/trainite.git
+cd trainite
 pip install -e .
 
-# Generate a project
 trainite init my-experiment --model transformer --dataset string-reverse
-
-# Train
 cd my-experiment
 python main.py config.yaml
-```
-
----
-
-## Installation
-
-Requires Python >= 3.10. Clone the repository first:
-
-```bash
-git clone https://github.com/pytorch-ignite/trainite.git
-cd trainite
-```
-
-Install using one of the following methods:
-
-### Option 1: Using `uv` (Recommended)
-
-If you use [uv](https://github.com/astral-sh/uv) for dependency management:
-
-```bash
-uv sync
-```
-
-This installs dependencies into a local `.venv` and manages execution. Run CLI commands prefixed with `uv run`:
-```bash
-uv run trainite init
-```
-
-### Option 2: Standard `pip`
-
-Create and activate your virtual environment, then install in editable mode:
-
-```bash
-pip install -e .
-```
-
-This registers the `trainite` command globally in your environment. You can run CLI commands directly:
-```bash
-trainite init
 ```
 
 ---
@@ -258,63 +223,4 @@ Each example is a standalone project — `cd` into it, install dependencies, and
 
 ---
 
-# Development
-
-Everything below is for contributors and developers working on Trainite itself.
-
----
-
-## Architecture Overview
-
-When a user runs `trainite init`, the following happens:
-
-```
-trainite init my-experiment --model transformer --dataset string-reverse
-│
-├─ 1. Registry lookup
-│     Look up ModelSpec, DatasetSpec, TrainerSpec from the registry
-│
-├─ 2. Config assembly
-│     Instantiate Pydantic config defaults for each component
-│     Inject collate function target from ModelSpec into DataConfig
-│     Build a complete ProjectConfig and dump it to config.yaml
-│
-├─ 3. Template copying
-│     Copy implementation files (model, dataset, trainer, utils, main, config)
-│     from the trainite package into the target project directory
-│
-├─ 4. Import rewriting
-│     Replace internal imports (e.g. "trainite.config" → "config")
-│     so the generated code is fully standalone
-│
-└─ 5. Dependency generation
-      Generate pyproject.toml with only the deps needed for the
-      selected components
-```
-
-The generated project has **zero runtime dependency** on the `trainite` package.
-
-
-## Testing
-
-Run the full test suite:
-
-```bash
-uv run pytest
-```
-
-Tests are organized by component:
-
-```
-tests/
-├── cli_test.py                     # CLI and code generation
-├── utils_test.py                   # Config loading and instantiation
-├── config/
-│   └── base_test.py                # Config validation
-├── datasets/
-│   └── string_reverse_test.py      # Dataset and tokenizer
-├── models/
-│   └── transformer_test.py         # Model forward pass and generation
-└── trainers/
-    └── pretrainer_test.py          # Training loop integration
-```
+> For contributor and development docs, see [CONTRIBUTING.md](CONTRIBUTING.md).
