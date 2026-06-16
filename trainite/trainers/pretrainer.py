@@ -606,24 +606,32 @@ class PreTrainer:
 
         if "tensorboard" in self.handlers:
             tb_writer = self.handlers["tensorboard"].writer
-            tb_table = [
-                "| Sample | Prompt | Target | Prediction |",
-                "|---|---|---|---|",
-            ]
+            lines = []
             for idx in range(num_samples):
-                prompt_escaped = prompts[idx].replace("|", "\\|").replace("\n", "<br>")
-                target_escaped = targets[idx].replace("|", "\\|").replace("\n", "<br>")
-                pred_escaped = (
-                    decoded_strs[idx].replace("|", "\\|").replace("\n", "<br>")
+                prompt = prompts[idx].strip() or "(empty)"
+                target = targets[idx].strip() or "(empty)"
+                pred = decoded_strs[idx].strip() or "(empty)"
+                prompt = (
+                    prompt.replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
                 )
-                tb_table.append(
-                    f"| {idx + 1} | {prompt_escaped} | {target_escaped} | {pred_escaped} |"
+                target = (
+                    target.replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
                 )
+                pred = (
+                    pred.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                )
+                lines.append(f"Sample {idx + 1}")
+                lines.append(f"  Prompt:     {prompt}")
+                lines.append(f"  Target:     {target}")
+                lines.append(f"  Prediction: {pred}")
+                lines.append("")
             name_map = {"Train": "training", "Val": "validation", "Test": "testing"}
             tb_tag = f"inference/{name_map.get(name, name.lower())}"
-            tb_writer.add_text(
-                tb_tag, "\n".join(tb_table), global_step=engine.state.epoch
-            )
+            tb_writer.add_text(tb_tag, "\n".join(lines), global_step=engine.state.epoch)
 
     def test(self, test_loader: DataLoader | None = None) -> None:
         loader = test_loader or self.test_loader
