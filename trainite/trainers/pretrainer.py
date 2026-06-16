@@ -15,7 +15,7 @@ from ignite.handlers import (
 from ignite.handlers.fbresearch_logger import FBResearchLogger
 from ignite.handlers.param_scheduler import ParamScheduler
 from ignite.handlers.tensorboard_logger import OptimizerParamsHandler, TensorboardLogger
-from ignite.metrics import Accuracy, Loss, RunningAverage
+from ignite.metrics import Accuracy, Loss, Metric, RunningAverage
 from ignite.utils import setup_logger
 from pydantic import BaseModel, ConfigDict, Field
 from torch import nn
@@ -76,21 +76,21 @@ class PreTrainer:
         torch.manual_seed(config.seed)
         self.config: ProjectConfig = config
 
-        self.train_loader: DataLoader
-        self.val_loader: DataLoader | None = None
-        self.test_loader: DataLoader | None = None
-        self.inference_tokenizer: object | None = None
-
         self.device: str | torch.device = self._resolve_device()
         self.epochs: int = config.trainer.epochs
         self.grad_clip_norm: float | None = getattr(
             config.trainer, "grad_clip_norm", None
         )
-        self.set_loaders()
+        self.train_loader, self.val_loader, self.test_loader = self._build_dataloaders()
         self.vocab_size: int = self._resolve_vocab_size()
         self.model: nn.Module = self._build_model()
 
-        self._setup_inference(config)
+        self.inference_every_epochs = config.trainer.inference_every_epochs
+        self.inference_num_samples = config.trainer.inference_num_samples
+        self.max_inference_new_tokens = config.trainer.max_inference_new_tokens
+        self.inference_tokenizer = (
+            self._setup_inference() if self.inference_every_epochs is not None else None
+        )
 
         self.loss_fn: nn.CrossEntropyLoss = nn.CrossEntropyLoss()
         self.optimizer: torch.optim.Optimizer = self._build_optimizer()
@@ -101,8 +101,7 @@ class PreTrainer:
         self.train_evaluator = Engine(self._eval_step)
         self.val_evaluator = Engine(self._eval_step)
         self.test_evaluator = Engine(self._eval_step)
-        self.metrics = {}
-        self._attach_metrics()
+        self.metrics: dict = self._attach_metrics()
 
     def _resolve_device(self) -> str | torch.device:
         resolved = self.config.device
@@ -209,29 +208,30 @@ class PreTrainer:
 
         return train_loader, val_loader, test_loader
 
-    def set_loaders(self) -> None:
-        if isinstance(self.config.data, DataConfigBase):
-            self.train_loader = self._build_dataloader(self.config.data.train)
-            self.val_loader = (
-                self._build_dataloader(self.config.data.val)
-                if self.config.data.val
-                else None
+    def _build_dataloaders(self) -> tuple[DataLoader, DataLoader, DataLoader | None]:
+        train_loader: DataLoader
+        val_loader: DataLoader
+        test_loader: DataLoader | None = None
+        data_config = self.config.data
+
+        if isinstance(data_config, DataConfigBase):
+            train_loader = self._build_dataloader(data_config.train)
+            val_loader = self._build_dataloader(data_config.val)
+            test_loader = (
+                self._build_dataloader(data_config.test) if data_config.test else None
             )
-            self.test_loader = (
-                self._build_dataloader(self.config.data.test)
-                if self.config.data.test
-                else None
-            )
-        elif isinstance(self.config.data, DataWithAutoSplit):
+        else:  # Assumed to be DataWithAutoSplit
             self.logger.info(
                 "Automatic splitting requested with ratios: train=%s, val=%s, test=%s",
-                1.0 - self.config.data.test_ratio - self.config.data.val_ratio,
-                self.config.data.val_ratio,
-                self.config.data.test_ratio,
+                1.0 - data_config.test_ratio - data_config.val_ratio,
+                data_config.val_ratio,
+                data_config.test_ratio,
             )
-            self.train_loader, self.val_loader, self.test_loader = (
-                self._build_loaders_from_ratios(self.config.data)
+            train_loader, val_loader, test_loader = self._build_loaders_from_ratios(
+                data_config
             )
+
+        return train_loader, val_loader, test_loader
 
     def _make_run_dir(self) -> Path:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -305,11 +305,12 @@ class PreTrainer:
         logits = self.model(inputs)
         return {"logits": logits, "targets": targets}
 
-    def _attach_metrics(self) -> None:
+    def _attach_metrics(self) -> dict[str, Metric]:
         RunningAverage(output_transform=lambda output: output["loss"]).attach(
             self.engine, "loss"
         )
 
+        metrics = {}
         for prefix, evaluator in [
             ("train", self.train_evaluator),
             ("val", self.val_evaluator),
@@ -323,9 +324,11 @@ class PreTrainer:
             exact_acc.attach(evaluator, "exact_accuracy")
             token_acc.attach(evaluator, "token_accuracy")
 
-            self.metrics[f"{prefix}_loss"] = loss
-            self.metrics[f"{prefix}_exact_accuracy"] = exact_acc
-            self.metrics[f"{prefix}_token_accuracy"] = token_acc
+            metrics[f"{prefix}_loss"] = loss
+            metrics[f"{prefix}_exact_accuracy"] = exact_acc
+            metrics[f"{prefix}_token_accuracy"] = token_acc
+
+        return metrics
 
     def _attach_handlers(self) -> None:
         self.logger = setup_logger(
@@ -511,19 +514,7 @@ class PreTrainer:
                 f"{name} dataset items must contain 'source_text' and 'target_text' keys for inference logging."
             )
 
-    def _setup_inference(self, config: ProjectConfig) -> None:
-        self.inference_every_epochs: int | None = getattr(
-            config.trainer, "inference_every_epochs", None
-        )
-        if self.inference_every_epochs is None:
-            return
-
-        self.inference_num_samples: int = getattr(
-            config.trainer, "inference_num_samples"
-        )
-        self.max_inference_new_tokens: int = getattr(
-            config.trainer, "max_inference_new_tokens"
-        )
+    def _setup_inference(self) -> object:
         inference_params = (
             self.inference_every_epochs,
             self.inference_num_samples,
@@ -559,7 +550,7 @@ class PreTrainer:
             raise ValueError(
                 "Dataset must have a 'tokenizer' attribute for inference logging."
             )
-        self.inference_tokenizer = getattr(train_ds, "tokenizer")
+        inference_tokenizer = getattr(train_ds, "tokenizer")
 
         # Validate active loaders
         self._validate_dataloader_for_inference(self.train_loader, "Train")
@@ -567,6 +558,8 @@ class PreTrainer:
             self._validate_dataloader_for_inference(self.val_loader, "Val")
         if self.test_loader is not None:
             self._validate_dataloader_for_inference(self.test_loader, "Test")
+
+        return inference_tokenizer
 
     def _log_inference(self, engine: Engine, loader: DataLoader, name: str) -> None:
         if (
