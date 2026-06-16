@@ -10,7 +10,7 @@ Trainite is a toolbox for training language models with PyTorch-Ignite. This pro
 - `main.py`: The entrypoint for training. Run it with `python main.py config.yaml`.
 - `models/`: Contains the model architecture definition.
 - `datasets/`: Handles data loading and preprocessing.
-- `trainer.py`: Defines the training and evaluation logic. You can override `train_step` or `eval_step` here.
+- `trainer.py`: Defines the training and evaluation logic. You can override `_train_step` or `_eval_step` here.
 - `config.py`: Contains Pydantic models for configuration validation. If you add new parameters to `config.yaml`, update the models here.
 - `utils.py`: Shared utilities for configuration and logging.
 

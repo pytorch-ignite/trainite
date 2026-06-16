@@ -79,7 +79,7 @@ model:
 
 ## When to change this file
 
-Edit `trainite/models/transformer.py` if you want to:
+Edit `models/transformer.py` if you want to:
 
 - make the model wider or deeper
 - swap attention or feedforward behavior

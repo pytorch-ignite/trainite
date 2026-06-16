@@ -45,14 +45,15 @@ At the end of each epoch it also runs evaluation on:
 
 - training data
 - validation data, if present
-- test data, if present
+
+At the end of the training run, it runs a final evaluation on the test data, if present.
 
 ## Logging and checkpoints
 
 `PreTrainer` saves a run directory like this:
 
 ```text
-output/<run_name>/<timestamp>/
+outputs/<run_name>/<timestamp>/
 ```
 
 Inside it you get:
@@ -100,7 +101,7 @@ If you are just getting started, the usual first changes are:
 
 ## If you want to customize behavior
 
-Edit `pretrainer.py` if you want to:
+Edit `trainer.py` if you want to:
 
 - change how loss is computed
 - add gradient accumulation

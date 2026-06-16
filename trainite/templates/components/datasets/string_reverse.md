@@ -70,7 +70,7 @@ data:
 
 ## When to change this file
 
-Edit `trainite/datasets/string_reverse.py` if you want to:
+Edit `datasets/string_reverse.py` if you want to:
 
 - change the tokenization rules
 - add or remove allowed characters
