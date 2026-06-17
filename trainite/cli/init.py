@@ -3,7 +3,7 @@ import re
 import sys
 import textwrap
 from pathlib import Path
-from typing import Iterable, Literal, Sequence
+from typing import Annotated, Iterable, Literal, Sequence
 
 import questionary
 import tomlkit
@@ -327,6 +327,7 @@ def init_project(
     output_root: str = "outputs",
     run_name: str = "",
     force: bool = False,
+    yes: Annotated[bool, tyro.conf.arg(aliases=["-y"])] = False,
 ) -> None:
     """Generate a starter training project.
 
@@ -338,6 +339,7 @@ def init_project(
         output_root: Output root for generated config.
         run_name: Run name for generated config.
         force: Overwrite existing starter files.
+        yes: Use defaults for anything not provided and skip prompts.
     """
     resolved_run_name = run_name or f"{model}__{dataset}"
     resolved_project_dir = _project_directory(project_dir, force)
