@@ -178,12 +178,12 @@ class TransformerModel(nn.Module):
         B, S = input_ids.shape
         x = self.embedding(input_ids) * math.sqrt(self.embedding.embedding_dim)
         cos, sin = self.rotary_emb(x, seq_len=S)
-        if attention_mask is not None and (not attention_mask.any().item()):
-            padding_mask = attention_mask.reshape(B, 1, 1, S).to(torch.bool)
+        padding_mask: torch.Tensor | None = None
+        if attention_mask is not None:
+            if not attention_mask.any().item():
+                padding_mask = attention_mask.reshape(B, 1, 1, S).to(torch.bool)
         elif (input_ids == self.embedding.padding_idx).any().item():
             padding_mask = (input_ids != self.embedding.padding_idx).reshape(B, 1, 1, S)
-        else:
-            padding_mask = None
         for block in self.blocks:
             x = block(x, cos, sin, padding_mask=padding_mask)
         x = self.norm(x)
