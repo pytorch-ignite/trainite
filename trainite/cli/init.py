@@ -229,6 +229,10 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
         ),
         ("trainite.shared.utils", "utils"),
         ("PreTrainer(", f"{trainer_spec.implementation_symbol}("),
+        (
+            "from trainite.datasets.transformed import TransformedDataset",
+            "from datasets.transformed import TransformedDataset",
+        ),
     ]
 
     readme_replacements = [
@@ -250,6 +254,7 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
             PROJECT_ROOT / dataset_spec.implementation_path,
             dataset_spec.template_replacements,
         ),
+        "datasets/transformed.py": _render_template(PROJECT_ROOT / "trainite/datasets/transformed.py"),
         f"tokenizers/{tokenizer_spec.name}.py": _render_template(
             PROJECT_ROOT / tokenizer_spec.implementation_path,
             tokenizer_spec.template_replacements,
@@ -308,6 +313,8 @@ def _update_targets(
             _update_targets(getattr(config, field), old_prefix, new_prefix)
     elif isinstance(config, (SplitConfig, DataWithAutoSplit)):
         _update_targets(config.dataset, old_prefix, new_prefix)
+        if getattr(config, "transform", None) is not None:
+            _update_targets(config.transform, old_prefix, new_prefix)
         _update_targets(config.dataloader, old_prefix, new_prefix)
     elif isinstance(config, DataLoaderConfig) and config.collate_fn:
         _update_targets(config.collate_fn, old_prefix, new_prefix)

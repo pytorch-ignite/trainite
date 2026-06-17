@@ -19,7 +19,7 @@ from ignite.utils import setup_logger
 from pydantic import BaseModel, ConfigDict, Field
 from torch import nn
 from torch.optim.lr_scheduler import LinearLR
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 
 from trainite.config.base import (
     ComponentConfig,
@@ -372,7 +372,7 @@ class PreTrainer:
 
     def _validate_dataloader_for_inference(self, loader: DataLoader, name: str) -> None:
         dataset = loader.dataset
-        dataset = getattr(dataset, "dataset", dataset)  # Unwrap Subset if needed
+        dataset = dataset.dataset if isinstance(dataset, Subset) else dataset
         item = dataset[0]  # type: ignore
         if not isinstance(item, dict):
             raise ValueError(f"{name} dataset items must be dicts with 'input_ids' and 'labels' keys.")
@@ -435,7 +435,7 @@ class PreTrainer:
         prompt_attn_list: list[torch.Tensor] = []
         target_texts: list[str] = []
         for i in range(num_samples):
-            inf_dataset = getattr(dataset, "dataset", dataset)  # Unwrap Subset if needed
+            inf_dataset = dataset.dataset if isinstance(dataset, Subset) else dataset
             inf = inf_dataset.get_item_inference(i)
             prompt_ids = inf["input_ids"]
             prompt_attn = inf.get("attention_mask")

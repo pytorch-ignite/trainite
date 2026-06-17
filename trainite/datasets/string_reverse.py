@@ -24,14 +24,13 @@ class StringReverseDataset(Dataset):
     """Generates unique random strings and their reversals.
 
     Each sample is returned as a dictionary containing:
-        - 'prompt': the original random string
-        - 'completion': the reversed string
+        - 'source': the original random string
+        - 'target': the reversed string
     """
 
     def __init__(
         self,
         per_seq_size: int,
-        tokenizer: Any,
         min_seq_len: int | None = None,
         max_seq_len: int | None = None,
         seq_len: int | None = None,
@@ -46,7 +45,6 @@ class StringReverseDataset(Dataset):
             chars = charset
 
         self.chars = chars
-        self.tokenizer = tokenizer
 
         if not self.chars:
             raise ValueError(f"Charset '{charset}' resulted in empty characters.")
@@ -118,9 +116,21 @@ class StringReverseDataset(Dataset):
     def __len__(self) -> int:
         return len(self.source_texts)
 
-    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
-        source = self.source_texts[index]
-        target = self.target_texts[index]
+    def __getitem__(self, index: int) -> dict[str, str]:
+        return {
+            "source": self.source_texts[index],
+            "target": self.target_texts[index],
+        }
+
+
+class PromptCompletionTransform:
+    def __init__(self, tokenizer: Any, ignore_index: int = -100) -> None:
+        self.tokenizer = tokenizer
+        self.ignore_index = ignore_index
+
+    def __call__(self, sample: dict[str, str]) -> dict[str, torch.Tensor]:
+        source = sample["source"]
+        target = sample["target"]
 
         sep = self.tokenizer.sep_token_id
         bos = self.tokenizer.bos_token_id
@@ -133,6 +143,10 @@ class StringReverseDataset(Dataset):
 
         input_ids = torch.tensor(combined_input_ids[:-1], dtype=torch.long)
         labels = torch.tensor(combined_input_ids[1:], dtype=torch.long)
+
+        # Apply labels masking for the prompt tokens
+        labels[: len(source_tokens) + 1] = self.ignore_index
+
         attention_mask = torch.ones(len(input_ids), dtype=torch.long)
 
         return {
@@ -141,9 +155,9 @@ class StringReverseDataset(Dataset):
             "labels": labels,
         }
 
-    def get_item_inference(self, index: int) -> dict[str, Any]:
-        source = self.source_texts[index]
-        target = self.target_texts[index]
+    def inference(self, sample: dict[str, str]) -> dict[str, Any]:
+        source = sample["source"]
+        target = sample["target"]
 
         bos = self.tokenizer.bos_token_id
         sep = self.tokenizer.sep_token_id
@@ -158,6 +172,15 @@ class StringReverseDataset(Dataset):
             "source_text": source,
             "target_text": target,
         }
+
+
+class PromptCompletionTransformConfig(ComponentConfig):
+    model_config = ConfigDict(validate_assignment=True)
+    target: str = Field(
+        default="trainite.datasets.string_reverse.PromptCompletionTransform",
+        alias="_target_",
+    )
+    ignore_index: int = -100
 
 
 class StringReverseDatasetConfig(ComponentConfig):
@@ -190,6 +213,7 @@ class StringReverseDataConfig(DataWithAutoSplit):
     dataset: StringReverseDatasetConfig | None = Field(  # type: ignore[assignment]
         default_factory=StringReverseDatasetConfig
     )
+    transform: PromptCompletionTransformConfig | None = Field(default_factory=PromptCompletionTransformConfig)
     test_ratio: float = 0.1
     val_ratio: float = 0.1
     dataloader: DataLoaderConfig = Field(
