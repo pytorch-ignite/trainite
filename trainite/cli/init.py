@@ -1,12 +1,13 @@
-import argparse
 import inspect
 import re
+import sys
 import textwrap
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Literal, Sequence
 
 import questionary
 import tomlkit
+import tyro
 from packaging.requirements import Requirement
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -45,6 +46,10 @@ PROJECT_ROOT = PACKAGE_ROOT.parent
 MODEL_CHOICES = tuple(REGISTRY["models"].keys())
 DATASET_CHOICES = tuple(REGISTRY["datasets"].keys())
 TRAINER_CHOICES = tuple(REGISTRY["trainers"].keys())
+
+ModelType = Literal[MODEL_CHOICES]
+DatasetType = Literal[DATASET_CHOICES]
+TrainerType = Literal[TRAINER_CHOICES]
 
 
 def _replace_many(text: str, replacements: Iterable[tuple[str, str]]) -> str:
@@ -257,31 +262,40 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
     }
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="trainite")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    init_parser = subparsers.add_parser("init", help="Generate a starter training project")
-    init_parser.add_argument("project_dir", nargs="?", help="Directory to create the starter project in")
-    init_parser.add_argument("--model", choices=MODEL_CHOICES, help="Starter model template to use")
-    init_parser.add_argument("--dataset", choices=DATASET_CHOICES, help="Starter dataset template to use")
-    init_parser.add_argument("--output-root", help="Output root for generated config")
-    init_parser.add_argument("--run-name", help="Run name for generated config")
-    init_parser.add_argument("--trainer", choices=TRAINER_CHOICES, help="Starter trainer template to use")
-    init_parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Overwrite existing starter files",
+def run_interactive_mode() -> None:
+    project_dir = _prompt_text(
+        "Project directory:",
+        "my-cool-experiment",
+        "Directory to create the starter project in \n",
     )
-    init_parser.add_argument(
-        "--yes",
-        "-y",
-        action="store_true",
-        help="Use defaults for anything not provided and skip prompts",
+    model = _prompt_choice("Model:", MODEL_CHOICES, MODEL_CHOICES[0], "Starter model template to use")
+    dataset = _prompt_choice(
+        "Dataset:",
+        DATASET_CHOICES,
+        DATASET_CHOICES[0],
+        "Starter dataset template to use",
     )
-    init_parser.set_defaults(func=init_project)
-
-    return parser
+    trainer = _prompt_choice(
+        "Trainer:",
+        TRAINER_CHOICES,
+        TRAINER_CHOICES[0],
+        "Starter trainer template to use",
+    )
+    output_root = _prompt_text("Output directory:", "outputs", "Output directory for generated files \n")
+    run_name = _prompt_text(
+        "Run name:",
+        f"{model}__{dataset}",
+        "Run name for generated config (used in output paths and logging) \n",
+    )
+    init_project(
+        project_dir=project_dir,
+        model=model,
+        dataset=dataset,
+        trainer=trainer,
+        output_root=output_root,
+        run_name=run_name,
+        force=False,
+    )
 
 
 def _update_targets(
@@ -305,54 +319,37 @@ def _update_targets(
         _update_targets(config.collate_fn, old_prefix, new_prefix)
 
 
-def init_project(args: argparse.Namespace) -> None:
-    if args.yes:
-        project_dir = args.project_dir or "my-cool-experiment"
-        model_name = args.model or MODEL_CHOICES[0]
-        dataset_name = args.dataset or DATASET_CHOICES[0]
-        trainer_name = args.trainer or TRAINER_CHOICES[0]
-        output_root = args.output_root or "outputs"
-        run_name = args.run_name or f"{model_name}__{dataset_name}"
-    else:
-        project_dir = args.project_dir or _prompt_text(
-            "Project directory:",
-            "my-cool-experiment",
-            "Directory to create the starter project in \n",
-        )
-        model_name = args.model or _prompt_choice(
-            "Model:", MODEL_CHOICES, MODEL_CHOICES[0], "Starter model template to use"
-        )
-        dataset_name = args.dataset or _prompt_choice(
-            "Dataset:",
-            DATASET_CHOICES,
-            DATASET_CHOICES[0],
-            "Starter dataset template to use",
-        )
-        trainer_name = args.trainer or _prompt_choice(
-            "Trainer:",
-            TRAINER_CHOICES,
-            TRAINER_CHOICES[0],
-            "Starter trainer template to use",
-        )
-        output_root = args.output_root or _prompt_text(
-            "Output directory:", "outputs", "Output directory for generated files \n"
-        )
-        run_name = args.run_name or _prompt_text(
-            "Run name:",
-            f"{model_name}__{dataset_name}",
-            "Run name for generated config (used in output paths and logging) \n",
-        )
+def init_project(
+    project_dir: tyro.conf.Positional[str] = "my-cool-experiment",
+    model: ModelType = "transformer",
+    dataset: DatasetType = "string-reverse",
+    trainer: TrainerType = "pretrainer",
+    output_root: str = "outputs",
+    run_name: str = "",
+    force: bool = False,
+) -> None:
+    """Generate a starter training project.
 
-    project_dir = _project_directory(project_dir, args.force)
+    Args:
+        project_dir: Directory to create the starter project in.
+        model: Starter model template to use.
+        dataset: Starter dataset template to use.
+        trainer: Starter trainer template to use.
+        output_root: Output root for generated config.
+        run_name: Run name for generated config.
+        force: Overwrite existing starter files.
+    """
+    resolved_run_name = run_name or f"{model}__{dataset}"
+    resolved_project_dir = _project_directory(project_dir, force)
 
-    output_config = OutputConfig(root=output_root, run_name=run_name)
+    output_config = OutputConfig(root=output_root, run_name=resolved_run_name)
 
     # Build templates for the starter project
-    templates = _build_templates(model_name, dataset_name, trainer_name, project_dir.name)
+    templates = _build_templates(model, dataset, trainer, resolved_project_dir.name)
 
-    model_spec = get_model_spec(model_name)
-    dataset_spec = get_dataset_spec(dataset_name)
-    trainer_spec = get_trainer_spec(trainer_name)
+    model_spec = get_model_spec(model)
+    dataset_spec = get_dataset_spec(dataset)
+    trainer_spec = get_trainer_spec(trainer)
 
     # Instantiate configs from specs
     model_component = model_spec.config_cls()
@@ -393,9 +390,9 @@ def init_project(args: argparse.Namespace) -> None:
         f"datasets.{dataset_spec.name}",
     )
 
-    dump_config(starter_config, project_dir / "config.yaml")
+    dump_config(starter_config, resolved_project_dir / "config.yaml")
     for filename, content in templates.items():
-        _write_file(project_dir / filename, content, args.force)
+        _write_file(resolved_project_dir / filename, content, force)
 
     print("\n✔ Generated config.yaml")
     for filename in templates:
@@ -403,6 +400,13 @@ def init_project(args: argparse.Namespace) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    args.func(args)
+    args_list = list(argv) if argv is not None else sys.argv[1:]
+
+    # Check if we should route to the interactive wizard
+    if not args_list or args_list == ["init"]:
+        run_interactive_mode()
+    else:
+        # Strip 'init' prefix so tyro maps positional arguments directly
+        if args_list and args_list[0] == "init":
+            args_list = args_list[1:]
+        tyro.cli(init_project, args=args_list)

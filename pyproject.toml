@@ -22,6 +22,7 @@ dependencies = [
     "tomlkit>=0.15.0",
     "packaging>=26.2",
     "questionary>=2.1.1",
+    "tyro>=1.0.0",
 ]
 dynamic = ["version"]
 
