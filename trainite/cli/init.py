@@ -1,3 +1,4 @@
+import dataclasses
 import inspect
 import re
 import sys
@@ -287,7 +288,8 @@ def run_interactive_mode() -> None:
         f"{model}__{dataset}",
         "Run name for generated config (used in output paths and logging) \n",
     )
-    init_project(
+
+    config = Init(
         project_dir=project_dir,
         model=model,
         dataset=dataset,
@@ -296,6 +298,8 @@ def run_interactive_mode() -> None:
         run_name=run_name,
         force=False,
     )
+
+    init_project(config)
 
 
 def _update_targets(
@@ -319,17 +323,12 @@ def _update_targets(
         _update_targets(config.collate_fn, old_prefix, new_prefix)
 
 
-def init_project(
-    project_dir: tyro.conf.Positional[str] = "my-cool-experiment",
-    model: ModelType = "transformer",
-    dataset: DatasetType = "string-reverse",
-    trainer: TrainerType = "pretrainer",
-    output_root: str = "outputs",
-    run_name: str = "",
-    force: bool = False,
-    yes: Annotated[bool, tyro.conf.arg(aliases=["-y"])] = False,
-) -> None:
+@dataclasses.dataclass
+class Init:
     """Generate a starter training project.
+
+    Run ``trainite init`` without any arguments to enter interactive mode,
+    where each option is prompted one at a time.
 
     Args:
         project_dir: Directory to create the starter project in.
@@ -339,8 +338,36 @@ def init_project(
         output_root: Output root for generated config.
         run_name: Run name for generated config.
         force: Overwrite existing starter files.
-        yes: Use defaults for anything not provided and skip prompts.
+        yes: Skip prompts and use defaults for anything not provided.
     """
+
+    project_dir: tyro.conf.Positional[str] = "my-cool-experiment"
+    model: ModelType = "transformer"
+    dataset: DatasetType = "string-reverse"
+    trainer: TrainerType = "pretrainer"
+    output_root: str = "outputs"
+    run_name: str = ""
+    force: bool = False
+    yes: Annotated[bool, tyro.conf.arg(aliases=["-y"])] = False
+
+
+def init_project(
+    config: Init = Init(),
+) -> None:
+    """Generate a starter training project.
+
+    Args:
+        config: Configuration for the starter project.
+    """
+    project_dir = config.project_dir
+    model = config.model
+    dataset = config.dataset
+    trainer = config.trainer
+    output_root = config.output_root
+    run_name = config.run_name
+    force = config.force
+    yes = config.yes
+
     resolved_run_name = run_name or f"{model}__{dataset}"
     resolved_project_dir = _project_directory(project_dir, force)
 
@@ -402,13 +429,11 @@ def init_project(
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    args_list = list(argv) if argv is not None else sys.argv[1:]
+    args_list = list(argv if argv is not None else sys.argv[1:])
 
-    # Check if we should route to the interactive wizard
-    if not args_list or args_list == ["init"]:
+    if args_list == ["init"]:
         run_interactive_mode()
-    else:
-        # Strip 'init' prefix so tyro maps positional arguments directly
-        if args_list and args_list[0] == "init":
-            args_list = args_list[1:]
-        tyro.cli(init_project, args=args_list)
+        return
+
+    cmd = tyro.cli(Init, args=args_list[1:] if args_list and args_list[0] == "init" else args_list)
+    init_project(cmd)
