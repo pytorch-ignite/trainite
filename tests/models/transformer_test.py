@@ -2,7 +2,6 @@ from unittest import mock
 
 import pytest
 import torch
-
 from trainite.config.registry import get_model_spec
 from trainite.models.transformer import (
     Attention,
@@ -11,8 +10,8 @@ from trainite.models.transformer import (
     TransformerBlock,
     TransformerModel,
 )
+from trainite.preprocessors.char_tokenizer import CharTokenizer
 from trainite.shared.utils import instantiate
-from trainite.tokenizers.char import CharTokenizer
 
 
 def test_rotary_embedding():

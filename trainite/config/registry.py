@@ -33,14 +33,14 @@ class ModelSpec(ComponentSpec):
 class DatasetSpec(ComponentSpec):
     builder_symbol: str
     dataset_config_cls_path: str
-    tokenizer_spec_name: str
+    preprocessor_spec_name: str | None = None
 
     @property
     def dataset_config_cls(self) -> type:
         return get_target(self.dataset_config_cls_path)
 
 
-class TokenizerSpec(ComponentSpec):
+class PreProcessorSpec(ComponentSpec):
     pass
 
 
@@ -75,7 +75,7 @@ DATASET_SPECS = {
             ("trainite.config.base", "config"),
         ],
         readme_template_path=Path("trainite/templates/components/datasets/string_reverse.md"),
-        tokenizer_spec_name="char",
+        preprocessor_spec_name="char",
     ),
 }
 
@@ -93,16 +93,16 @@ TRAINER_SPECS = {
     ),
 }
 
-TOKENIZER_SPECS = {
-    "char": TokenizerSpec(
-        name="char",
-        implementation_path=Path("trainite/tokenizers/char.py"),
-        config_cls_path="trainite.tokenizers.char.CharTokenizerConfig",
+PREPROCESSOR_SPECS = {
+    "char": PreProcessorSpec(
+        name="char_tokenizer",
+        implementation_path=Path("trainite/preprocessors/char_tokenizer.py"),
+        config_cls_path="trainite.preprocessors.char_tokenizer.CharTokenizerConfig",
         implementation_symbol="CharTokenizer",
         template_replacements=[
             ("trainite.config.base", "config"),
         ],
-        readme_template_path=Path("trainite/templates/components/tokenizers/char.md"),
+        readme_template_path=Path("trainite/templates/components/preprocessors/char.md"),
     ),
 }
 
@@ -111,7 +111,7 @@ REGISTRY = {
     "models": MODEL_SPECS,
     "datasets": DATASET_SPECS,
     "trainers": TRAINER_SPECS,
-    "tokenizers": TOKENIZER_SPECS,
+    "preprocessors": PREPROCESSOR_SPECS,
 }
 
 
@@ -139,5 +139,5 @@ def get_trainer_spec(name: str) -> TrainerSpec:
     return TRAINER_SPECS[name]
 
 
-def get_tokenizer_spec(name: str) -> TokenizerSpec:
-    return TOKENIZER_SPECS[name]
+def get_preprocessor_spec(name: str) -> PreProcessorSpec:
+    return PREPROCESSOR_SPECS[name]

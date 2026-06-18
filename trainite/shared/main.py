@@ -172,7 +172,7 @@ def main() -> None:
     config = load_config(config_path, ProjectConfig)
 
     device = resolve_device(config.device)
-    tokenizer = instantiate(config.tokenizer)
+    tokenizer = instantiate(config.preprocessor)
 
     train_loader, val_loader, test_loader = build_dataloaders(config.data, tokenizer, config.seed)
 
@@ -188,7 +188,7 @@ def main() -> None:
         train_loader=train_loader,
         val_loader=val_loader,
         test_loader=test_loader,
-        tokenizer=tokenizer,
+        preprocessor=tokenizer,
     )
     trainer.run()
 

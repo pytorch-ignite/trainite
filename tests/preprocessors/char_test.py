@@ -1,6 +1,5 @@
 import torch
-
-from trainite.tokenizers.char import UNIVERSAL_VOCAB, CharTokenizer, CharTokenizerConfig
+from trainite.preprocessors.char_tokenizer import UNIVERSAL_VOCAB, CharTokenizer, CharTokenizerConfig
 
 
 def test_char_tokenizer_vocab_size():
@@ -96,4 +95,4 @@ def test_char_tokenizer_call_max_length_padding():
 
 def test_char_tokenizer_config():
     config = CharTokenizerConfig()
-    assert config.target == "trainite.tokenizers.char.CharTokenizer"
+    assert config.target == "trainite.preprocessors.char_tokenizer.CharTokenizer"

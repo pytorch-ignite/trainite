@@ -31,7 +31,7 @@ from trainite.config.base import (
 
 # __MODEL_IMPORT__
 # __DATASET_IMPORT__
-# __TOKENIZER_IMPORT__
+# __PREPROCESSOR_IMPORT__
 from trainite.shared.utils import dump_config
 
 
@@ -49,7 +49,7 @@ class PreTrainerConfig(BaseModel):
 
 class ProjectConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
-    tokenizer: ComponentConfig
+    preprocessor: ComponentConfig | None = None
     model: ComponentConfig
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
     data: DataConfigBase | DataWithAutoSplit
@@ -65,7 +65,7 @@ class PreTrainer:
         config: ProjectConfig,
         model: nn.Module,
         optimizer: torch.optim.Optimizer,
-        tokenizer: Any,
+        preprocessor: Any,
         train_loader: DataLoader,
         val_loader: DataLoader,
         test_loader: DataLoader | None = None,
@@ -73,7 +73,7 @@ class PreTrainer:
         self.logger: logging.Logger = setup_logger("trainer", level=logging.INFO)
         torch.manual_seed(config.seed)
         self.config: ProjectConfig = config
-        self.tokenizer: Any = tokenizer
+        self.tokenizer: Any = preprocessor
         self.device: str | torch.device = self._resolve_device()
         self.epochs: int = config.trainer.epochs
         self.grad_clip_norm: float | None = getattr(config.trainer, "grad_clip_norm", None)

@@ -152,6 +152,6 @@ class CharTokenizer:
 
 class CharTokenizerConfig(ComponentConfig):
     target: str = Field(
-        default="trainite.tokenizers.char.CharTokenizer",
+        default="trainite.preprocessors.char_tokenizer.CharTokenizer",
         alias="_target_",
     )

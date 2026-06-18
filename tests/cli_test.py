@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from trainite.config.registry import get_dataset_spec, get_model_spec, get_tokenizer_spec, get_trainer_spec
+from trainite.config.registry import get_dataset_spec, get_model_spec, get_preprocessor_spec, get_trainer_spec
 
 
 @pytest.mark.parametrize(
@@ -38,7 +38,7 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
         dataset_spec = get_dataset_spec(dataset)
         model_spec = get_model_spec(model)
         trainer_spec = get_trainer_spec(trainer)
-        tokenizer_spec = get_tokenizer_spec(dataset_spec.tokenizer_spec_name)
+        preprocessor_spec = get_preprocessor_spec(dataset_spec.preprocessor_spec_name)
 
         expected_files = [
             "config.yaml",
@@ -46,7 +46,7 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
             f"models/{model_spec.name}.py",
             f"datasets/{dataset_spec.name}.py",
             "datasets/transformed.py",
-            f"tokenizers/{tokenizer_spec.name}.py",
+            f"preprocessors/{preprocessor_spec.name}.py",
             f"{trainer_spec.name}.py",
             "utils.py",
             "main.py",
@@ -62,7 +62,7 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
             f"models/{model_spec.name}.py",
             f"datasets/{dataset_spec.name}.py",
             "datasets/transformed.py",
-            f"tokenizers/{tokenizer_spec.name}.py",
+            f"preprocessors/{preprocessor_spec.name}.py",
             f"{trainer_spec.name}.py",
             "utils.py",
             "main.py",

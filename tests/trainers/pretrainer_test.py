@@ -29,7 +29,7 @@ from trainite.trainers.pretrainer import PreTrainer, PreTrainerConfig, ProjectCo
 
 def create_trainer_from_config(config: ProjectConfig) -> PreTrainer:
     device = resolve_device(config.device)
-    tokenizer = instantiate(config.tokenizer)
+    tokenizer = instantiate(config.preprocessor)
     train_loader, val_loader, test_loader = build_dataloaders(config.data, tokenizer, config.seed)
     vocab_size = resolve_vocab_size(tokenizer, config.model)
     model = build_model(config.model, tokenizer, vocab_size, device)
@@ -41,7 +41,7 @@ def create_trainer_from_config(config: ProjectConfig) -> PreTrainer:
         train_loader=train_loader,
         val_loader=val_loader,
         test_loader=test_loader,
-        tokenizer=tokenizer,
+        preprocessor=tokenizer,
         # vocab_size=vocab_size,
     )
 
@@ -216,7 +216,7 @@ def temp_run_dir():
 @pytest.fixture
 def project_config(temp_run_dir):
     return ProjectConfig(
-        tokenizer=cc("tests.trainers.pretrainer_test.DummyTokenizer"),
+        preprocessor=cc("tests.trainers.pretrainer_test.DummyTokenizer"),
         model=cc(
             "tests.trainers.pretrainer_test.SimpleModel",
             vocab_size=10,
@@ -522,7 +522,7 @@ def test_pretrainer_explicit_split_shuffle(project_config):
 
 def test_pretrainer_builds_train_and_val_loaders_from_ratios(tmp_path):
     config = ProjectConfig(
-        tokenizer=cc("tests.trainers.pretrainer_test.DummyTokenizer"),
+        preprocessor=cc("tests.trainers.pretrainer_test.DummyTokenizer"),
         model=cc(
             "tests.trainers.pretrainer_test.SimpleModel",
             vocab_size=100,
@@ -555,7 +555,7 @@ def test_pretrainer_builds_train_and_val_loaders_from_ratios(tmp_path):
 
 def test_pretrainer_builds_train_val_and_test_loaders_from_ratios(tmp_path):
     config = ProjectConfig(
-        tokenizer=cc("tests.trainers.pretrainer_test.DummyTokenizer"),
+        preprocessor=cc("tests.trainers.pretrainer_test.DummyTokenizer"),
         model=cc(
             "tests.trainers.pretrainer_test.SimpleModel",
             vocab_size=100,
