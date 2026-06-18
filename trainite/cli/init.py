@@ -1,7 +1,6 @@
 import dataclasses
 import inspect
 import re
-import sys
 import textwrap
 from pathlib import Path
 from typing import Annotated, Iterable, Literal, Sequence
@@ -426,14 +425,3 @@ def init_project(
     print("\n✔ Generated config.yaml")
     for filename in templates:
         print(f"✔ Generated {filename}")
-
-
-def main(argv: Sequence[str] | None = None) -> None:
-    args_list = list(argv if argv is not None else sys.argv[1:])
-
-    if args_list == ["init"]:
-        run_interactive_mode()
-        return
-
-    cmd = tyro.cli(Init, args=args_list[1:] if args_list and args_list[0] == "init" else args_list)
-    init_project(cmd)
