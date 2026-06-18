@@ -13,6 +13,3 @@ class TransformedDataset(Dataset):
 
     def __getitem__(self, i):
         return self.transform(self.dataset[i])
-
-    def get_item_inference(self, i):
-        return self.transform.inference(self.dataset[i])

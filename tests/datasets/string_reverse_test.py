@@ -209,24 +209,3 @@ def test_prompt_completion_transform():
 
     # All attention mask values should be 1
     assert item["attention_mask"].eq(1).all()
-
-
-def test_prompt_completion_transform_inference():
-    tokenizer = CharTokenizer()
-    transform = PromptCompletionTransform(tokenizer=tokenizer)
-
-    sample = {"source": "abc", "target": "cba"}
-    inf = transform.inference(sample)
-
-    assert "input_ids" in inf
-    assert "attention_mask" in inf
-    assert inf["source_text"] == "abc"
-    assert inf["target_text"] == "cba"
-
-    # Starts with BOS, ends with SEP, no target tokens
-    assert inf["input_ids"][0].item() == tokenizer.bos_token_id
-    assert inf["input_ids"][-1].item() == tokenizer.sep_token_id
-
-    source_encoded = tokenizer("abc", add_special_tokens=False)["input_ids"]
-    assert len(inf["input_ids"]) == 1 + len(source_encoded) + 1
-    assert inf["attention_mask"].eq(1).all()

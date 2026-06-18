@@ -17,9 +17,6 @@ class StubTransform:
     def __call__(self, sample):
         return f"transformed_{sample}"
 
-    def inference(self, sample):
-        return f"inference_{sample}"
-
 
 def test_transformed_dataset():
     raw_data = ["apple", "banana", "cherry"]
@@ -31,7 +28,3 @@ def test_transformed_dataset():
     assert transformed_dataset[0] == "transformed_apple"
     assert transformed_dataset[1] == "transformed_banana"
     assert transformed_dataset[2] == "transformed_cherry"
-
-    assert transformed_dataset.get_item_inference(0) == "inference_apple"
-    assert transformed_dataset.get_item_inference(1) == "inference_banana"
-    assert transformed_dataset.get_item_inference(2) == "inference_cherry"

@@ -153,24 +153,8 @@ class PromptCompletionTransform:
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "labels": labels,
-        }
-
-    def inference(self, sample: dict[str, str]) -> dict[str, Any]:
-        source = sample["source"]
-        target = sample["target"]
-
-        bos = self.tokenizer.bos_token_id
-        sep = self.tokenizer.sep_token_id
-
-        source_tokenized = self.tokenizer(source, add_special_tokens=False)["input_ids"]
-        input_ids = torch.tensor([bos] + source_tokenized + [sep], dtype=torch.long)
-        attention_mask = torch.ones(len(input_ids), dtype=torch.long)
-
-        return {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "source_text": source,
-            "target_text": target,
+            "source": source,
+            "target": target,
         }
 
 

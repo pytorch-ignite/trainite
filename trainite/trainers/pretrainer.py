@@ -113,21 +113,6 @@ class PreTrainer:
         run_dir.mkdir(parents=True, exist_ok=True)
         return run_dir
 
-    def _exact_accuracy_transform(self, output: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
-        logits = output["logits"]
-        targets = output["targets"]
-
-        preds = torch.argmax(logits, dim=-1)
-        mask = targets != self.loss_fn.ignore_index
-
-        correct = (preds == targets) | ~mask
-        seq_correct = correct.all(dim=-1)
-
-        y_pred = seq_correct.long()
-        y = torch.ones_like(seq_correct)
-
-        return y_pred, y
-
     def _flatten_loss(self, output: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         logits = output["logits"].reshape(-1, output["logits"].size(-1))
         targets = output["targets"].reshape(-1)
@@ -184,15 +169,12 @@ class PreTrainer:
             ("test", self.test_evaluator),
         ]:
             loss = Loss(self.loss_fn, output_transform=self._flatten_loss)
-            exact_acc = Accuracy(output_transform=self._exact_accuracy_transform)
             token_acc = Accuracy(output_transform=self._flatten_accuracy)
 
             loss.attach(evaluator, "loss")
-            exact_acc.attach(evaluator, "exact_accuracy")
             token_acc.attach(evaluator, "token_accuracy")
 
             metrics[f"{prefix}_loss"] = loss
-            metrics[f"{prefix}_exact_accuracy"] = exact_acc
             metrics[f"{prefix}_token_accuracy"] = token_acc
 
         return metrics
@@ -260,8 +242,8 @@ class PreTrainer:
         if self.val_loader:
 
             def score_function(engine):
-                val_acc = engine.state.metrics["exact_accuracy"]
-                return val_acc
+                loss = engine.state.metrics["loss"]
+                return -loss
 
             checkpoint = Checkpoint(
                 to_save=to_save,
@@ -309,7 +291,7 @@ class PreTrainer:
             output_transform=lambda output: {"batch_loss": output["loss"]},
         )
 
-        metric_names = ["loss", "exact_accuracy", "token_accuracy"]
+        metric_names = ["loss", "token_accuracy"]
         tb_logger.attach_output_handler(
             self.train_evaluator,
             event_name=Events.EPOCH_COMPLETED,
@@ -352,21 +334,18 @@ class PreTrainer:
             self.val_evaluator.run(self.val_loader)
             val_metrics = self.val_evaluator.state.metrics
             self.logger.info(
-                "epoch=%s train_loss=%.4f train_exact_match_acc=%.4f train_token_acc=%.4f val_loss=%.4f val_exact_match_acc=%.4f val_token_acc=%.4f",
+                "epoch=%s train_loss=%.4f train_token_acc=%.4f val_loss=%.4f val_token_acc=%.4f",
                 epoch,
                 train_metrics["loss"],
-                train_metrics["exact_accuracy"],
                 train_metrics["token_accuracy"],
                 val_metrics["loss"],
-                val_metrics["exact_accuracy"],
                 val_metrics["token_accuracy"],
             )
         else:
             self.logger.info(
-                "epoch=%s train_loss=%.4f train_exact_match_acc=%.4f train_token_acc=%.4f",
+                "epoch=%s train_loss=%.4f train_token_acc=%.4f",
                 epoch,
                 train_metrics["loss"],
-                train_metrics["exact_accuracy"],
                 train_metrics["token_accuracy"],
             )
 
@@ -375,13 +354,9 @@ class PreTrainer:
         dataset = dataset.dataset if isinstance(dataset, Subset) else dataset
         item = dataset[0]  # type: ignore
         if not isinstance(item, dict):
-            raise ValueError(f"{name} dataset items must be dicts with 'input_ids' and 'labels' keys.")
-        if "input_ids" not in item or "labels" not in item:
-            raise ValueError(
-                f"{name} dataset items must contain 'input_ids' and 'labels' keys. Got: {list(item.keys())}"
-            )
-        if not hasattr(dataset, "get_item_inference"):
-            raise ValueError("Dataset must implement 'get_item_inference' for inference logging.")
+            raise ValueError(f"{name} dataset items must be dicts with 'source' and 'target' keys.")
+        if "source" not in item or "target" not in item:
+            raise ValueError(f"{name} dataset items must contain 'source' and 'target' keys. Got: {list(item.keys())}")
 
     def _setup_inference(self) -> object:
         inference_params = (
@@ -405,9 +380,6 @@ class PreTrainer:
                 f"max_inference_new_tokens={self.max_inference_new_tokens}"
             )
 
-        if not hasattr(self.model, "generate"):
-            raise ValueError("Model must implement 'generate' method for inference logging.")
-
         tokenizer: Any = self.tokenizer
         if not hasattr(tokenizer, "decode"):
             raise ValueError("Tokenizer must implement 'decode' method for inference logging.")
@@ -424,7 +396,10 @@ class PreTrainer:
 
         self.logger.info(f"Epoch {engine.state.epoch}: Running inference on {name} samples...")
 
-        eos_token_id = getattr(tokenizer, "eos_token_id", None)
+        eos_token_id = self.tokenizer.eos_token_id
+        sep_token_id = self.tokenizer.sep_token_id
+        bos_token_id = self.tokenizer.bos_token_id
+        pad_token_id = getattr(self.tokenizer, "pad_token_id", 0)
 
         dataset = loader.dataset
         total_samples = len(dataset)  # type: ignore
@@ -433,72 +408,58 @@ class PreTrainer:
         # Extract prompt IDs via dataset.get_item_inference (validated in _setup_inference).
         prompt_ids_list: list[torch.Tensor] = []
         prompt_attn_list: list[torch.Tensor] = []
-        target_texts: list[str] = []
+        targets: list[str] = []
+        sources: list[str] = []
         for i in range(num_samples):
-            inf_dataset = dataset.dataset if isinstance(dataset, Subset) else dataset
-            inf = inf_dataset.get_item_inference(i)
-            prompt_ids = inf["input_ids"]
-            prompt_attn = inf.get("attention_mask")
-            target_text = str(inf.get("target_text", ""))
+            dataset = dataset.dataset if isinstance(dataset, Subset) else dataset  # in case of Subset wrapping
+            item = dataset[i]
+            source = item["source"]
+            target = item["target"]
 
-            prompt_ids_list.append(prompt_ids.detach())
-            prompt_attn_list.append(prompt_attn)
-            target_texts.append(target_text)
+            input_ids = tokenizer(source, add_special_tokens=False)["input_ids"]
+            input_ids = torch.tensor([bos_token_id] + input_ids + [sep_token_id], dtype=torch.long)
+            attention_mask = torch.ones_like(input_ids, dtype=torch.long)
+
+            prompt_ids_list.append(input_ids)
+            prompt_attn_list.append(attention_mask)
+            targets.append(target)
+            sources.append(source)
         model: Any = self.model
         model.eval()
-
-        pad_id = getattr(tokenizer, "pad_token_id", 0)
 
         # Left-pad for generation: reverse → pad_sequence → reverse
         batch_input_ids = (
             torch.nn.utils.rnn.pad_sequence(
-                [t.flip(0) for t in prompt_ids_list], batch_first=True, padding_value=pad_id
+                [t.flip(0) for t in prompt_ids_list], batch_first=True, padding_value=pad_token_id
             )
             .flip(1)
             .to(self.device)
         )
-
-        if any(a is not None for a in prompt_attn_list):
-            batch_attention_mask = (
-                torch.nn.utils.rnn.pad_sequence(
-                    [t.flip(0) for t in prompt_attn_list], batch_first=True, padding_value=0
-                )
-                .flip(1)
-                .to(self.device)
-            )
-        else:
-            batch_attention_mask = batch_input_ids.ne(pad_id).to(torch.long)
-
-        sequences = model.generate(
+        batch_attention_mask = (
+            torch.nn.utils.rnn.pad_sequence([t.flip(0) for t in prompt_attn_list], batch_first=True, padding_value=0)
+            .flip(1)
+            .to(self.device)
+        )
+        sequences = self.generate(
             input_ids=batch_input_ids,
             max_new_tokens=self.max_inference_new_tokens,
             attention_mask=batch_attention_mask,
-            eos_token_id=eos_token_id,
         )
         new_tokens = sequences[:, batch_input_ids.shape[1] :]
         decoded_strs = [
             tokenizer.decode(
-                tokens.tolist() if hasattr(tokens, "tolist") else tokens,
+                tokens.tolist(),
                 skip_special_tokens=True,
             )
             for tokens in new_tokens
-        ]
-
-        # Decode prompts for readable logging
-        prompt_strs = [
-            tokenizer.decode(
-                ids.tolist() if isinstance(ids, torch.Tensor) else ids,
-                skip_special_tokens=True,
-            )
-            for ids in prompt_ids_list
         ]
 
         for idx in range(num_samples):
             self.logger.info(
                 "    Sample %d | Prompt: %r | Target: %r | Prediction: %r",
                 idx + 1,
-                prompt_strs[idx],
-                target_texts[idx],
+                sources[idx],
+                targets[idx],
                 decoded_strs[idx],
             )
 
@@ -506,8 +467,8 @@ class PreTrainer:
             tb_writer = self.handlers["tensorboard"].writer
             lines = []
             for idx in range(num_samples):
-                prompt = prompt_strs[idx].strip() or "(empty)"
-                target = target_texts[idx].strip() or "(empty)"
+                prompt = sources[idx].strip() or "(empty)"
+                target = targets[idx].strip() or "(empty)"
                 pred = decoded_strs[idx].strip() or "(empty)"
                 prompt = prompt.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 target = target.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -520,6 +481,61 @@ class PreTrainer:
             name_map = {"Train": "training", "Val": "validation", "Test": "testing"}
             tb_tag = f"inference/{name_map.get(name, name.lower())}"
             tb_writer.add_text(tb_tag, "\n".join(lines), global_step=engine.state.epoch)
+
+    @torch.no_grad()
+    def generate(
+        self,
+        input_ids: torch.Tensor,
+        max_new_tokens: int,
+        attention_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """Generate text token IDs from prompt input_ids.
+
+        Expects a pre-padded tensor (B, S). The caller is responsible for
+        left-padding and providing an attention mask before calling this method.
+
+        Args:
+            input_ids: Prompt token IDs of shape (batch, seq_len).
+            max_new_tokens: Maximum number of new tokens to generate.
+            attention_mask: Optional attention mask of shape (batch, seq_len).
+        Returns:
+            Tensor containing the full token IDs (prompt + newly generated tokens)
+            of shape (batch, prompt_len + new_tokens).
+        """
+        self.model.eval()
+
+        eos_id = self.tokenizer.eos_token_id
+
+        device = self.device
+        generated = input_ids.clone()
+
+        for _ in range(max_new_tokens):
+            logits = self.model(generated, attention_mask=attention_mask)
+            next_token_logits = logits[:, -1, :]
+            next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+            if eos_id is not None:
+                eos_mask = generated[:, -1:].eq(eos_id)
+                next_token = torch.where(eos_mask, torch.tensor(eos_id, device=device), next_token)
+            generated = torch.cat([generated, next_token], dim=-1)
+
+            next_mask = torch.ones(
+                (attention_mask.shape[0], 1),
+                dtype=attention_mask.dtype,
+                device=device,
+            )
+
+            already_ended = generated[:, -2:-1].eq(eos_id)
+            next_mask = torch.where(
+                already_ended,
+                torch.tensor(0, dtype=attention_mask.dtype, device=device),
+                next_mask,
+            )
+            attention_mask = torch.cat([attention_mask, next_mask], dim=-1)
+
+            if generated[:, -1].eq(eos_id).all():
+                break
+
+        return generated
 
     def test(self, test_loader: DataLoader | None = None) -> None:
         loader = test_loader or self.test_loader
@@ -540,9 +556,8 @@ class PreTrainer:
         self.test_evaluator.run(loader)
         metrics = self.test_evaluator.state.metrics
         self.logger.info(
-            "Test results: loss=%.4f exact_match_acc=%.4f token_acc=%.4f",
+            "Test results: loss=%.4f token_acc=%.4f",
             metrics["loss"],
-            metrics["exact_accuracy"],
             metrics["token_accuracy"],
         )
 

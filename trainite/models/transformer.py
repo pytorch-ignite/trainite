@@ -189,68 +189,6 @@ class TransformerModel(nn.Module):
         x = self.norm(x)
         return self.proj(x)
 
-    @torch.no_grad()
-    def generate(
-        self,
-        input_ids: torch.Tensor,
-        max_new_tokens: int,
-        attention_mask: torch.Tensor | None = None,
-        eos_token_id: int | None = None,
-        pad_token_id: int | None = None,
-        **kwargs: Any,
-    ) -> torch.Tensor:
-        """Generate text token IDs from prompt input_ids.
-
-        Expects a pre-padded tensor (B, S). The caller is responsible for
-        left-padding and providing an attention mask before calling this method.
-
-        Args:
-            input_ids: Prompt token IDs of shape (batch, seq_len).
-            max_new_tokens: Maximum number of new tokens to generate.
-            attention_mask: Optional attention mask of shape (batch, seq_len).
-            eos_token_id: Optional token ID that signals end-of-sequence.
-            pad_token_id: Optional token ID used for padding sequences.
-
-        Returns:
-            Tensor containing the full token IDs (prompt + newly generated tokens)
-            of shape (batch, prompt_len + new_tokens).
-        """
-        self.eval()
-
-        eos_id = eos_token_id
-
-        device = input_ids.device
-        generated = input_ids.clone()
-
-        for _ in range(max_new_tokens):
-            logits = self(generated, attention_mask=attention_mask)
-            next_token_logits = logits[:, -1, :]
-            next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
-            if eos_id is not None:
-                eos_mask = generated[:, -1:].eq(eos_id)
-                next_token = torch.where(eos_mask, torch.tensor(eos_id, device=device), next_token)
-            generated = torch.cat([generated, next_token], dim=-1)
-
-            if attention_mask is not None:
-                next_mask = torch.ones(
-                    (attention_mask.shape[0], 1),
-                    dtype=attention_mask.dtype,
-                    device=device,
-                )
-                if eos_id is not None:
-                    already_ended = generated[:, -2:-1].eq(eos_id)
-                    next_mask = torch.where(
-                        already_ended,
-                        torch.tensor(0, dtype=attention_mask.dtype, device=device),
-                        next_mask,
-                    )
-                attention_mask = torch.cat([attention_mask, next_mask], dim=-1)
-
-            if eos_id is not None and generated[:, -1].eq(eos_id).all():
-                break
-
-        return generated
-
 
 class CausalLMCollateFn:
     """Collate sequences for decoder-only autoregressive training."""

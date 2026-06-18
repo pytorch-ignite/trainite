@@ -1,5 +1,3 @@
-from unittest import mock
-
 import pytest
 import torch
 from trainite.config.registry import get_model_spec
@@ -144,63 +142,6 @@ def test_build_transformer_model_from_spec():
     model_conf = spec.config_cls()
     model = instantiate(model_conf)
     assert isinstance(model, TransformerModel)
-
-
-def test_transformer_model_generate():
-    tokenizer = CharTokenizer()
-    hidden_size = 16
-    model = TransformerModel(vocab_size=tokenizer.vocab_size, hidden_size=hidden_size)
-    model.eval()
-
-    # Test tensor input generate
-    with mock.patch.object(model, "forward") as mock_forward:
-
-        def mock_forward_fn(x, attention_mask=None):
-            logits = torch.zeros(1, x.shape[1], tokenizer.vocab_size)
-            logits[0, -1, 7] = 10.0
-            return logits
-
-        mock_forward.side_effect = mock_forward_fn
-
-        input_ids = torch.tensor([[5, 6]], dtype=torch.long)
-        generated = model.generate(input_ids, max_new_tokens=1)
-        assert isinstance(generated, torch.Tensor)
-        assert generated[0].tolist() == [5, 6, 7]
-
-    # Test with eos_token_id early exit
-    with mock.patch.object(model, "forward") as mock_forward:
-
-        def mock_forward_fn(x, attention_mask=None):
-            logits = torch.zeros(1, x.shape[1], tokenizer.vocab_size)
-            logits[0, -1, tokenizer.eos_token_id] = 10.0
-            return logits
-
-        mock_forward.side_effect = mock_forward_fn
-
-        input_ids = torch.tensor([[5, 6]], dtype=torch.long)
-        generated = model.generate(
-            input_ids,
-            max_new_tokens=10,
-            eos_token_id=tokenizer.eos_token_id,
-        )
-        assert generated[0].tolist() == [5, 6, tokenizer.eos_token_id]
-
-    # # Test with eos_token_id early exit (default tokenizer fallback)
-    # with mock.patch.object(model, "forward") as mock_forward:
-    #
-    #     def mock_forward_fn(x, attention_mask=None):
-    #         logits = torch.zeros(1, x.shape[1], tokenizer.vocab_size)
-    #         logits[0, -1, tokenizer.eos_token_id] = 10.0
-    #         return logits
-    #
-    #     mock_forward.side_effect = mock_forward_fn
-    #
-    #     input_ids = torch.tensor([[5, 6]], dtype=torch.long)
-    #     generated = model.generate(
-    #         input_ids,
-    #         max_new_tokens=10,
-    #     )
-    #     assert generated[0].tolist() == [5, 6, tokenizer.eos_token_id]
 
 
 def test_causal_lm_collate_fn():
