@@ -12,7 +12,7 @@ from config import ProjectConfig, load_config
 from ignite.engine import Engine, Events
 from trainer import PreTrainer
 
-NUM_RUNS: int = 13
+NUM_RUNS: int = 3
 TIME_LIMIT_SECONDS: float = 3600 * 2
 TEST_SEQ_LENGTHS: list[int] = [16, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320]
 
@@ -30,7 +30,7 @@ _MODEL_OVERRIDES = {
     "max_seq_len": MODEL_MAX_SEQ_LEN,
 }
 
-_OUTPUT_ROOT = f"outputs2/d{MODEL_HIDDEN_SIZE}_l{MODEL_NUM_LAYERS}_h{MODEL_NUM_HEADS}"
+_OUTPUT_ROOT = f"outputs_1/d{MODEL_HIDDEN_SIZE}_l{MODEL_NUM_LAYERS}_h{MODEL_NUM_HEADS}"
 
 
 def _make_run_name(seq_len: int, seed: int) -> str:
@@ -134,7 +134,7 @@ def run_single_experiment(
             trainer.engine.terminate()
 
     def _early_stopping_lr(engine: Engine) -> None:
-        if engine.optimizer.param_groups[0]["lr"] < 1e-6:
+        if trainer.optimizer.param_groups[0]["lr"] < 1e-6:
             print("\n  Learning rate too low! Terminating early.", end="")
             engine.terminate()
 
