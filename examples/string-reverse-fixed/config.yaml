@@ -38,9 +38,9 @@ trainer:
         patience: 5
         factor: 0.5
         min_lr: 1e-6
-        mode: min
+        mode: max
 output:
     root: outputs
     run_name: transformer__string-reverse
 seed: 42
-device: cuda:0
+device: auto

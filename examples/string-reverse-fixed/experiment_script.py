@@ -71,37 +71,32 @@ def _make_anchor_snapshot_callback(
 ) -> Callable[[Engine], None]:
     """Snapshot all metrics at the epoch where val-exact-accuracy peaks."""
 
-    def handler(engine: Engine) -> None:
-        val_metrics = trainer.val_evaluator.state.metrics
-        current_val_exact: float = val_metrics["exact_accuracy"]
+    def handler(engine: Engine):
+            val_metrics = trainer.val_evaluator.state.metrics
+            current_val_token: float = val_metrics["token_accuracy"]
 
-        train_metrics = trainer.train_evaluator.state.metrics
-        current_train_exact: float = train_metrics["exact_accuracy"]
-        prev_max_train = store.get("max_train_exact_acc", -1.0)
-        if current_train_exact >= prev_max_train:
-            store["max_train_exact_acc"] = current_train_exact
+            train_metrics = trainer.train_evaluator.state.metrics
+            current_train_exact: float = train_metrics["exact_accuracy"]
 
-        prev_best_val = store.get("anchor_val_exact_acc", -1.0)
-        prev_best_val_loss = store.get("ancor_val_loss", float("inf"))
+            # Keep tracking absolute training memorization capacity independently
+            prev_max_train = store.get("max_train_exact_acc", -1.0)
+            if current_train_exact > prev_max_train:
+                store["max_train_exact_acc"] = current_train_exact
 
+            # Corrected Gate: Read and compare strictly against historical peak token accuracy
+            prev_best_val_token = store.get("anchor_val_token_acc", -1.0)
+            if current_val_token <= prev_best_val_token:
+                return
 
-
-        if current_val_exact < prev_best_val:
-            return
-
-        if current_val_exact == prev_best_val and val_metrics["loss"] >= prev_best_val_loss:
-            return
-
-        store["anchor_val_exact_acc"] = current_val_exact
-        store["ancor_val_loss"] = val_metrics["loss"]
-        store["anchor_epoch"] = float(engine.state.epoch)
-        store["train_loss"] = train_metrics["loss"]
-        store["train_exact_acc"] = train_metrics["exact_accuracy"]
-        store["train_token_acc"] = train_metrics["token_accuracy"]
-        store["val_loss"] = val_metrics["loss"]
-        store["val_exact_acc"] = val_metrics["exact_accuracy"]
-        store["val_token_acc"] = val_metrics["token_accuracy"]
-
+            # Commit snapshot values to store when a new token accuracy peak is achieved
+            store["anchor_val_token_acc"] = current_val_token
+            store["anchor_epoch"] = float(engine.state.epoch)
+            store["train_loss"] = train_metrics["loss"]
+            store["train_exact_acc"] = train_metrics["exact_accuracy"]
+            store["train_token_acc"] = train_metrics["token_accuracy"]
+            store["val_loss"] = val_metrics["loss"]
+            store["val_exact_acc"] = val_metrics["exact_accuracy"]
+            store["val_token_acc"] = val_metrics["token_accuracy"]
     return handler
 
 
@@ -267,7 +262,7 @@ def plot_results(
         f"Transformer — Fixed Seq Len\n"
         f"layers={model_info['num_layers']},  d={model_info['hidden_size']},  "
         f"heads={model_info['num_heads']},  ds={FIXED_DATASET_SIZE},  "
-        f"{NUM_RUNS}-run avg ± 1σ  |  anchored on best val-exact-acc",
+        f"{NUM_RUNS}-run avg ± 1σ  |  anchored on best val-token-acc",
         fontsize=12,
         fontweight="bold",
     )

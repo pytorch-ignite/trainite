@@ -339,7 +339,7 @@ class PreTrainer:
         scheduler_cfg = self.config.trainer.scheduler
         self.scheduler: ReduceLROnPlateauScheduler = ReduceLROnPlateauScheduler(
             self.optimizer,
-            metric_name="loss",
+            metric_name="token_accuracy",
             mode=scheduler_cfg.mode,
             patience=scheduler_cfg.patience,
             factor=scheduler_cfg.factor,
@@ -376,15 +376,15 @@ class PreTrainer:
         if self.val_loader:
 
             def score_function(engine):
-                val_acc = engine.state.metrics["exact_accuracy"]
-                return val_acc
+                val_token_accuracy = engine.state.metrics["token_accuracy"]
+                return val_token_accuracy
 
             checkpoint = Checkpoint(
                 to_save=to_save,
                 save_handler=DiskSaver(dirname=str(self.run_dir), require_empty=False),
                 filename_prefix="best",
                 score_function=score_function,
-                score_name="val_acc",
+                score_name="val_token_accuracy",
                 n_saved=1,
                 global_step_transform=lambda *_: self.engine.state.epoch,
             )
@@ -558,21 +558,6 @@ class PreTrainer:
         if self.test_loader is not None:
             self._validate_dataloader_for_inference(self.test_loader, "Test")
 
-    @staticmethod
-    def _escape_md_cell(text: str) -> str:
-        """Wrap in a markdown code span so content is treated as literal text."""
-        content = text.strip() or "(empty)"
-        # Code spans prevent ALL markdown/HTML interpretation of the content.
-        if "`" not in content:
-            return f"`{content}`"
-        # If content contains backticks, delimit with one more than the
-        # longest consecutive run so the delimiter cannot match inside.
-        longest = run = 0
-        for ch in content:
-            run = run + 1 if ch == "`" else 0
-            longest = max(longest, run)
-        delim = "`" * (longest + 1)
-        return f"{delim} {content} {delim}"
 
     def _log_inference(
         self,
@@ -624,21 +609,23 @@ class PreTrainer:
 
         if "tensorboard" in self.handlers:
             tb_writer = self.handlers["tensorboard"].writer
-            tb_table = [
-                "| Sample | Prompt | Target | Prediction |",
-                "|---|---|---|---|",
-            ]
+            lines = []
             for idx in range(num_samples):
-                prompt_escaped = self._escape_md_cell(prompts[idx])
-                target_escaped = self._escape_md_cell(targets[idx])
-                pred_escaped = self._escape_md_cell(decoded_strs[idx])
-                tb_table.append(
-                    f"| {idx + 1} | {prompt_escaped} | {target_escaped} | {pred_escaped} |"
-                )
+                prompt = prompts[idx].strip() or "(empty)"
+                target = targets[idx].strip() or "(empty)"
+                pred = decoded_strs[idx].strip() or "(empty)"
+                prompt = prompt.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                target = target.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                pred = pred.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                lines.append(f"Sample {idx + 1}")
+                lines.append(f"  Prompt:     {prompt}")
+                lines.append(f"  Target:     {target}")
+                lines.append(f"  Prediction: {pred}")
+                lines.append("")
             name_map = {"Train": "training", "Val": "validation", "Test": "testing"}
             tb_tag = f"inference/{name_map.get(name, name.lower())}"
             tb_writer.add_text(
-                tb_tag, "\n".join(tb_table), global_step=engine.state.epoch
+                tb_tag, "\n".join(lines), global_step=engine.state.epoch
             )
 
     def test(self, test_loader: DataLoader | None = None) -> None:
