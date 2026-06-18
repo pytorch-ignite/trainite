@@ -12,14 +12,14 @@ from config import ProjectConfig, load_config
 from ignite.engine import Engine, Events
 from trainer import PreTrainer
 
-NUM_RUNS: int = 3
+NUM_RUNS: int = 13
 TIME_LIMIT_SECONDS: float = 3600 * 2
-TEST_SEQ_LENGTHS: list[int] = [64, 128, 256, 320, 512, 600, 750, 900, 1024]
+TEST_SEQ_LENGTHS: list[int] = [16, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320]
 
-MODEL_HIDDEN_SIZE: int = 64
-MODEL_NUM_LAYERS: int = 6
+MODEL_HIDDEN_SIZE: int = 32
+MODEL_NUM_LAYERS: int = 4
 MODEL_NUM_HEADS: int = 4
-MODEL_FEEDFORWARD_DIM: int = 256
+MODEL_FEEDFORWARD_DIM: int = 128
 MODEL_MAX_SEQ_LEN: int = max(TEST_SEQ_LENGTHS) * 3
 FIXED_DATASET_SIZE: int = 10000
 _MODEL_OVERRIDES = {
@@ -30,7 +30,7 @@ _MODEL_OVERRIDES = {
     "max_seq_len": MODEL_MAX_SEQ_LEN,
 }
 
-_OUTPUT_ROOT = f"outputs_1/d{MODEL_HIDDEN_SIZE}_l{MODEL_NUM_LAYERS}_h{MODEL_NUM_HEADS}"
+_OUTPUT_ROOT = f"outputs2/d{MODEL_HIDDEN_SIZE}_l{MODEL_NUM_LAYERS}_h{MODEL_NUM_HEADS}"
 
 
 def _make_run_name(seq_len: int, seed: int) -> str:
@@ -78,14 +78,22 @@ def _make_anchor_snapshot_callback(
         train_metrics = trainer.train_evaluator.state.metrics
         current_train_exact: float = train_metrics["exact_accuracy"]
         prev_max_train = store.get("max_train_exact_acc", -1.0)
-        if current_train_exact > prev_max_train:
+        if current_train_exact >= prev_max_train:
             store["max_train_exact_acc"] = current_train_exact
 
         prev_best_val = store.get("anchor_val_exact_acc", -1.0)
-        if current_val_exact <= prev_best_val:
+        prev_best_val_loss = store.get("ancor_val_loss", float("inf"))
+
+
+
+        if current_val_exact < prev_best_val:
+            return
+
+        if current_val_exact == prev_best_val and val_metrics["loss"] >= prev_best_val_loss:
             return
 
         store["anchor_val_exact_acc"] = current_val_exact
+        store["ancor_val_loss"] = val_metrics["loss"]
         store["anchor_epoch"] = float(engine.state.epoch)
         store["train_loss"] = train_metrics["loss"]
         store["train_exact_acc"] = train_metrics["exact_accuracy"]
@@ -125,7 +133,13 @@ def run_single_experiment(
             print("\n  100% train accuracy reached! Terminating early.", end="")
             trainer.engine.terminate()
 
+    def _early_stopping_lr(engine: Engine) -> None:
+        if engine.optimizer.param_groups[0]["lr"] < 1e-6:
+            print("\n  Learning rate too low! Terminating early.", end="")
+            engine.terminate()
+
     trainer.train_evaluator.add_event_handler(Events.EPOCH_COMPLETED, _early_stopping)
+    trainer.train_evaluator.add_event_handler(Events.ITERATION_COMPLETED, _early_stopping_lr)
 
     original_attach = trainer._attach_handlers
 
