@@ -381,8 +381,8 @@ class PreTrainer:
             )
 
         tokenizer: Any = self.tokenizer
-        if not hasattr(tokenizer, "decode"):
-            raise ValueError("Tokenizer must implement 'decode' method for inference logging.")
+        if not hasattr(tokenizer, "decode") or not callable(tokenizer):
+            raise ValueError("Tokenizer must be callable and implement 'decode' method for inference logging.")
 
         # Validate active loaders
         self._validate_dataloader_for_inference(self.train_loader, "Train")
