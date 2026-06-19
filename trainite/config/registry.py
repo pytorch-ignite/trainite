@@ -28,18 +28,20 @@ class TrainerSpec(ComponentSpec):
 class ModelSpec(ComponentSpec):
     builder_symbol: str
     collate_fn_target: str | None = None
-    tokenizer_target: str | None = None
 
 
 class DatasetSpec(ComponentSpec):
     builder_symbol: str
     dataset_config_cls_path: str
+    preprocessor_spec_name: str | None = None
 
     @property
     def dataset_config_cls(self) -> type:
-        from trainite.shared.utils import get_target
-
         return get_target(self.dataset_config_cls_path)
+
+
+class PreProcessorSpec(ComponentSpec):
+    pass
 
 
 MODEL_SPECS = {
@@ -50,7 +52,6 @@ MODEL_SPECS = {
         implementation_symbol="TransformerModel",
         builder_symbol="TransformerModel",
         collate_fn_target="trainite.models.transformer.CausalLMCollateFn",
-        tokenizer_target="trainite.models.transformer.CharTokenizer",
         template_replacements=[
             ("trainite.shared.utils", "utils"),
             ("trainite.models", "models"),
@@ -74,6 +75,7 @@ DATASET_SPECS = {
             ("trainite.config.base", "config"),
         ],
         readme_template_path=Path("trainite/templates/components/datasets/string_reverse.md"),
+        preprocessor_spec_name="char",
     ),
 }
 
@@ -91,11 +93,25 @@ TRAINER_SPECS = {
     ),
 }
 
+PREPROCESSOR_SPECS = {
+    "char": PreProcessorSpec(
+        name="char_tokenizer",
+        implementation_path=Path("trainite/preprocessors/char_tokenizer.py"),
+        config_cls_path="trainite.preprocessors.char_tokenizer.CharTokenizerConfig",
+        implementation_symbol="CharTokenizer",
+        template_replacements=[
+            ("trainite.config.base", "config"),
+        ],
+        readme_template_path=Path("trainite/templates/components/preprocessors/char.md"),
+    ),
+}
+
 
 REGISTRY = {
     "models": MODEL_SPECS,
     "datasets": DATASET_SPECS,
     "trainers": TRAINER_SPECS,
+    "preprocessors": PREPROCESSOR_SPECS,
 }
 
 
@@ -121,3 +137,7 @@ def get_dataset_spec(name: str) -> DatasetSpec:
 
 def get_trainer_spec(name: str) -> TrainerSpec:
     return TRAINER_SPECS[name]
+
+
+def get_preprocessor_spec(name: str) -> PreProcessorSpec:
+    return PREPROCESSOR_SPECS[name]

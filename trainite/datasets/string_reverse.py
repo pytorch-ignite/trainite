@@ -1,7 +1,9 @@
 import random
 import string
 import warnings
+from typing import Any
 
+import torch
 from pydantic import ConfigDict, Field, model_validator
 from torch.utils.data import Dataset
 
@@ -22,8 +24,8 @@ class StringReverseDataset(Dataset):
     """Generates unique random strings and their reversals.
 
     Each sample is returned as a dictionary containing:
-        - 'prompt': the original random string
-        - 'completion': the reversed string
+        - 'source': the original random string
+        - 'target': the reversed string
     """
 
     def __init__(
@@ -57,13 +59,30 @@ class StringReverseDataset(Dataset):
         else:
             lengths = list(range(min_seq_len, max_seq_len + 1))
 
-        rng = random.Random(seed)
         num_chars = len(self.chars)
 
-        self.source_texts = []
-        self.target_texts = []
+        self.source_texts, self.target_texts = self.generate_unique_sequences(
+            lengths=lengths,
+            num_chars=num_chars,
+            per_seq_size=per_seq_size,
+            seed=seed,
+        )
 
+        # Shuffle so variable-length samples are evenly distributed across batches
+        final_shuffle_gen = random.Random(seed)
+        shuffle_indices = list(range(len(self.source_texts)))
+        final_shuffle_gen.shuffle(shuffle_indices)
+
+        self.source_texts = [self.source_texts[i] for i in shuffle_indices]
+        self.target_texts = [self.target_texts[i] for i in shuffle_indices]
+
+    def generate_unique_sequences(
+        self, lengths: list[int], num_chars: int, per_seq_size: int, seed: int = 42
+    ) -> tuple[list[str], list[str]]:
         # Generate per_seq_size unique sequences for each length bucket
+        source_texts = []
+        target_texts = []
+        rng = random.Random(seed)
         for length in lengths:
             unique_sequences: set[str] = set()
             max_possible_combinations = num_chars**length
@@ -89,25 +108,63 @@ class StringReverseDataset(Dataset):
             # Pack each unique sequence into source and target formats
             for seq in unique_sequences:
                 reversed_seq = seq[::-1]
-                self.source_texts.append(seq)
-                self.target_texts.append(reversed_seq)
+                source_texts.append(seq)
+                target_texts.append(reversed_seq)
 
-        # Shuffle so variable-length samples are evenly distributed across batches
-        final_shuffle_gen = random.Random(seed)
-        shuffle_indices = list(range(len(self.source_texts)))
-        final_shuffle_gen.shuffle(shuffle_indices)
-
-        self.source_texts = [self.source_texts[i] for i in shuffle_indices]
-        self.target_texts = [self.target_texts[i] for i in shuffle_indices]
+        return source_texts, target_texts
 
     def __len__(self) -> int:
         return len(self.source_texts)
 
     def __getitem__(self, index: int) -> dict[str, str]:
         return {
-            "prompt": self.source_texts[index],
-            "completion": self.target_texts[index],
+            "source": self.source_texts[index],
+            "target": self.target_texts[index],
         }
+
+
+class PromptCompletionTransform:
+    def __init__(self, tokenizer: Any, ignore_index: int = -100) -> None:
+        self.tokenizer = tokenizer
+        self.ignore_index = ignore_index
+
+    def __call__(self, sample: dict[str, str]) -> dict[str, torch.Tensor]:
+        source = sample["source"]
+        target = sample["target"]
+
+        sep = self.tokenizer.sep_token_id
+        bos = self.tokenizer.bos_token_id
+        eos = self.tokenizer.eos_token_id
+
+        source_tokens = self.tokenizer(source, add_special_tokens=False)["input_ids"]
+        target_tokens = self.tokenizer(target, add_special_tokens=False)["input_ids"]
+
+        combined_input_ids = [bos] + source_tokens + [sep] + target_tokens + [eos]
+
+        input_ids = torch.tensor(combined_input_ids[:-1], dtype=torch.long)
+        labels = torch.tensor(combined_input_ids[1:], dtype=torch.long)
+
+        # Apply labels masking for the prompt tokens
+        labels[: len(source_tokens) + 1] = self.ignore_index
+
+        attention_mask = torch.ones(len(input_ids), dtype=torch.long)
+
+        return {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "labels": labels,
+            "source": source,
+            "target": target,
+        }
+
+
+class PromptCompletionTransformConfig(ComponentConfig):
+    model_config = ConfigDict(validate_assignment=True)
+    target: str = Field(
+        default="trainite.datasets.string_reverse.PromptCompletionTransform",
+        alias="_target_",
+    )
+    ignore_index: int = -100
 
 
 class StringReverseDatasetConfig(ComponentConfig):
@@ -140,6 +197,7 @@ class StringReverseDataConfig(DataWithAutoSplit):
     dataset: StringReverseDatasetConfig | None = Field(  # type: ignore[assignment]
         default_factory=StringReverseDatasetConfig
     )
+    transform: PromptCompletionTransformConfig | None = Field(default_factory=PromptCompletionTransformConfig)
     test_ratio: float = 0.1
     val_ratio: float = 0.1
     dataloader: DataLoaderConfig = Field(

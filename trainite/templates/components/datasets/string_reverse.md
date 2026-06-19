@@ -10,8 +10,8 @@ Each dataset item is a dictionary of raw strings:
 
 ```python
 {
-    "prompt": "abc",
-    "completion": "cba",
+    "source": "abc",
+    "target": "cba",
 }
 ```
 

@@ -8,6 +8,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset, random_split
 
+from trainite.datasets.transformed import TransformedDataset
 from trainite.shared.utils import get_target, instantiate, load_config
 from trainite.trainers.pretrainer import PreTrainer, ProjectConfig
 
@@ -89,15 +90,35 @@ def create_dataloader(
     return DataLoader(dataset, shuffle=shuffle, collate_fn=collate_fn, **dl_kwargs)
 
 
+def _inject_if_accepted(target_symbol: Any, **candidates: Any) -> dict[str, Any]:
+    try:
+        sig = inspect.signature(target_symbol)
+        return {k: v for k, v in candidates.items() if k in sig.parameters}
+    except Exception:
+        return {}
+
+
+def build_dataset(dataset_config: Any, transform_config: Any, tokenizer: Any) -> Dataset:
+    ds = get_target(dataset_config.target)
+    dataset = instantiate(dataset_config, **_inject_if_accepted(ds, preprocessor=tokenizer, tokenizer=tokenizer))
+    if transform_config is not None:
+        tf = get_target(transform_config.target)
+        transform = instantiate(
+            transform_config, **_inject_if_accepted(tf, preprocessor=tokenizer, tokenizer=tokenizer)
+        )
+        return TransformedDataset(dataset, transform)
+    return dataset
+
+
 def build_dataloader(split_config: Any, tokenizer: Any) -> DataLoader:
-    dataset = instantiate(split_config.dataset)
+    dataset = build_dataset(split_config.dataset, split_config.transform, tokenizer)
     return create_dataloader(dataset, split_config.dataloader, tokenizer)
 
 
 def build_loaders_from_ratios(
     data_config: Any, tokenizer: Any, seed: int
 ) -> tuple[DataLoader, DataLoader, DataLoader | None]:
-    dataset = instantiate(data_config.dataset)
+    dataset = build_dataset(data_config.dataset, data_config.transform, tokenizer)
     total_len = len(dataset)
 
     if total_len == 0:
@@ -151,7 +172,7 @@ def main() -> None:
     config = load_config(config_path, ProjectConfig)
 
     device = resolve_device(config.device)
-    tokenizer = instantiate(config.tokenizer)
+    tokenizer = instantiate(config.preprocessor) if config.preprocessor is not None else None
 
     train_loader, val_loader, test_loader = build_dataloaders(config.data, tokenizer, config.seed)
 
@@ -167,7 +188,7 @@ def main() -> None:
         train_loader=train_loader,
         val_loader=val_loader,
         test_loader=test_loader,
-        tokenizer=tokenizer,
+        preprocessor=tokenizer,
     )
     trainer.run()
 

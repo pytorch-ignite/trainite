@@ -4,7 +4,9 @@ It is a decoder-only Transformer: given a sequence of token IDs, it predicts the
 
 ## What goes in / out
 
-- **Input**: `input_ids` with shape `(batch, seq_len)`
+- **Input**:
+  - `input_ids` with shape `(batch, seq_len)`
+  - `attention_mask` (optional) with shape `(batch, seq_len)`
 - **Output**: logits with shape `(batch, seq_len, vocab_size)`
 
 The trainer uses these logits with cross-entropy loss.

@@ -25,6 +25,7 @@ and a batch that looks like:
 {
     "input_ids": Tensor,
     "labels": Tensor,
+    "attention_mask": Tensor,  # Optional
 }
 ```
 

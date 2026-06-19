@@ -90,6 +90,9 @@ If you prefer standard Python tools, you can create a virtual environment and us
 ### Trainer: {{trainer_name}}
 {{trainer_docs}}
 
+### Preprocessor: {{preprocessor_name}}
+{{preprocessor_docs}}
+
 ## Customization
 
 ### Dataset Configuration

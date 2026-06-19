@@ -1,17 +1,14 @@
-from unittest import mock
-
 import pytest
 import torch
-
 from trainite.config.registry import get_model_spec
 from trainite.models.transformer import (
     Attention,
     CausalLMCollateFn,
-    CharTokenizer,
     RotaryEmbedding,
     TransformerBlock,
     TransformerModel,
 )
+from trainite.preprocessors.char_tokenizer import CharTokenizer
 from trainite.shared.utils import instantiate
 
 
@@ -147,70 +144,29 @@ def test_build_transformer_model_from_spec():
     assert isinstance(model, TransformerModel)
 
 
-def test_transformer_model_generate():
-    tokenizer = CharTokenizer()
-    hidden_size = 16
-    model = TransformerModel(vocab_size=tokenizer.vocab_size, hidden_size=hidden_size)
-    model.eval()
-
-    # Test tensor input generate
-    with mock.patch.object(model, "forward") as mock_forward:
-
-        def mock_forward_fn(x, attention_mask=None):
-            logits = torch.zeros(1, x.shape[1], tokenizer.vocab_size)
-            logits[0, -1, 7] = 10.0
-            return logits
-
-        mock_forward.side_effect = mock_forward_fn
-
-        input_ids = torch.tensor([[5, 6]], dtype=torch.long)
-        generated = model.generate(input_ids, max_new_tokens=1)
-        assert isinstance(generated, torch.Tensor)
-        assert generated[0].tolist() == [5, 6, 7]
-
-    # Test with eos_token_id early exit
-    with mock.patch.object(model, "forward") as mock_forward:
-
-        def mock_forward_fn(x, attention_mask=None):
-            logits = torch.zeros(1, x.shape[1], tokenizer.vocab_size)
-            logits[0, -1, tokenizer.eos_token_id] = 10.0
-            return logits
-
-        mock_forward.side_effect = mock_forward_fn
-
-        input_ids = torch.tensor([[5, 6]], dtype=torch.long)
-        generated = model.generate(
-            input_ids,
-            max_new_tokens=10,
-            eos_token_id=tokenizer.eos_token_id,
-        )
-        assert generated[0].tolist() == [5, 6, tokenizer.eos_token_id]
-
-    # # Test with eos_token_id early exit (default tokenizer fallback)
-    # with mock.patch.object(model, "forward") as mock_forward:
-    #
-    #     def mock_forward_fn(x, attention_mask=None):
-    #         logits = torch.zeros(1, x.shape[1], tokenizer.vocab_size)
-    #         logits[0, -1, tokenizer.eos_token_id] = 10.0
-    #         return logits
-    #
-    #     mock_forward.side_effect = mock_forward_fn
-    #
-    #     input_ids = torch.tensor([[5, 6]], dtype=torch.long)
-    #     generated = model.generate(
-    #         input_ids,
-    #         max_new_tokens=10,
-    #     )
-    #     assert generated[0].tolist() == [5, 6, tokenizer.eos_token_id]
-
-
 def test_causal_lm_collate_fn():
     tokenizer = CharTokenizer()
     collate = CausalLMCollateFn(tokenizer=tokenizer, pad_token_id=0, ignore_index=-100)
 
-    data1 = {"prompt": "abc", "completion": "cba"}
-    data2 = {"prompt": "d", "completion": "d"}
-    batch = [data1, data2]
+    # Create pre-tokenized items as the dataset now produces
+    src1 = "abc"
+    tgt1 = "cba"
+    src2 = "d"
+    tgt2 = "d"
+
+    def make_item(source: str, target: str) -> dict:
+        source_ids = tokenizer.encode(source)
+        target_ids = tokenizer.encode(target)
+        combined = (
+            [tokenizer.bos_token_id] + source_ids + [tokenizer.sep_token_id] + target_ids + [tokenizer.eos_token_id]
+        )
+        return {
+            "input_ids": torch.tensor(combined[:-1], dtype=torch.long),
+            "labels": torch.tensor(combined[1:], dtype=torch.long),
+            "attention_mask": torch.ones(len(combined) - 1, dtype=torch.long),
+        }
+
+    batch = [make_item(src1, tgt1), make_item(src2, tgt2)]
 
     collated = collate(batch)
     assert "input_ids" in collated
@@ -221,8 +177,8 @@ def test_causal_lm_collate_fn():
     assert collated["input_ids"].shape == collated["labels"].shape
 
     # Max sequence length:
-    # "abc" (3) -> src is <bos> abc <sep> (5 tokens). target is cba <eos> (4 tokens). total full_seq = 9. input_ids = 8. labels = 8.
-    # "d" (1) -> src is <bos> d <sep> (3 tokens). target is d <eos> (2 tokens). total full_seq = 5. input_ids = 4. labels = 4.
-    # So max length is 8.
+    # "abc" (3) -> <bos>abc<sep>cba<eos> = 9 tokens, input_ids=8, labels=8
+    # "d" (1) -> <bos>d<sep>d<eos> = 5 tokens, input_ids=4, labels=4
+    # Max length = 8, shorter padded on left
     assert collated["input_ids"].shape == (2, 8)
-    assert (collated["input_ids"][1, :4] == 0).all()
+    assert (collated["input_ids"][1, :4] == tokenizer.pad_token_id).all()

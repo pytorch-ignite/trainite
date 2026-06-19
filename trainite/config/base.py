@@ -36,6 +36,7 @@ class DataLoaderConfig(BaseModel):
 class SplitConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
     dataset: ComponentConfig
+    transform: ComponentConfig | None = None
     dataloader: DataLoaderConfig = Field(default_factory=DataLoaderConfig)
 
 
@@ -50,6 +51,7 @@ class DataWithAutoSplit(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
     # Option 2: Automatic splitting
     dataset: ComponentConfig
+    transform: ComponentConfig | None = None
     dataloader: DataLoaderConfig = Field(default_factory=DataLoaderConfig)
     test_ratio: float = Field(default=0.2, ge=0.0, lt=0.5)
     val_ratio: float = Field(default=0.1, gt=0.0, lt=0.3)

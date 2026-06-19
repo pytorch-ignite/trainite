@@ -1,54 +1,35 @@
 import pytest
+import torch
 from torch.utils.data import DataLoader
-
 from trainite.config.registry import get_dataset_spec
-from trainite.datasets.string_reverse import StringReverseDataset
-from trainite.models.transformer import (
+from trainite.datasets.string_reverse import (
     CHARSET_PRESETS,
-    UNIVERSAL_VOCAB,
-    CharTokenizer,
+    PromptCompletionTransform,
+    StringReverseDataset,
 )
-from trainite.shared.utils import get_target, instantiate
-
-
-def test_char_tokenizer():
-    tokenizer = CharTokenizer()
-    assert tokenizer.vocab_size == len(UNIVERSAL_VOCAB) + len(tokenizer.special_tokens)
-
-    encoded = tokenizer.encode("abc")
-    assert encoded == [5, 6, 7]
-
-    decoded = tokenizer.decode(encoded)
-    assert decoded == "abc"
-
-    # Test special tokens
-    assert tokenizer.decode([0, 1, 2, 3, 4], skip_special_tokens=False) == "<PAD><BOS><SEP><EOS><UNK>"
-    assert tokenizer.decode([0, 1, 2, 3, 4], skip_special_tokens=True) == "<UNK>"
-
-    # Test unk
-    assert tokenizer.encode("Δ") == [4]  # Δ is not in the universal vocab, should map to UNK token ID 3
-    assert tokenizer.decode([4]) == "<UNK>"
+from trainite.datasets.transformed import TransformedDataset
+from trainite.preprocessors.char_tokenizer import CharTokenizer
+from trainite.shared.main import build_dataset
+from trainite.shared.utils import get_target
 
 
 def test_string_reverse_dataset():
     per_seq_size = 10
     max_len = 5
-    dataset = StringReverseDataset(per_seq_size=per_seq_size, min_seq_len=max_len, max_seq_len=max_len, seed=42)
+    dataset = StringReverseDataset(
+        per_seq_size=per_seq_size,
+        min_seq_len=max_len,
+        max_seq_len=max_len,
+        seed=42,
+    )
 
     assert len(dataset) == per_seq_size
     item = dataset[0]
-    assert "prompt" in item
-    assert "completion" in item
-
-    source_text = item["prompt"]
-    target_text = item["completion"]
-
-    # seq len is 5.
-    assert len(source_text) == 5
-    assert len(target_text) == 5
-
-    # Verify reversal logic
-    assert source_text[::-1] == target_text
+    assert "source" in item
+    assert "target" in item
+    assert isinstance(item["source"], str)
+    assert isinstance(item["target"], str)
+    assert item["source"][::-1] == item["target"]
 
 
 def test_string_reverse_variable_lengths_and_presets():
@@ -120,13 +101,14 @@ def test_build_string_reverse_dataset():
 def test_config_build_string_reverse_dataset():
     spec = get_dataset_spec("string-reverse")
     dataset_conf = spec.config_cls()
-    dataset = instantiate(dataset_conf.dataset)
-    assert isinstance(dataset, StringReverseDataset)
+    tokenizer = CharTokenizer()
+    dataset = build_dataset(dataset_conf.dataset, dataset_conf.transform, tokenizer)
+    assert isinstance(dataset, TransformedDataset)
 
     from trainite.config.registry import get_model_spec
 
     model_spec = get_model_spec("transformer")
-    collate_fn_obj = get_target(model_spec.collate_fn_target)(tokenizer=CharTokenizer())
+    collate_fn_obj = get_target(model_spec.collate_fn_target)(tokenizer=tokenizer)
 
     dataloader_conf = dataset_conf.dataloader
     dataloader_kwargs = dataloader_conf.model_dump(exclude={"collate_fn"})
@@ -146,5 +128,84 @@ def test_string_reverse_dataset_size_capping_and_warning():
         UserWarning,
         match="Requested 10 unique sequences for seq_len=1 but only 3 could be generated",
     ):
-        dataset = StringReverseDataset(per_seq_size=10, min_seq_len=1, max_seq_len=1, charset="abc", seed=42)
+        dataset = StringReverseDataset(
+            per_seq_size=10,
+            min_seq_len=1,
+            max_seq_len=1,
+            charset="abc",
+            seed=42,
+        )
     assert len(dataset) == 3
+
+
+def test_charset_empty_raises():
+    """Empty charset should raise ValueError."""
+    with pytest.raises(ValueError, match="resulted in empty characters"):
+        StringReverseDataset(
+            per_seq_size=5,
+            seq_len=3,
+            charset="",
+        )
+
+
+def test_dataset_config_min_seq_len_gt_max():
+    """Config validation: min_seq_len > max_seq_len should raise."""
+    from trainite.datasets.string_reverse import StringReverseDatasetConfig
+
+    with pytest.raises(ValueError, match="min_seq_len must be less than or equal to max_seq_len"):
+        StringReverseDatasetConfig(min_seq_len=10, max_seq_len=5)
+
+
+def test_data_config_defaults():
+    """Verify StringReverseDataConfig default values."""
+    from trainite.datasets.string_reverse import StringReverseDataConfig
+
+    config = StringReverseDataConfig()
+    assert config.test_ratio == 0.1
+    assert config.val_ratio == 0.1
+    assert config.dataset is not None
+    assert config.dataset.per_seq_size == 256
+    assert config.dataset.charset == "@alpha"
+    assert config.dataloader.batch_size == 32
+    assert config.dataloader.collate_fn is None
+
+
+def test_prompt_completion_transform():
+    tokenizer = CharTokenizer()
+    transform = PromptCompletionTransform(tokenizer=tokenizer, ignore_index=-100)
+
+    sample = {"source": "abc", "target": "cba"}
+    item = transform(sample)
+
+    assert "input_ids" in item
+    assert "labels" in item
+    assert "attention_mask" in item
+
+    # Check tensor shapes and types
+    assert item["input_ids"].dtype == torch.long
+    assert item["labels"].dtype == torch.long
+    assert item["attention_mask"].dtype == torch.long
+
+    # Auto-regressive shift: input_ids and labels should match, shifted by 1
+    assert len(item["input_ids"]) == len(item["labels"])
+
+    # First token of input is BOS
+    assert item["input_ids"][0].item() == tokenizer.bos_token_id
+    # Last token of labels is EOS
+    assert item["labels"][-1].item() == tokenizer.eos_token_id
+
+    # The SEP token must exist in the labels/inputs
+    sep_idx = (item["input_ids"] == tokenizer.sep_token_id).nonzero(as_tuple=True)[0][0].item()
+    assert sep_idx > 0
+
+    # Ensure label masking for the prompt part (BOS + source + SEP = 1 + 3 + 1 = 5 tokens)
+    # The source tokens plus the SEP token in labels must be masked.
+    # labels corresponds to combined_input_ids[1:], so the first len(source_tokens) + 1 tokens are masked.
+    source_tokens = tokenizer("abc", add_special_tokens=False)["input_ids"]
+    masked_len = len(source_tokens) + 1
+    assert (item["labels"][:masked_len] == -100).all()
+    # The target tokens + EOS should NOT be masked
+    assert (item["labels"][masked_len:] != -100).all()
+
+    # All attention mask values should be 1
+    assert item["attention_mask"].eq(1).all()

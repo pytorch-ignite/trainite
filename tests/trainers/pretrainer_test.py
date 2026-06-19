@@ -7,7 +7,7 @@ from unittest import mock
 import pytest
 import torch
 import torch.nn as nn
-
+from pydantic import ValidationError
 from trainite.config import (
     ComponentConfig,
     DataConfigBase,
@@ -29,7 +29,7 @@ from trainite.trainers.pretrainer import PreTrainer, PreTrainerConfig, ProjectCo
 
 def create_trainer_from_config(config: ProjectConfig) -> PreTrainer:
     device = resolve_device(config.device)
-    tokenizer = instantiate(config.tokenizer)
+    tokenizer = instantiate(config.preprocessor)
     train_loader, val_loader, test_loader = build_dataloaders(config.data, tokenizer, config.seed)
     vocab_size = resolve_vocab_size(tokenizer, config.model)
     model = build_model(config.model, tokenizer, vocab_size, device)
@@ -41,7 +41,7 @@ def create_trainer_from_config(config: ProjectConfig) -> PreTrainer:
         train_loader=train_loader,
         val_loader=val_loader,
         test_loader=test_loader,
-        tokenizer=tokenizer,
+        preprocessor=tokenizer,
         # vocab_size=vocab_size,
     )
 
@@ -59,7 +59,7 @@ class SimpleModel(nn.Module):
         self.embedding = nn.Embedding(vocab_size, hidden_size)
         self.fc = nn.Linear(hidden_size, vocab_size)
 
-    def forward(self, x):
+    def forward(self, x, attention_mask=None, **kwargs):
         return self.fc(self.embedding(x))
 
 
@@ -68,7 +68,7 @@ class SimpleModelWithTokenizer(SimpleModel):
 
 
 class SimpleDataset(torch.utils.data.Dataset):
-    def __init__(self, size=16, seq_len=4, vocab_size=10):
+    def __init__(self, size=16, seq_len=4, vocab_size=10, **kwargs):
         self.size = size
         self.seq_len = seq_len
         self.vocab_size = vocab_size
@@ -84,7 +84,7 @@ class SimpleDataset(torch.utils.data.Dataset):
 
 
 class SimpleDatasetNoVocab(torch.utils.data.Dataset):
-    def __init__(self, size=16, seq_len=4):
+    def __init__(self, size=16, seq_len=4, **kwargs):
         self.size = size
         self.seq_len = seq_len
 
@@ -99,6 +99,9 @@ class SimpleDatasetNoVocab(torch.utils.data.Dataset):
 
 
 class EmptyDataset(torch.utils.data.Dataset):
+    def __init__(self, **kwargs):
+        pass
+
     def __len__(self):
         return 0
 
@@ -139,6 +142,9 @@ class DummyTokenizer:
     def decode(self, ids, skip_special_tokens=True):
         return "decoded_prediction"
 
+    def __call__(self, text, **kwargs):
+        return {"input_ids": self.encode(text)}
+
 
 class GenerativeModel(SimpleModel):
     tokenizer = DummyTokenizer()
@@ -161,10 +167,13 @@ class GenerativeModel(SimpleModel):
 
 
 class GenerativeDataset(SimpleDataset):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
     def __getitem__(self, index):
         item = super().__getitem__(index)
-        item["prompt"] = f"source_{index}"  # type: ignore[assignment]
-        item["completion"] = f"target_{index}"  # type: ignore[assignment]
+        item["source"] = f"source_{index}"
+        item["target"] = f"target_{index}"
         return item
 
 
@@ -190,7 +199,7 @@ def temp_run_dir():
 @pytest.fixture
 def project_config(temp_run_dir):
     return ProjectConfig(
-        tokenizer=cc("tests.trainers.pretrainer_test.DummyTokenizer"),
+        preprocessor=cc("tests.trainers.pretrainer_test.DummyTokenizer"),
         model=cc(
             "tests.trainers.pretrainer_test.SimpleModel",
             vocab_size=10,
@@ -259,32 +268,6 @@ def test_flatten_accuracy():
     assert flat_logits.shape == (4, 5)  # 6 tokens total, 2 are masked
     assert flat_targets.shape == (4,)
     assert (flat_targets == torch.tensor([1, 2, 0, 3])).all()
-
-
-def test_exact_accuracy_transform():
-    logits = torch.tensor(
-        [
-            [[10.0, 0.0], [0.0, 10.0], [10.0, 0.0]],  # Preds: 0, 1, 0
-            [[0.0, 10.0], [10.0, 0.0], [0.0, 10.0]],  # Preds: 1, 0, 1
-        ]
-    )
-    targets = torch.tensor(
-        [
-            [0, 1, -100],  # Correct if we ignore -100
-            [1, 0, 0],  # Last one is wrong (pred 1, target 0)
-        ]
-    )
-
-    trainer = PreTrainer.__new__(PreTrainer)
-    trainer.loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
-
-    output = {"logits": logits, "targets": targets}
-    y_pred, y = trainer._exact_accuracy_transform(output)
-
-    # Sequence 1: 0==0, 1==1, -100 is masked. All correct -> 1
-    # Sequence 2: 1==1, 0==0, 1!=0. Not all correct -> 0
-    assert (y_pred == torch.tensor([1, 0])).all()
-    assert (y == torch.tensor([1, 1])).all()
 
 
 def test_pretrainer_init(project_config):
@@ -438,7 +421,6 @@ def test_pretrainer_test_method(project_config, temp_run_dir):
 
     # Test evaluators should have run
     assert "loss" in trainer.test_evaluator.state.metrics
-    assert "exact_accuracy" in trainer.test_evaluator.state.metrics
     assert "token_accuracy" in trainer.test_evaluator.state.metrics
 
 
@@ -496,7 +478,7 @@ def test_pretrainer_explicit_split_shuffle(project_config):
 
 def test_pretrainer_builds_train_and_val_loaders_from_ratios(tmp_path):
     config = ProjectConfig(
-        tokenizer=cc("tests.trainers.pretrainer_test.DummyTokenizer"),
+        preprocessor=cc("tests.trainers.pretrainer_test.DummyTokenizer"),
         model=cc(
             "tests.trainers.pretrainer_test.SimpleModel",
             vocab_size=100,
@@ -529,7 +511,7 @@ def test_pretrainer_builds_train_and_val_loaders_from_ratios(tmp_path):
 
 def test_pretrainer_builds_train_val_and_test_loaders_from_ratios(tmp_path):
     config = ProjectConfig(
-        tokenizer=cc("tests.trainers.pretrainer_test.DummyTokenizer"),
+        preprocessor=cc("tests.trainers.pretrainer_test.DummyTokenizer"),
         model=cc(
             "tests.trainers.pretrainer_test.SimpleModel",
             vocab_size=100,
@@ -581,8 +563,6 @@ def test_pretrainer_dataset_is_empty(project_config):
 
 
 def test_pretrainer_early_stopping_patience(project_config):
-    from pydantic import ValidationError
-
     with pytest.raises(ValidationError):
         project_config.trainer.early_stopping_patience = 0
 
@@ -642,37 +622,6 @@ def test_setup_inference_invalid_inference_type_params(project_config, epochs, t
         create_trainer_from_config(project_config)
 
 
-def test_setup_inference_missing_generate(project_config):
-    project_config.trainer.inference_every_epochs = 1
-    with pytest.raises(ValueError, match="Model must implement 'generate' method"):
-        create_trainer_from_config(project_config)
-
-
-@pytest.mark.skip(reason="Obsolete after tokenizer became required in ProjectConfig")
-def test_setup_inference_missing_tokenizer(project_config):
-    project_config.trainer.inference_every_epochs = 1
-    project_config.__dict__["tokenizer"] = None
-    project_config.model = cc(
-        "tests.trainers.pretrainer_test.GenerativeModelNoTokenizer",
-        vocab_size=10,
-        hidden_size=8,
-    )
-    project_config.data.train.dataset = cc(
-        "tests.trainers.pretrainer_test.GenerativeDataset",
-        size=16,
-        seq_len=4,
-        vocab_size=10,
-    )
-    project_config.data.val.dataset = cc(
-        "tests.trainers.pretrainer_test.GenerativeDataset",
-        size=8,
-        seq_len=4,
-        vocab_size=10,
-    )
-    with pytest.raises(ValueError, match="Please specify a tokenizer"):
-        create_trainer_from_config(project_config)
-
-
 def test_setup_inference_invalid_dataset_items(project_config):
     project_config.trainer.inference_every_epochs = 1
     project_config.model = cc(
@@ -688,7 +637,7 @@ def test_setup_inference_invalid_dataset_items(project_config):
     )
     with pytest.raises(
         ValueError,
-        match="dataset items must contain 'prompt' and 'completion' keys",
+        match="must contain 'source' and 'target' keys",
     ):
         create_trainer_from_config(project_config)
 
@@ -744,3 +693,24 @@ def test_pretrainer_grad_clip_norm(project_config):
     with mock.patch("torch.nn.utils.clip_grad_norm_") as mock_clip:
         trainer.run()
     assert mock_clip.called
+
+
+def test_pretrainer_generate(project_config):
+    trainer = create_trainer_from_config(project_config)
+    trainer.model.eval()
+
+    with mock.patch.object(trainer.model, "forward") as mock_forward:
+
+        def mock_forward_fn(x, attention_mask=None):
+            logits = torch.zeros(x.shape[0], x.shape[1], trainer.tokenizer.vocab_size)
+            logits[:, -1, 7] = 10.0
+            return logits
+
+        mock_forward.side_effect = mock_forward_fn
+
+        input_ids = torch.tensor([[5, 6]], dtype=torch.long)
+        attention_mask = torch.ones_like(input_ids, dtype=torch.long)
+
+        generated = trainer.generate(input_ids, max_new_tokens=1, attention_mask=attention_mask)
+        assert isinstance(generated, torch.Tensor)
+        assert generated[0].tolist() == [5, 6, 7]
