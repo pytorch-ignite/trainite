@@ -291,9 +291,7 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
 
     templates.update(
         {
-            f"{trainer_spec.name}.py": _render_template(
-                PROJECT_ROOT / trainer_spec.implementation_path, trainer_replacements
-            ),
+            "trainer.py": _render_template(PROJECT_ROOT / trainer_spec.implementation_path, trainer_replacements),
             "utils.py": _render_template(PROJECT_ROOT / "trainite/shared/utils.py"),
             "main.py": _render_template(PROJECT_ROOT / "trainite/shared/main.py", main_replacements),
             "README.md": _render_template(PROJECT_ROOT / "trainite/templates/project/README.md", readme_replacements),

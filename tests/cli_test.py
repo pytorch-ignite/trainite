@@ -47,7 +47,7 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
             f"datasets/{dataset_spec.name}.py",
             "datasets/transformed.py",
             f"preprocessors/{preprocessor_spec.name}.py",
-            f"{trainer_spec.name}.py",
+            "trainer.py",
             "utils.py",
             "main.py",
             "pyproject.toml",
@@ -63,7 +63,7 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
             f"datasets/{dataset_spec.name}.py",
             "datasets/transformed.py",
             f"preprocessors/{preprocessor_spec.name}.py",
-            f"{trainer_spec.name}.py",
+            "trainer.py",
             "utils.py",
             "main.py",
         ]
