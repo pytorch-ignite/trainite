@@ -244,7 +244,7 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
     main_replacements = [
         (
             "from trainite.trainers.pretrainer import PreTrainer, ProjectConfig",
-            f"from {trainer_spec.name} import {trainer_spec.implementation_symbol}, ProjectConfig",
+            f"from trainer import {trainer_spec.implementation_symbol}, ProjectConfig",
         ),
         ("trainite.shared.utils", "utils"),
         ("PreTrainer(", f"{trainer_spec.implementation_symbol}("),

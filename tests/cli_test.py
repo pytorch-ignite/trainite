@@ -38,7 +38,10 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
         dataset_spec = get_dataset_spec(dataset)
         model_spec = get_model_spec(model)
         trainer_spec = get_trainer_spec(trainer)
-        preprocessor_spec = get_preprocessor_spec(dataset_spec.preprocessor_spec_name)
+        preprocessor_spec = (
+            get_preprocessor_spec(dataset_spec.preprocessor_spec_name) if dataset_spec.preprocessor_spec_name else None
+        )
+        preprocessor_file = f"preprocessors/{preprocessor_spec.name}.py" if preprocessor_spec else None
 
         expected_files = [
             "config.yaml",
@@ -46,15 +49,16 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
             f"models/{model_spec.name}.py",
             f"datasets/{dataset_spec.name}.py",
             "datasets/transformed.py",
-            f"preprocessors/{preprocessor_spec.name}.py",
             "trainer.py",
             "utils.py",
             "main.py",
             "pyproject.toml",
             "README.md",
+            preprocessor_file,
         ]
         for filename in expected_files:
-            assert (project_dir / filename).exists(), f"{filename} missing"
+            if filename is not None:
+                assert (project_dir / filename).exists(), f"{filename} missing"
 
         # Check if python files are parseable
         python_files = [
@@ -62,13 +66,14 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
             f"models/{model_spec.name}.py",
             f"datasets/{dataset_spec.name}.py",
             "datasets/transformed.py",
-            f"preprocessors/{preprocessor_spec.name}.py",
             "trainer.py",
             "utils.py",
             "main.py",
+            preprocessor_file,
         ]
         for filename in python_files:
-            py_compile.compile(str(project_dir / filename), doraise=True)
+            if filename is not None:
+                py_compile.compile(str(project_dir / filename), doraise=True)
 
 
 def test_generated_string_reversal_project_is_runnable() -> None:
