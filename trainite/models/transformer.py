@@ -180,7 +180,7 @@ class TransformerModel(nn.Module):
         cos, sin = self.rotary_emb(x, seq_len=S)
         padding_mask: torch.Tensor | None = None
         if attention_mask is not None:
-            if not attention_mask.any().item():
+            if not attention_mask.all().item():
                 padding_mask = attention_mask.reshape(B, 1, 1, S).to(torch.bool)
         elif (input_ids == self.embedding.padding_idx).any().item():
             padding_mask = (input_ids != self.embedding.padding_idx).reshape(B, 1, 1, S)
