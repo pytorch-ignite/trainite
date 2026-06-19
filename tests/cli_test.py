@@ -122,3 +122,31 @@ def test_generated_string_reversal_project_is_runnable() -> None:
             pytest.fail(f"Generated project failed to run:\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}")
         except subprocess.TimeoutExpired:
             pytest.fail("Generated project timed out")
+
+
+def test_cli_main_routing():
+    from trainite.cli.main import main
+    from unittest import mock
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(argv=[])
+    assert exc_info.value.code == 1
+
+    with mock.patch("trainite.cli.main.run_interactive_mode") as mock_interactive:
+        main(argv=["init"])
+        mock_interactive.assert_called_once()
+
+    with mock.patch("trainite.cli.main.init_project") as mock_init_project:
+        main(
+            argv=[
+                "init",
+                "--model",
+                "transformer",
+                "--dataset",
+                "string-reverse",
+                "--trainer",
+                "pretrainer",
+                "dummy_path",
+            ]
+        )
+        mock_init_project.assert_called_once()
