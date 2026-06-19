@@ -172,7 +172,7 @@ def main() -> None:
     config = load_config(config_path, ProjectConfig)
 
     device = resolve_device(config.device)
-    tokenizer = instantiate(config.preprocessor)
+    tokenizer = instantiate(config.preprocessor) if config.preprocessor is not None else None
 
     train_loader, val_loader, test_loader = build_dataloaders(config.data, tokenizer, config.seed)
 
