@@ -64,7 +64,7 @@ class StringReverseDataset(Dataset):
         self.source_texts, self.target_texts = self.generate_unique_sequences(
             lengths=lengths,
             num_chars=num_chars,
-            target_size=per_seq_size,
+            per_seq_size=per_seq_size,
             seed=seed,
         )
 
@@ -77,7 +77,7 @@ class StringReverseDataset(Dataset):
         self.target_texts = [self.target_texts[i] for i in shuffle_indices]
 
     def generate_unique_sequences(
-        self, lengths: list[int], num_chars: int, target_size: int, seed: int = 42
+        self, lengths: list[int], num_chars: int, per_seq_size: int, seed: int = 42
     ) -> tuple[list[str], list[str]]:
         # Generate per_seq_size unique sequences for each length bucket
         source_texts = []
@@ -86,7 +86,7 @@ class StringReverseDataset(Dataset):
         for length in lengths:
             unique_sequences: set[str] = set()
             max_possible_combinations = num_chars**length
-            target = min(target_size, max_possible_combinations)
+            target = min(per_seq_size, max_possible_combinations)
 
             # Safety cap to avoid infinite loops when the space is small
             attempts = 0
@@ -97,9 +97,9 @@ class StringReverseDataset(Dataset):
                 unique_sequences.add(seq)
                 attempts += 1
 
-            if len(unique_sequences) < target_size:
+            if len(unique_sequences) < per_seq_size:
                 warnings.warn(
-                    f"Requested {target_size} unique sequences for seq_len={length} "
+                    f"Requested {per_seq_size} unique sequences for seq_len={length} "
                     f"but only {len(unique_sequences)} could be generated "
                     f"(max possible: {max_possible_combinations}).",
                     stacklevel=2,

@@ -179,11 +179,11 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
     preprocessor_spec = (
         get_preprocessor_spec(dataset_spec.preprocessor_spec_name) if dataset_spec.preprocessor_spec_name else None
     )
-    specs = [model_spec, dataset_spec, trainer_spec]
-    specs = specs + [preprocessor_spec] if preprocessor_spec else specs
+    specs = [model_spec, dataset_spec, trainer_spec, preprocessor_spec]
     spec_deps = set()
     for spec in specs:
-        spec_deps.update(spec.dependencies)
+        if spec is not None:
+            spec_deps.update(spec.dependencies)
     required_deps, other_deps = parse_dependencies(PROJECT_ROOT / "pyproject.toml")
     final_deps = set(required_deps.values())
     for dep in spec_deps:
@@ -254,6 +254,11 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
         ),
     ]
 
+    preprocessor_name = preprocessor_spec.name if preprocessor_spec else "None"
+    preprocessor_docs = ""
+    if preprocessor_spec and preprocessor_spec.readme_template_path:
+        preprocessor_docs = _render_template(PROJECT_ROOT / preprocessor_spec.readme_template_path)
+
     readme_replacements = [
         ("{{project_name}}", project_name),
         ("{{model_name}}", model_spec.name),
@@ -262,6 +267,8 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
         ("{{dataset_docs}}", dataset_docs),
         ("{{trainer_name}}", trainer_spec.name),
         ("{{trainer_docs}}", trainer_docs),
+        ("{{preprocessor_name}}", preprocessor_name),
+        ("{{preprocessor_docs}}", preprocessor_docs),
     ]
 
     templates = {

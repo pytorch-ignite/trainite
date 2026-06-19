@@ -351,6 +351,8 @@ class PreTrainer:
 
     def _validate_dataloader_for_inference(self, loader: DataLoader, name: str) -> None:
         dataset = loader.dataset
+        if len(dataset) == 0:
+            raise ValueError(f"{name} dataset is empty. Cannot perform inference logging.")
         dataset = dataset.dataset if isinstance(dataset, Subset) else dataset
         item = dataset[0]  # type: ignore
         if not isinstance(item, dict):
@@ -411,7 +413,6 @@ class PreTrainer:
         targets: list[str] = []
         sources: list[str] = []
         for i in range(num_samples):
-            dataset = dataset.dataset if isinstance(dataset, Subset) else dataset  # in case of Subset wrapping
             item = dataset[i]
             source = item["source"]
             target = item["target"]
