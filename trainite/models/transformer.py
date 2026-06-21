@@ -2,9 +2,9 @@ import math
 from typing import Protocol
 
 import torch
+from pydantic import Field
 from torch import nn
 from torch.nn.utils.rnn import pad_sequence
-from pydantic import Field
 
 from trainite.config.base import ComponentConfig
 
@@ -110,36 +110,28 @@ class Attention(nn.Module):
         attn_weights = None
         if output_attentions:
             attn_scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim)
+            causal_mask = torch.ones(S, S, dtype=torch.bool, device=x.device).tril()
+            mask = causal_mask
             if padding_mask is not None:
-                causal_mask = torch.ones(S, S, dtype=torch.bool, device=x.device).tril()
                 mask = causal_mask & padding_mask
-                attn_scores = attn_scores.masked_fill(~mask, float("-inf"))
-            else:
-                causal_mask = torch.ones(S, S, dtype=torch.bool, device=x.device).tril()
-                attn_scores = attn_scores.masked_fill(~causal_mask, float("-inf"))
+            attn_scores = attn_scores.masked_fill(~mask, float("-inf"))
             attn_weights = torch.softmax(attn_scores, dim=-1)
             context = torch.matmul(attn_weights, v)
         else:
-            # padding mask shape should be (B,1,1,S) to broadcast correctly with attention scores of shape (B, num_heads, S, S)
+            is_causal = True
+            mask = None
             if padding_mask is not None:
                 causal_mask = torch.ones(S, S, dtype=torch.bool, device=x.device).tril()
                 mask = causal_mask & padding_mask
-                context = nn.functional.scaled_dot_product_attention(
-                    q,
-                    k,
-                    v,
-                    attn_mask=mask,
-                    is_causal=False,
-                    dropout_p=self.dropout_p if self.training else 0.0,
-                )
-            else:
-                context = nn.functional.scaled_dot_product_attention(
-                    q,
-                    k,
-                    v,
-                    is_causal=True,
-                    dropout_p=self.dropout_p if self.training else 0.0,
-                )
+                is_causal = False
+            context = nn.functional.scaled_dot_product_attention(
+                q,
+                k,
+                v,
+                attn_mask=mask,
+                is_causal=is_causal,
+                dropout_p=self.dropout_p if self.training else 0.0,
+            )
         context = context.transpose(1, 2).contiguous().view(B, S, C)
         out = self.out(context)
         return self.dropout(out), context, attn_weights
