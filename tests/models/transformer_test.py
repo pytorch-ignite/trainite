@@ -55,14 +55,14 @@ def test_attention():
 
     # Test causal attention (default when padding_mask is None)
     attn.eval()
-    output, context = attn(x, cos, sin)
+    output, context, _ = attn(x, cos, sin)
     assert output.shape == x.shape
 
     # Test with padding mask
     # padding_mask shape (B, 1, 1, S)
     padding_mask = torch.ones(2, 1, 1, 10, dtype=torch.bool)
     padding_mask[:, :, :, -2:] = False  # Mask last 2 tokens
-    output, context = attn(x, cos, sin, padding_mask=padding_mask)
+    output, context, _ = attn(x, cos, sin, padding_mask=padding_mask)
     assert output.shape == x.shape
 
     # Non-divisible embed_dim should raise an assertion error
@@ -97,23 +97,23 @@ def test_attention_context_and_dropout_behavior():
     cos, sin = rope(x, seq_len=10)
 
     # context shape should match (B, S, C)
-    output, context = attn(x, cos, sin)
+    output, context, _ = attn(x, cos, sin)
     assert context.shape == x.shape
 
     # Dropout should be disabled in eval mode (deterministic outputs across different seeds)
     attn.eval()
     torch.manual_seed(0)
-    out1, _ = attn(x, cos, sin)
+    out1, _, _ = attn(x, cos, sin)
     torch.manual_seed(1)
-    out2, _ = attn(x, cos, sin)
+    out2, _, _ = attn(x, cos, sin)
     assert torch.allclose(out1, out2)
 
     # In train mode with different seeds outputs are expected to differ due to dropout randomness
     attn.train()
     torch.manual_seed(0)
-    out3, _ = attn(x, cos, sin)
+    out3, _, _ = attn(x, cos, sin)
     torch.manual_seed(1)
-    out4, _ = attn(x, cos, sin)
+    out4, _, _ = attn(x, cos, sin)
     # It's extremely unlikely these are exactly equal when dropout is active
     assert not torch.allclose(out3, out4)
 

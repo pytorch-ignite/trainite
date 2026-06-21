@@ -2,9 +2,9 @@ import math
 from typing import Protocol
 
 import torch
+from pydantic import Field
 from torch import nn
 from torch.nn.utils.rnn import pad_sequence
-from pydantic import Field
 
 from trainite.config.base import ComponentConfig
 
@@ -92,7 +92,8 @@ class Attention(nn.Module):
         cos: torch.Tensor,
         sin: torch.Tensor,
         padding_mask: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        output_attentions: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
         B, S, C = x.shape
 
         qkv = self.qkv_projection(x)
@@ -106,29 +107,34 @@ class Attention(nn.Module):
         # Apply Rotary Position Embeddings
         q, k = apply_rotary_pos_emb(q, k, cos, sin)
 
-        # padding mask shape should be (B,1,1,S) to broadcast correctly with attention scores of shape (B, num_heads, S, S)
-        if padding_mask is not None:
+        attn_weights = None
+        if output_attentions:
+            attn_scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim)
             causal_mask = torch.ones(S, S, dtype=torch.bool, device=x.device).tril()
-            mask = causal_mask & padding_mask
+            mask = causal_mask
+            if padding_mask is not None:
+                mask = causal_mask & padding_mask
+            attn_scores = attn_scores.masked_fill(~mask, float("-inf"))
+            attn_weights = torch.softmax(attn_scores, dim=-1)
+            context = torch.matmul(attn_weights, v)
+        else:
+            is_causal = True
+            mask = None
+            if padding_mask is not None:
+                causal_mask = torch.ones(S, S, dtype=torch.bool, device=x.device).tril()
+                mask = causal_mask & padding_mask
+                is_causal = False
             context = nn.functional.scaled_dot_product_attention(
                 q,
                 k,
                 v,
                 attn_mask=mask,
-                is_causal=False,
-                dropout_p=self.dropout_p if self.training else 0.0,
-            )
-        else:
-            context = nn.functional.scaled_dot_product_attention(
-                q,
-                k,
-                v,
-                is_causal=True,
+                is_causal=is_causal,
                 dropout_p=self.dropout_p if self.training else 0.0,
             )
         context = context.transpose(1, 2).contiguous().view(B, S, C)
         out = self.out(context)
-        return self.dropout(out), context
+        return self.dropout(out), context, attn_weights
 
 
 class TransformerBlock(nn.Module):
@@ -151,13 +157,19 @@ class TransformerBlock(nn.Module):
         cos: torch.Tensor,
         sin: torch.Tensor,
         padding_mask: torch.Tensor | None = None,
-    ) -> torch.Tensor:
+        output_attentions: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         normed = self.norm1(x)
-        attn_output, _ = self.attention(normed, cos, sin, padding_mask=padding_mask)
+        attn_output, _, attn_weights = self.attention(
+            normed, cos, sin, padding_mask=padding_mask, output_attentions=output_attentions
+        )
         x = x + attn_output
 
         normed = self.norm2(x)
         x = x + self.feedforward(normed)
+        if output_attentions:
+            assert attn_weights is not None
+            return x, attn_weights
         return x
 
 
@@ -190,7 +202,9 @@ class TransformerModel(nn.Module):
         self.proj = nn.Linear(hidden_size, vocab_size)
         self.norm = nn.LayerNorm(hidden_size)
 
-    def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, input_ids: torch.Tensor, output_attentions: bool = False
+    ) -> torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]:
         B, S = input_ids.shape
         x = self.embedding(input_ids) * math.sqrt(self.embedding.embedding_dim)
         cos, sin = self.rotary_emb(x, seq_len=S)
@@ -198,10 +212,18 @@ class TransformerModel(nn.Module):
             padding_mask = (input_ids != self.embedding.padding_idx).reshape(B, 1, 1, S)
         else:
             padding_mask = None
+        all_attentions = []
         for block in self.blocks:
-            x = block(x, cos, sin, padding_mask=padding_mask)
+            if output_attentions:
+                x, attn_weights = block(x, cos, sin, padding_mask=padding_mask, output_attentions=True)
+                all_attentions.append(attn_weights)
+            else:
+                x = block(x, cos, sin, padding_mask=padding_mask, output_attentions=False)
         x = self.norm(x)
-        return self.proj(x)
+        logits = self.proj(x)
+        if output_attentions:
+            return logits, all_attentions
+        return logits
 
     @torch.no_grad()
     def generate(
