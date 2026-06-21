@@ -128,24 +128,30 @@ class PromptCompletionTransform:
         self.tokenizer = tokenizer
         self.ignore_index = ignore_index
 
+    def build_prompt(self, sample: dict[str, str]) -> list[int]:
+        """Token ids for the generation prompt: [bos] + source + [sep] (no target)."""
+        bos = self.tokenizer.bos_token_id
+        sep = self.tokenizer.sep_token_id
+        source_tokens = self.tokenizer(sample["source"], add_special_tokens=False)["input_ids"]
+        return [bos] + source_tokens + [sep]
+
     def __call__(self, sample: dict[str, str]) -> dict[str, torch.Tensor]:
         source = sample["source"]
         target = sample["target"]
 
-        sep = self.tokenizer.sep_token_id
-        bos = self.tokenizer.bos_token_id
         eos = self.tokenizer.eos_token_id
 
-        source_tokens = self.tokenizer(source, add_special_tokens=False)["input_ids"]
+        prompt_ids = self.build_prompt(sample)
         target_tokens = self.tokenizer(target, add_special_tokens=False)["input_ids"]
 
-        combined_input_ids = [bos] + source_tokens + [sep] + target_tokens + [eos]
+        combined_input_ids = prompt_ids + target_tokens + [eos]
 
         input_ids = torch.tensor(combined_input_ids[:-1], dtype=torch.long)
         labels = torch.tensor(combined_input_ids[1:], dtype=torch.long)
 
-        # Apply labels masking for the prompt tokens
-        labels[: len(source_tokens) + 1] = self.ignore_index
+        # Mask the prompt portion of the (shifted) labels. labels = combined[1:],
+        # so the prompt spans len(prompt_ids) - 1 leading positions.
+        labels[: len(prompt_ids) - 1] = self.ignore_index
 
         attention_mask = torch.ones(len(input_ids), dtype=torch.long)
 

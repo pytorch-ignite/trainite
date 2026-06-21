@@ -34,6 +34,8 @@ def create_trainer_from_config(config: ProjectConfig) -> PreTrainer:
     vocab_size = resolve_vocab_size(tokenizer, config.model)
     model = build_model(config.model, tokenizer, vocab_size, device)
     optimizer = instantiate(config.optimizer, params=model.parameters())
+    ds = train_loader.dataset
+    ds = ds.dataset if isinstance(ds, torch.utils.data.Subset) else ds
     return PreTrainer(
         config=config,
         model=model,
@@ -42,7 +44,7 @@ def create_trainer_from_config(config: ProjectConfig) -> PreTrainer:
         val_loader=val_loader,
         test_loader=test_loader,
         preprocessor=tokenizer,
-        # vocab_size=vocab_size,
+        prompt_transform=getattr(ds, "transform", None),
     )
 
 
@@ -166,6 +168,19 @@ class GenerativeModel(SimpleModel):
         return torch.cat([input_ids, dummy_new], dim=-1)
 
 
+class DummyTransform:
+    """Passthrough transform that also supplies a prompt format for inference."""
+
+    def __init__(self, tokenizer=None):
+        self.tokenizer = tokenizer
+
+    def __call__(self, sample):
+        return sample
+
+    def build_prompt(self, sample):
+        return [self.tokenizer.bos_token_id] + self.tokenizer.encode(sample["source"]) + [self.tokenizer.sep_token_id]
+
+
 class GenerativeDataset(SimpleDataset):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -238,7 +253,7 @@ def project_config(temp_run_dir):
     )
 
 
-def test_flatten_loss():
+def test_flatten():
     # Mock some data
     logits = torch.randn(2, 3, 5)  # B=2, S=3, V=5
     targets = torch.tensor([[1, 2, -100], [0, -100, 3]])
@@ -247,23 +262,7 @@ def test_flatten_loss():
     trainer.loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
 
     output = {"logits": logits, "targets": targets}
-    flat_logits, flat_targets = trainer._flatten_loss(output)
-
-    assert flat_logits.shape == (4, 5)  # 6 tokens total, 2 are masked
-    assert flat_targets.shape == (4,)
-    assert (flat_targets == torch.tensor([1, 2, 0, 3])).all()
-
-
-def test_flatten_accuracy():
-    # Mock some data
-    logits = torch.randn(2, 3, 5)  # B=2, S=3, V=5
-    targets = torch.tensor([[1, 2, -100], [0, -100, 3]])
-
-    trainer = PreTrainer.__new__(PreTrainer)
-    trainer.loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
-
-    output = {"logits": logits, "targets": targets}
-    flat_logits, flat_targets = trainer._flatten_accuracy(output)
+    flat_logits, flat_targets = trainer._flatten(output)
 
     assert flat_logits.shape == (4, 5)  # 6 tokens total, 2 are masked
     assert flat_targets.shape == (4,)
@@ -587,39 +586,24 @@ def test_pretrainer_dataloader_class_collate_fn(project_config):
     assert isinstance(trainer.train_loader.collate_fn.tokenizer, DummyTokenizer)
 
 
+# Inference param validation now lives on PreTrainerConfig (Field(gt=0)), so bad
+# values (non-positive or non-int) are rejected at config construction.
 @pytest.mark.parametrize(
-    "epochs, tokens, samples",
+    "kwargs",
     [
-        (0, 32, 4),  # Invalid epochs
-        (1, 0, 4),  # Invalid tokens
-        (1, 32, 0),  # Invalid samples
-        (-1, 32, 4),  # Negative epochs
-        (1, -1, 4),  # Negative tokens
-        (1, 32, -1),  # Negative samples
+        {"inference_every_epochs": 0},
+        {"max_inference_new_tokens": 0},
+        {"inference_num_samples": 0},
+        {"inference_every_epochs": -1},
+        {"max_inference_new_tokens": -1},
+        {"inference_num_samples": -1},
+        {"inference_every_epochs": 2.5},
+        {"inference_num_samples": "0.3"},
     ],
 )
-def test_setup_inference_invalid_inference_params(project_config, epochs, tokens, samples):
-    project_config.trainer.inference_every_epochs = epochs
-    project_config.trainer.max_inference_new_tokens = tokens
-    project_config.trainer.inference_num_samples = samples
-    with pytest.raises(ValueError, match="Inference logging parameters must be greater than 0"):
-        create_trainer_from_config(project_config)
-
-
-@pytest.mark.parametrize(
-    "epochs, tokens, samples",
-    [
-        (2.5, 32, 4),  # Invalid type epochs
-        (1, True, 4),  # Invalid type tokens
-        (1, 32, "0.3"),  # Invalid type samples
-    ],
-)
-def test_setup_inference_invalid_inference_type_params(project_config, epochs, tokens, samples):
-    project_config.trainer.__dict__["inference_every_epochs"] = epochs
-    project_config.trainer.__dict__["max_inference_new_tokens"] = tokens
-    project_config.trainer.__dict__["inference_num_samples"] = samples
-    with pytest.raises(TypeError, match="Inference logging parameters must be integers."):
-        create_trainer_from_config(project_config)
+def test_invalid_inference_params_rejected(kwargs):
+    with pytest.raises(ValidationError):
+        PreTrainerConfig(**kwargs)
 
 
 def test_setup_inference_invalid_dataset_items(project_config):
@@ -670,18 +654,21 @@ def test_setup_inference_and_log_success(project_config, temp_run_dir):
         vocab_size=10,
         hidden_size=8,
     )
+    transform = cc("tests.trainers.pretrainer_test.DummyTransform")
     project_config.data.train.dataset = cc(
         "tests.trainers.pretrainer_test.GenerativeDataset",
         size=16,
         seq_len=4,
         vocab_size=10,
     )
+    project_config.data.train.transform = transform
     project_config.data.val.dataset = cc(
         "tests.trainers.pretrainer_test.GenerativeDataset",
         size=8,
         seq_len=4,
         vocab_size=10,
     )
+    project_config.data.val.transform = transform
     trainer = create_trainer_from_config(project_config)
     assert trainer.max_inference_new_tokens == 32
     trainer.run()

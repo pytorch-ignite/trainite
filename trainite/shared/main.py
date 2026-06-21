@@ -6,7 +6,7 @@ from typing import Any
 
 import torch
 from torch import nn
-from torch.utils.data import DataLoader, Dataset, random_split
+from torch.utils.data import DataLoader, Dataset, Subset, random_split
 
 from trainite.datasets.transformed import TransformedDataset
 from trainite.shared.utils import get_target, instantiate, load_config
@@ -181,6 +181,11 @@ def main() -> None:
 
     optimizer = instantiate(config.optimizer, params=model.parameters())
 
+    # The transform owns the prompt format; hand it to the trainer for inference logging.
+    ds = train_loader.dataset
+    ds = ds.dataset if isinstance(ds, Subset) else ds
+    prompt_transform = getattr(ds, "transform", None)
+
     trainer = PreTrainer(
         config=config,
         model=model,
@@ -189,6 +194,7 @@ def main() -> None:
         val_loader=val_loader,
         test_loader=test_loader,
         preprocessor=tokenizer,
+        prompt_transform=prompt_transform,
     )
     trainer.run()
 

@@ -40,10 +40,10 @@ class PreTrainerConfig(BaseModel):
     epochs: int = Field(default=3, gt=0)
     log_every_steps: int = Field(default=10, gt=0)
     early_stopping_patience: int | None = Field(default=3, gt=0)
-    # Inference logging — validated at runtime in _setup_inference
-    inference_every_epochs: int | None = Field(default=None)
-    inference_num_samples: int = Field(default=5)
-    max_inference_new_tokens: int = Field(default=16)
+    # Inference logging
+    inference_every_epochs: int | None = Field(default=None, gt=0)
+    inference_num_samples: int = Field(default=5, gt=0)
+    max_inference_new_tokens: int = Field(default=16, gt=0)
     grad_clip_norm: float | None = Field(default=None, gt=0.0)
 
 
@@ -69,11 +69,13 @@ class PreTrainer:
         train_loader: DataLoader,
         val_loader: DataLoader,
         test_loader: DataLoader | None = None,
+        prompt_transform: Any = None,
     ) -> None:
         self.logger: logging.Logger = setup_logger("trainer", level=logging.INFO)
         torch.manual_seed(config.seed)
         self.config: ProjectConfig = config
-        self.tokenizer: Any = preprocessor
+        self.tokenizer = preprocessor
+        self.prompt_transform = prompt_transform
         self.device: str | torch.device = self._resolve_device()
         self.epochs: int = config.trainer.epochs
         self.grad_clip_norm: float | None = getattr(config.trainer, "grad_clip_norm", None)
@@ -113,13 +115,7 @@ class PreTrainer:
         run_dir.mkdir(parents=True, exist_ok=True)
         return run_dir
 
-    def _flatten_loss(self, output: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
-        logits = output["logits"].reshape(-1, output["logits"].size(-1))
-        targets = output["targets"].reshape(-1)
-        mask = targets != self.loss_fn.ignore_index
-        return logits[mask], targets[mask]
-
-    def _flatten_accuracy(self, output: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+    def _flatten(self, output: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         logits = output["logits"].reshape(-1, output["logits"].size(-1))
         targets = output["targets"].reshape(-1)
         mask = targets != self.loss_fn.ignore_index
@@ -168,8 +164,8 @@ class PreTrainer:
             ("val", self.val_evaluator),
             ("test", self.test_evaluator),
         ]:
-            loss = Loss(self.loss_fn, output_transform=self._flatten_loss)
-            token_acc = Accuracy(output_transform=self._flatten_accuracy)
+            loss = Loss(self.loss_fn, output_transform=self._flatten)
+            token_acc = Accuracy(output_transform=self._flatten)
 
             loss.attach(evaluator, "loss")
             token_acc.attach(evaluator, "token_accuracy")
@@ -354,60 +350,40 @@ class PreTrainer:
         if len(dataset) == 0:
             raise ValueError(f"{name} dataset is empty. Cannot perform inference logging.")
         dataset = dataset.dataset if isinstance(dataset, Subset) else dataset
-        item = dataset[0]  # type: ignore
+        item = dataset[0]
         if not isinstance(item, dict):
             raise ValueError(f"{name} dataset items must be dicts with 'source' and 'target' keys.")
         if "source" not in item or "target" not in item:
             raise ValueError(f"{name} dataset items must contain 'source' and 'target' keys. Got: {list(item.keys())}")
 
-    def _setup_inference(self) -> object:
-        inference_params = (
-            self.inference_every_epochs,
-            self.inference_num_samples,
-            self.max_inference_new_tokens,
-        )
-        if any((not isinstance(param, int) or isinstance(param, bool)) for param in inference_params):
-            raise TypeError(
-                f"Inference logging parameters must be integers.\n"
-                f"Got inference_every_epochs={self.inference_every_epochs}, "
-                f"inference_num_samples={self.inference_num_samples}, "
-                f"max_inference_new_tokens={self.max_inference_new_tokens}"
-            )
-
-        if any(param <= 0 for param in inference_params):
-            raise ValueError(
-                f"Inference logging parameters must be greater than 0.\n"
-                f"Got inference_every_epochs={self.inference_every_epochs}, "
-                f"inference_num_samples={self.inference_num_samples}, "
-                f"max_inference_new_tokens={self.max_inference_new_tokens}"
-            )
-
+    def _setup_inference(self) -> None:
         tokenizer: Any = self.tokenizer
         if not hasattr(tokenizer, "decode") or not callable(tokenizer):
             raise ValueError("Tokenizer must be callable and implement 'decode' method for inference logging.")
 
-        # Validate active loaders
+        # Validate active loaders yield source/target
         self._validate_dataloader_for_inference(self.train_loader, "Train")
         if self.val_loader is not None:
             self._validate_dataloader_for_inference(self.val_loader, "Val")
         if self.test_loader is not None:
             self._validate_dataloader_for_inference(self.test_loader, "Test")
 
-    def _log_inference(self, engine: Engine, loader: DataLoader, name: str) -> None:
-        tokenizer: Any = self.tokenizer
+        # The transform supplies the prompt format (source -> token ids)
+        if self.prompt_transform is None or not hasattr(self.prompt_transform, "build_prompt"):
+            raise ValueError(
+                "Inference logging requires the dataset's transform to define build_prompt(sample) -> list[int]."
+            )
 
+    def _log_inference(self, engine: Engine, loader: DataLoader, name: str) -> None:
         self.logger.info(f"Epoch {engine.state.epoch}: Running inference on {name} samples...")
 
-        eos_token_id = self.tokenizer.eos_token_id
-        sep_token_id = self.tokenizer.sep_token_id
-        bos_token_id = self.tokenizer.bos_token_id
         pad_token_id = getattr(self.tokenizer, "pad_token_id", 0)
 
         dataset = loader.dataset
-        total_samples = len(dataset)  # type: ignore
+        total_samples = len(dataset)
         num_samples = min(self.inference_num_samples, total_samples)
 
-        # Extract prompt IDs via dataset.get_item_inference (validated in _setup_inference).
+        # Build generation prompts via the dataset's transform (validated in _setup_inference).
         prompt_ids_list: list[torch.Tensor] = []
         prompt_attn_list: list[torch.Tensor] = []
         targets: list[str] = []
@@ -417,16 +393,14 @@ class PreTrainer:
             source = item["source"]
             target = item["target"]
 
-            input_ids = tokenizer(source, add_special_tokens=False)["input_ids"]
-            input_ids = torch.tensor([bos_token_id] + input_ids + [sep_token_id], dtype=torch.long)
+            input_ids = torch.tensor(self.prompt_transform.build_prompt(item), dtype=torch.long)
             attention_mask = torch.ones_like(input_ids, dtype=torch.long)
 
             prompt_ids_list.append(input_ids)
             prompt_attn_list.append(attention_mask)
             targets.append(target)
             sources.append(source)
-        model: Any = self.model
-        model.eval()
+        self.model.eval()
 
         # Left-pad for generation: reverse → pad_sequence → reverse
         batch_input_ids = (
@@ -448,7 +422,7 @@ class PreTrainer:
         )
         new_tokens = sequences[:, batch_input_ids.shape[1] :]
         decoded_strs = [
-            tokenizer.decode(
+            self.tokenizer.decode(
                 tokens.tolist(),
                 skip_special_tokens=True,
             )
