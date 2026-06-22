@@ -361,7 +361,7 @@ class PreTrainer:
         if not hasattr(tokenizer, "decode") or not callable(tokenizer):
             raise ValueError("Tokenizer must be callable and implement 'decode' method for inference logging.")
 
-        # Validate active loaders yield source/target
+        # Validate active loaders
         self._validate_dataloader_for_inference(self.train_loader, "Train")
         if self.val_loader is not None:
             self._validate_dataloader_for_inference(self.val_loader, "Val")
@@ -380,7 +380,7 @@ class PreTrainer:
         pad_token_id = getattr(self.tokenizer, "pad_token_id", 0)
 
         dataset = loader.dataset
-        total_samples = len(dataset)
+        total_samples = len(dataset)  # type: ignore
         num_samples = min(self.inference_num_samples, total_samples)
 
         # Build generation prompts via the dataset's transform (validated in _setup_inference).
