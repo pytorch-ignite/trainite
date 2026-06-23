@@ -23,7 +23,7 @@ from torch.optim.lr_scheduler import LinearLR
 from torch.utils.data import DataLoader
 
 
-class PreTrainer:
+class DecoderTrainer:
     def __init__(
         self,
         config: ProjectConfig,

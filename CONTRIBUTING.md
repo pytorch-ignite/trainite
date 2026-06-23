@@ -57,7 +57,7 @@ tests/
 ├── models/
 │   └── transformer_test.py         # Model forward pass and generation
 └── trainers/
-    └── pretrainer_test.py          # Training loop integration
+    └── decoder_trainer_test.py      # Training loop integration
 ```
 
 ---

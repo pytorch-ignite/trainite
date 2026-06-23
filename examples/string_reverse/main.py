@@ -9,7 +9,7 @@ from torch import nn
 from torch.utils.data import DataLoader, Dataset, random_split
 
 from config import load_config
-from trainer import PreTrainer
+from trainer import DecoderTrainer
 from utils import get_target, instantiate
 
 
@@ -181,7 +181,7 @@ def main() -> None:
     #    vocab_size = getattr(train_dataset, "vocab_size")
     # 4. Build model using config.model and vocab_size.
     # 5. Build optimizer.
-    # 6. Run PreTrainer.
+    # 6. Run DecoderTrainer.
 
     train_loader, val_loader, test_loader = build_dataloaders(config.data, None, config.seed)
 
@@ -208,7 +208,7 @@ def main() -> None:
 
     optimizer = instantiate(config.optimizer, params=model.parameters())
 
-    trainer = PreTrainer(
+    trainer = DecoderTrainer(
         config=config,
         model=model,
         optimizer=optimizer,

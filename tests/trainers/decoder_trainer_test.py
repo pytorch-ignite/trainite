@@ -24,10 +24,10 @@ from trainite.shared.main import (
     resolve_vocab_size,
 )
 from trainite.shared.utils import instantiate
-from trainite.trainers.pretrainer import PreTrainer, PreTrainerConfig, ProjectConfig
+from trainite.trainers.decoder_trainer import DecoderTrainer, DecoderTrainerConfig, ProjectConfig
 
 
-def create_trainer_from_config(config: ProjectConfig) -> PreTrainer:
+def create_trainer_from_config(config: ProjectConfig) -> DecoderTrainer:
     device = resolve_device(config.device)
     tokenizer = instantiate(config.preprocessor)
     train_loader, val_loader, test_loader = build_dataloaders(config.data, tokenizer, config.seed)
@@ -36,7 +36,7 @@ def create_trainer_from_config(config: ProjectConfig) -> PreTrainer:
     optimizer = instantiate(config.optimizer, params=model.parameters())
     ds = train_loader.dataset
     ds = ds.dataset if isinstance(ds, torch.utils.data.Subset) else ds
-    return PreTrainer(
+    return DecoderTrainer(
         config=config,
         model=model,
         optimizer=optimizer,
@@ -214,9 +214,9 @@ def temp_run_dir():
 @pytest.fixture
 def project_config(temp_run_dir):
     return ProjectConfig(
-        preprocessor=cc("tests.trainers.pretrainer_test.DummyTokenizer"),
+        preprocessor=cc("tests.trainers.decoder_trainer_test.DummyTokenizer"),
         model=cc(
-            "tests.trainers.pretrainer_test.SimpleModel",
+            "tests.trainers.decoder_trainer_test.SimpleModel",
             vocab_size=10,
             hidden_size=8,
         ),
@@ -224,7 +224,7 @@ def project_config(temp_run_dir):
         data=DataConfigBase(
             train=SplitConfig(
                 dataset=cc(
-                    "tests.trainers.pretrainer_test.SimpleDataset",
+                    "tests.trainers.decoder_trainer_test.SimpleDataset",
                     size=16,
                     seq_len=4,
                     vocab_size=10,
@@ -233,7 +233,7 @@ def project_config(temp_run_dir):
             ),
             val=SplitConfig(
                 dataset=cc(
-                    "tests.trainers.pretrainer_test.SimpleDataset",
+                    "tests.trainers.decoder_trainer_test.SimpleDataset",
                     size=8,
                     seq_len=4,
                     vocab_size=10,
@@ -241,7 +241,7 @@ def project_config(temp_run_dir):
                 dataloader=DataLoaderConfig(batch_size=4),
             ),
         ),
-        trainer=PreTrainerConfig(
+        trainer=DecoderTrainerConfig(
             epochs=1,
             log_every_steps=1,
             inference_every_epochs=None,
@@ -258,7 +258,7 @@ def test_flatten():
     logits = torch.randn(2, 3, 5)  # B=2, S=3, V=5
     targets = torch.tensor([[1, 2, -100], [0, -100, 3]])
 
-    trainer = PreTrainer.__new__(PreTrainer)
+    trainer = DecoderTrainer.__new__(DecoderTrainer)
     trainer.loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
 
     output = {"logits": logits, "targets": targets}
@@ -269,7 +269,7 @@ def test_flatten():
     assert (flat_targets == torch.tensor([1, 2, 0, 3])).all()
 
 
-def test_pretrainer_init(project_config):
+def test_decoder_trainer_init(project_config):
     trainer = create_trainer_from_config(project_config)
     assert trainer.epochs == 1
     assert isinstance(trainer.model, SimpleModel)
@@ -294,7 +294,7 @@ def test_device_auto_selection(project_config):
 
 
 @pytest.mark.skip(reason="Obsolete after decoupling tokenizer from model and dataset vocab_size resolution")
-def test_pretrainer_auto_vocab_size(project_config):
+def test_decoder_trainer_auto_vocab_size(project_config):
     # Remove vocab_size from model config
     model_conf = project_config.model.model_dump(by_alias=True)
     model_conf.pop("vocab_size", None)
@@ -307,7 +307,7 @@ def test_pretrainer_auto_vocab_size(project_config):
     assert trainer.model.embedding.num_embeddings == 10
 
 
-def test_pretrainer_vocab_size_mismatch(project_config):
+def test_decoder_trainer_vocab_size_mismatch(project_config):
     # Set model vocab_size smaller than dataset
     model_conf = project_config.model.model_dump(by_alias=True)
     model_conf["vocab_size"] = 5
@@ -318,10 +318,10 @@ def test_pretrainer_vocab_size_mismatch(project_config):
 
 
 @pytest.mark.skip(reason="Obsolete after decoupling tokenizer from model and dataset vocab_size resolution")
-def test_pretrainer_vocab_size_missing(project_config):
+def test_decoder_trainer_vocab_size_missing(project_config):
     # Setup dataset to not have vocab_size
     project_config.data.train.dataset = cc(
-        "tests.trainers.pretrainer_test.SimpleDatasetNoVocab",
+        "tests.trainers.decoder_trainer_test.SimpleDatasetNoVocab",
         size=16,
         seq_len=4,
     )
@@ -334,7 +334,7 @@ def test_pretrainer_vocab_size_missing(project_config):
         create_trainer_from_config(project_config)
 
 
-def test_pretrainer_run_with_val(project_config, temp_run_dir):
+def test_decoder_trainer_run_with_val(project_config, temp_run_dir):
     trainer = create_trainer_from_config(project_config)
     trainer.run()
 
@@ -358,7 +358,7 @@ def test_pretrainer_run_with_val(project_config, temp_run_dir):
 
 
 @pytest.mark.skip(reason="Skipping this test because validation is required.")
-def test_pretrainer_run_without_val(project_config, temp_run_dir):
+def test_decoder_trainer_run_without_val(project_config, temp_run_dir):
     object.__setattr__(
         project_config,
         "data",
@@ -390,7 +390,7 @@ def test_pretrainer_run_without_val(project_config, temp_run_dir):
     assert "checkpoint_best" not in trainer.handlers
 
 
-def test_pretrainer_test_no_loader(project_config):
+def test_decoder_trainer_test_no_loader(project_config):
     # Ensure test split is None (default in fixture is None)
     project_config.data.test = None
     trainer = create_trainer_from_config(project_config)
@@ -402,11 +402,11 @@ def test_pretrainer_test_no_loader(project_config):
     mock_warning.assert_called_with("No test loader provided. Skipping testing.")
 
 
-def test_pretrainer_test_method(project_config, temp_run_dir):
+def test_decoder_trainer_test_method(project_config, temp_run_dir):
     # Add test split to config
     project_config.data.test = SplitConfig(
         dataset=cc(
-            "tests.trainers.pretrainer_test.SimpleDataset",
+            "tests.trainers.decoder_trainer_test.SimpleDataset",
             size=4,
             seq_len=4,
             vocab_size=10,
@@ -424,7 +424,7 @@ def test_pretrainer_test_method(project_config, temp_run_dir):
 
 
 @pytest.mark.skip(reason="Skipping this test because validation is required ")
-def test_pretrainer_test_without_val(project_config, temp_run_dir):
+def test_decoder_trainer_test_without_val(project_config, temp_run_dir):
     # Remove validation split
     # Add test split
     object.__setattr__(
@@ -435,7 +435,7 @@ def test_pretrainer_test_without_val(project_config, temp_run_dir):
             val=None,
             test=SplitConfig(
                 dataset=cc(
-                    "tests.trainers.pretrainer_test.SimpleDataset",
+                    "tests.trainers.decoder_trainer_test.SimpleDataset",
                     size=4,
                     seq_len=4,
                     vocab_size=10,
@@ -460,14 +460,14 @@ def test_pretrainer_test_without_val(project_config, temp_run_dir):
     mock_load.assert_any_call(last_checkpoint_path, map_location=trainer.device, weights_only=True)
 
 
-def test_pretrainer_dataloader_collate_fn(project_config):
-    project_config.data.train.dataloader.collate_fn = cc("tests.trainers.pretrainer_test.dummy_collate_fn")
+def test_decoder_trainer_dataloader_collate_fn(project_config):
+    project_config.data.train.dataloader.collate_fn = cc("tests.trainers.decoder_trainer_test.dummy_collate_fn")
     trainer = create_trainer_from_config(project_config)
     assert trainer.train_loader is not None
     assert trainer.train_loader.collate_fn is dummy_collate_fn
 
 
-def test_pretrainer_explicit_split_shuffle(project_config):
+def test_decoder_trainer_explicit_split_shuffle(project_config):
     project_config.data.train.dataloader.shuffle = True
     trainer = create_trainer_from_config(project_config)
     assert trainer.train_loader is not None
@@ -475,17 +475,17 @@ def test_pretrainer_explicit_split_shuffle(project_config):
     assert isinstance(trainer.train_loader.sampler, torch.utils.data.RandomSampler)
 
 
-def test_pretrainer_builds_train_and_val_loaders_from_ratios(tmp_path):
+def test_decoder_trainer_builds_train_and_val_loaders_from_ratios(tmp_path):
     config = ProjectConfig(
-        preprocessor=cc("tests.trainers.pretrainer_test.DummyTokenizer"),
+        preprocessor=cc("tests.trainers.decoder_trainer_test.DummyTokenizer"),
         model=cc(
-            "tests.trainers.pretrainer_test.SimpleModel",
+            "tests.trainers.decoder_trainer_test.SimpleModel",
             vocab_size=100,
             hidden_size=32,
         ),
         data=DataWithAutoSplit(
             dataset=cc(
-                "tests.trainers.pretrainer_test.SimpleDataset",
+                "tests.trainers.decoder_trainer_test.SimpleDataset",
                 size=100,
                 seq_len=10,
                 vocab_size=100,
@@ -493,7 +493,7 @@ def test_pretrainer_builds_train_and_val_loaders_from_ratios(tmp_path):
             test_ratio=0.0,
             val_ratio=0.2,
         ),
-        trainer=PreTrainerConfig(epochs=1),
+        trainer=DecoderTrainerConfig(epochs=1),
         output=OutputConfig(root=str(tmp_path), run_name="test"),
     )
 
@@ -508,17 +508,17 @@ def test_pretrainer_builds_train_and_val_loaders_from_ratios(tmp_path):
     assert trainer.test_loader is None
 
 
-def test_pretrainer_builds_train_val_and_test_loaders_from_ratios(tmp_path):
+def test_decoder_trainer_builds_train_val_and_test_loaders_from_ratios(tmp_path):
     config = ProjectConfig(
-        preprocessor=cc("tests.trainers.pretrainer_test.DummyTokenizer"),
+        preprocessor=cc("tests.trainers.decoder_trainer_test.DummyTokenizer"),
         model=cc(
-            "tests.trainers.pretrainer_test.SimpleModel",
+            "tests.trainers.decoder_trainer_test.SimpleModel",
             vocab_size=100,
             hidden_size=32,
         ),
         data=DataWithAutoSplit(
             dataset=cc(
-                "tests.trainers.pretrainer_test.SimpleDataset",
+                "tests.trainers.decoder_trainer_test.SimpleDataset",
                 size=100,
                 seq_len=10,
                 vocab_size=100,
@@ -526,7 +526,7 @@ def test_pretrainer_builds_train_val_and_test_loaders_from_ratios(tmp_path):
             test_ratio=0.2,
             val_ratio=0.2,
         ),
-        trainer=PreTrainerConfig(epochs=1),
+        trainer=DecoderTrainerConfig(epochs=1),
         output=OutputConfig(root=str(tmp_path), run_name="test"),
     )
 
@@ -549,10 +549,10 @@ def test_pretrainer_builds_train_val_and_test_loaders_from_ratios(tmp_path):
     assert isinstance(trainer.test_loader.sampler, torch.utils.data.SequentialSampler)
 
 
-def test_pretrainer_dataset_is_empty(project_config):
+def test_decoder_trainer_dataset_is_empty(project_config):
     project_config.data = DataWithAutoSplit(
         dataset=cc(
-            "tests.trainers.pretrainer_test.EmptyDataset",
+            "tests.trainers.decoder_trainer_test.EmptyDataset",
         ),
         test_ratio=0.0,
         val_ratio=0.2,
@@ -561,7 +561,7 @@ def test_pretrainer_dataset_is_empty(project_config):
         create_trainer_from_config(project_config)
 
 
-def test_pretrainer_early_stopping_patience(project_config):
+def test_decoder_trainer_early_stopping_patience(project_config):
     with pytest.raises(ValidationError):
         project_config.trainer.early_stopping_patience = 0
 
@@ -573,20 +573,20 @@ def test_pretrainer_early_stopping_patience(project_config):
     trainer.run()
 
 
-def test_pretrainer_dataloader_class_collate_fn(project_config):
+def test_decoder_trainer_dataloader_class_collate_fn(project_config):
     project_config.model = cc(
-        "tests.trainers.pretrainer_test.SimpleModel",
+        "tests.trainers.decoder_trainer_test.SimpleModel",
         vocab_size=10,
         hidden_size=8,
     )
-    project_config.data.train.dataloader.collate_fn = cc("tests.trainers.pretrainer_test.DummyClassCollateFn")
+    project_config.data.train.dataloader.collate_fn = cc("tests.trainers.decoder_trainer_test.DummyClassCollateFn")
     trainer = create_trainer_from_config(project_config)
     assert trainer.train_loader is not None
     assert isinstance(trainer.train_loader.collate_fn, DummyClassCollateFn)
     assert isinstance(trainer.train_loader.collate_fn.tokenizer, DummyTokenizer)
 
 
-# Inference param validation now lives on PreTrainerConfig (Field(gt=0)), so bad
+# Inference param validation now lives on DecoderTrainerConfig (Field(gt=0)), so bad
 # values (non-positive or non-int) are rejected at config construction.
 @pytest.mark.parametrize(
     "kwargs",
@@ -603,18 +603,18 @@ def test_pretrainer_dataloader_class_collate_fn(project_config):
 )
 def test_invalid_inference_params_rejected(kwargs):
     with pytest.raises(ValidationError):
-        PreTrainerConfig(**kwargs)
+        DecoderTrainerConfig(**kwargs)
 
 
 def test_setup_inference_invalid_dataset_items(project_config):
     project_config.trainer.inference_every_epochs = 1
     project_config.model = cc(
-        "tests.trainers.pretrainer_test.GenerativeModel",
+        "tests.trainers.decoder_trainer_test.GenerativeModel",
         vocab_size=10,
         hidden_size=8,
     )
     project_config.data.train.dataset = cc(
-        "tests.trainers.pretrainer_test.SimpleDatasetWithTokenizer",
+        "tests.trainers.decoder_trainer_test.SimpleDatasetWithTokenizer",
         size=16,
         seq_len=4,
         vocab_size=10,
@@ -629,12 +629,12 @@ def test_setup_inference_invalid_dataset_items(project_config):
 def test_setup_inference_non_dict_dataset_items(project_config):
     project_config.trainer.inference_every_epochs = 1
     project_config.model = cc(
-        "tests.trainers.pretrainer_test.GenerativeModel",
+        "tests.trainers.decoder_trainer_test.GenerativeModel",
         vocab_size=10,
         hidden_size=8,
     )
     project_config.data.train.dataset = cc(
-        "tests.trainers.pretrainer_test.NonDictDataset",
+        "tests.trainers.decoder_trainer_test.NonDictDataset",
         size=16,
         seq_len=4,
         vocab_size=10,
@@ -650,20 +650,20 @@ def test_setup_inference_and_log_success(project_config, temp_run_dir):
     project_config.trainer.inference_every_epochs = 1
     project_config.trainer.max_inference_new_tokens = 32
     project_config.model = cc(
-        "tests.trainers.pretrainer_test.GenerativeModel",
+        "tests.trainers.decoder_trainer_test.GenerativeModel",
         vocab_size=10,
         hidden_size=8,
     )
-    transform = cc("tests.trainers.pretrainer_test.DummyTransform")
+    transform = cc("tests.trainers.decoder_trainer_test.DummyTransform")
     project_config.data.train.dataset = cc(
-        "tests.trainers.pretrainer_test.GenerativeDataset",
+        "tests.trainers.decoder_trainer_test.GenerativeDataset",
         size=16,
         seq_len=4,
         vocab_size=10,
     )
     project_config.data.train.transform = transform
     project_config.data.val.dataset = cc(
-        "tests.trainers.pretrainer_test.GenerativeDataset",
+        "tests.trainers.decoder_trainer_test.GenerativeDataset",
         size=8,
         seq_len=4,
         vocab_size=10,
@@ -674,7 +674,7 @@ def test_setup_inference_and_log_success(project_config, temp_run_dir):
     trainer.run()
 
 
-def test_pretrainer_grad_clip_norm(project_config):
+def test_decoder_trainer_grad_clip_norm(project_config):
     project_config.trainer.grad_clip_norm = 1.0
     trainer = create_trainer_from_config(project_config)
     with mock.patch("torch.nn.utils.clip_grad_norm_") as mock_clip:
@@ -682,7 +682,7 @@ def test_pretrainer_grad_clip_norm(project_config):
     assert mock_clip.called
 
 
-def test_pretrainer_generate(project_config):
+def test_decoder_trainer_generate(project_config):
     trainer = create_trainer_from_config(project_config)
     trainer.model.eval()
 

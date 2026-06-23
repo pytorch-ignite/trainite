@@ -106,7 +106,7 @@ Interactive prompt preview:
 ? Project directory: my-experiment
 ? Model: transformer
 ? Dataset: string-reverse
-? Trainer: pretrainer
+? Trainer: decoder-trainer
 ? Output directory: outputs
 ? Run name: transformer__string-reverse
 
@@ -169,7 +169,7 @@ outputs/
 
 | Name | Description |
 |---|---|
-| `pretrainer` | Standard supervised training (next-token prediction). Includes LR warmup + linear decay, checkpointing, early stopping, TensorBoard logging, and inference sample logging. |
+| `decoder-trainer` | Standard supervised training (next-token prediction). Includes LR warmup + linear decay, checkpointing, early stopping, TensorBoard logging, and inference sample logging. |
 
 ---
 

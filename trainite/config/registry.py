@@ -17,7 +17,7 @@ class ComponentSpec(BaseModel):
     dependencies: list[str] = []
 
     @property
-    def config_cls(self) -> type:
+    def config_cls(self) -> type[BaseModel]:
         return get_target(self.config_cls_path)
 
 
@@ -36,7 +36,7 @@ class DatasetSpec(ComponentSpec):
     preprocessor_spec_name: str | None = None
 
     @property
-    def dataset_config_cls(self) -> type:
+    def dataset_config_cls(self) -> type[BaseModel]:
         return get_target(self.dataset_config_cls_path)
 
 
@@ -80,16 +80,16 @@ DATASET_SPECS = {
 }
 
 TRAINER_SPECS = {
-    "pretrainer": TrainerSpec(
-        name="pretrainer",
-        implementation_path=Path("trainite/trainers/pretrainer.py"),
-        config_cls_path="trainite.trainers.pretrainer.PreTrainerConfig",
-        implementation_symbol="PreTrainer",
+    "decoder-trainer": TrainerSpec(
+        name="decoder_trainer",
+        implementation_path=Path("trainite/trainers/decoder_trainer.py"),
+        config_cls_path="trainite.trainers.decoder_trainer.DecoderTrainerConfig",
+        implementation_symbol="DecoderTrainer",
         template_replacements=[
             ("trainite.shared.utils", "utils"),
             ("trainite.config.base", "config"),
         ],
-        readme_template_path=Path("trainite/templates/components/trainers/pretrainer.md"),
+        readme_template_path=Path("trainite/templates/components/trainers/decoder_trainer.md"),
     ),
 }
 

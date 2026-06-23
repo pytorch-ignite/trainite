@@ -248,11 +248,11 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
 
     main_replacements = [
         (
-            "from trainite.trainers.pretrainer import PreTrainer, ProjectConfig",
+            "from trainite.trainers.decoder_trainer import DecoderTrainer, ProjectConfig",
             f"from trainer import {trainer_spec.implementation_symbol}, ProjectConfig",
         ),
         ("trainite.shared.utils", "utils"),
-        ("PreTrainer(", f"{trainer_spec.implementation_symbol}("),
+        ("DecoderTrainer(", f"{trainer_spec.implementation_symbol}("),
         (
             "from trainite.datasets.transformed import TransformedDataset",
             "from datasets.transformed import TransformedDataset",
@@ -391,7 +391,7 @@ class Init:
     project_dir: tyro.conf.Positional[str] = "my-cool-experiment"
     model: ModelType = "transformer"
     dataset: DatasetType = "string-reverse"
-    trainer: TrainerType = "pretrainer"
+    trainer: TrainerType = "decoder-trainer"
     output_root: str = "outputs"
     run_name: str = ""
     force: bool = False

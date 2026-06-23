@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader, Dataset, Subset, random_split
 
 from trainite.datasets.transformed import TransformedDataset
 from trainite.shared.utils import get_target, instantiate, load_config
-from trainite.trainers.pretrainer import PreTrainer, ProjectConfig
+from trainite.trainers.decoder_trainer import DecoderTrainer, ProjectConfig
 
 
 def parse_args() -> argparse.Namespace:
@@ -186,7 +186,7 @@ def main() -> None:
     ds = ds.dataset if isinstance(ds, Subset) else ds
     prompt_transform = getattr(ds, "transform", None)
 
-    trainer = PreTrainer(
+    trainer = DecoderTrainer(
         config=config,
         model=model,
         optimizer=optimizer,

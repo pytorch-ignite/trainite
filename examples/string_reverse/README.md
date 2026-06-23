@@ -247,10 +247,10 @@ If you only want to test the pipeline, keep the defaults and just change:
 - `min_seq_len` / `max_seq_len`
 
 
-### Trainer: pretrainer
-# PreTrainer
+### Trainer: decoder-trainer
+# DecoderTrainer
 
-`PreTrainer` is the default training loop for this project.
+`DecoderTrainer` is the default training loop for this project.
 
 It is built on PyTorch-Ignite and already handles the things you usually want on day one:
 
@@ -263,7 +263,7 @@ It is built on PyTorch-Ignite and already handles the things you usually want on
 
 ## What it expects
 
-`PreTrainer` works with a model that returns logits shaped like:
+`DecoderTrainer` works with a model that returns logits shaped like:
 
 ```python
 (batch, seq_len, vocab_size)
@@ -299,7 +299,7 @@ At the end of each epoch it also runs evaluation on:
 
 ## Logging and checkpoints
 
-`PreTrainer` saves a run directory like this:
+`DecoderTrainer` saves a run directory like this:
 
 ```text
 output/<run_name>/<timestamp>/
@@ -337,7 +337,7 @@ If you are just getting started, the usual first changes are:
 
 ## If you want to customize behavior
 
-Edit `trainite/trainers/pretrainer.py` if you want to:
+Edit `trainite/trainers/decoder_trainer.py` if you want to:
 
 - change how loss is computed
 - add gradient accumulation

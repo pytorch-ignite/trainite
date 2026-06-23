@@ -35,7 +35,7 @@ from trainite.config.base import (
 from trainite.shared.utils import dump_config
 
 
-class PreTrainerConfig(BaseModel):
+class DecoderTrainerConfig(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     epochs: int = Field(default=3, gt=0)
     log_every_steps: int = Field(default=10, gt=0)
@@ -53,13 +53,13 @@ class ProjectConfig(BaseModel):
     model: ComponentConfig
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
     data: DataConfigBase | DataWithAutoSplit
-    trainer: PreTrainerConfig = Field(default_factory=PreTrainerConfig)
+    trainer: DecoderTrainerConfig = Field(default_factory=DecoderTrainerConfig)
     output: OutputConfig
     seed: int = 42
     device: str = "auto"
 
 
-class PreTrainer:
+class DecoderTrainer:
     def __init__(
         self,
         config: ProjectConfig,
