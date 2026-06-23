@@ -423,9 +423,9 @@ def init_project(
     # Build templates for the starter project
     templates = _build_templates(model, dataset, trainer, resolved_project_dir.name)
 
-    model_spec = get_model_spec(model_name)
-    dataset_spec = get_dataset_spec(dataset_name)
-    trainer_spec = get_trainer_spec(trainer_name)
+    model_spec = get_model_spec(model)
+    dataset_spec = get_dataset_spec(dataset)
+    trainer_spec = get_trainer_spec(trainer)
     preprocessor_spec = (
         get_preprocessor_spec(dataset_spec.preprocessor_spec_name) if dataset_spec.preprocessor_spec_name else None
     )
@@ -479,7 +479,7 @@ def init_project(
             f"preprocessors.{preprocessor_spec.name}",
         )
 
-    dump_config(starter_config, project_dir / "config.yaml")
+    dump_config(starter_config, resolved_project_dir / "config.yaml")
     for filename, content in templates.items():
         _write_file(resolved_project_dir / filename, content, force)
 
