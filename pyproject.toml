@@ -45,6 +45,7 @@ artifacts = [
 
 [tool.uv]
 package = true
+default-groups = []
 
 [tool.pyrefly]
 project-excludes = [
