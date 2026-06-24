@@ -1,9 +1,8 @@
-import dataclasses
 import inspect
 import re
 import textwrap
 from pathlib import Path
-from typing import Annotated, Iterable, Literal, Sequence
+from typing import Annotated, Any, Iterable, Sequence
 
 import questionary
 import tomlkit
@@ -14,11 +13,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from trainite.config import (
     ComponentConfig,
     DataConfigBase,
-    DataLoaderConfig,
     DataWithAutoSplit,
     OptimizerConfig,
     OutputConfig,
-    SplitConfig,
 )
 from trainite.config.registry import REGISTRY, get_dataset_spec, get_model_spec, get_preprocessor_spec, get_trainer_spec
 from trainite.shared.utils import dump_config
@@ -43,9 +40,10 @@ MODEL_CHOICES = tuple(REGISTRY["models"].keys())
 DATASET_CHOICES = tuple(REGISTRY["datasets"].keys())
 TRAINER_CHOICES = tuple(REGISTRY["trainers"].keys())
 
-ModelType = Literal[MODEL_CHOICES]
-DatasetType = Literal[DATASET_CHOICES]
-TrainerType = Literal[TRAINER_CHOICES]
+# ponytail: type choice aliases as simple str
+ModelType = str
+DatasetType = str
+TrainerType = str
 
 
 def _replace_many(text: str, replacements: Iterable[tuple[str, str]]) -> str:
@@ -153,7 +151,8 @@ def parse_dependencies(
     required_deps = data["dependency-groups"]["generated"]
 
     # 2. Optional dependencies
-    other_deps = []
+    # ponytail: type-annotate empty list
+    other_deps: list[str] = []
     optional_deps = data["project"].get("optional-dependencies", {})
     for group_deps in optional_deps.values():
         other_deps.extend(group_deps)
@@ -347,31 +346,16 @@ def run_interactive_mode() -> None:
     init_project(config)
 
 
-def _update_targets(
-    config: ComponentConfig | ProjectConfig | DataConfigBase | SplitConfig | DataLoaderConfig,
-    old_prefix: str,
-    new_prefix: str,
-) -> None:
+def _update_targets(config: Any, old_prefix: str, new_prefix: str) -> None:
     if isinstance(config, ComponentConfig) and config.target.startswith(old_prefix):
         config.target = config.target.replace(old_prefix, new_prefix, 1)
-    elif isinstance(config, ProjectConfig):
-        # Recursively update all components in ProjectConfig
+    elif isinstance(config, BaseModel):
         for field in config.model_fields:
-            _update_targets(getattr(config, field), old_prefix, new_prefix)
-    elif isinstance(config, DataConfigBase):
-        for field in config.model_fields:
-            _update_targets(getattr(config, field), old_prefix, new_prefix)
-    elif isinstance(config, (SplitConfig, DataWithAutoSplit)):
-        _update_targets(config.dataset, old_prefix, new_prefix)
-        if getattr(config, "transform", None) is not None:
-            _update_targets(config.transform, old_prefix, new_prefix)
-        _update_targets(config.dataloader, old_prefix, new_prefix)
-    elif isinstance(config, DataLoaderConfig) and config.collate_fn:
-        _update_targets(config.collate_fn, old_prefix, new_prefix)
+            if (val := getattr(config, field)) is not None:
+                _update_targets(val, old_prefix, new_prefix)
 
 
-@dataclasses.dataclass
-class Init:
+class Init(BaseModel):
     """Generate a starter training project.
 
     Run ``trainite init`` without any arguments to enter interactive mode,
@@ -389,11 +373,11 @@ class Init:
     """
 
     project_dir: tyro.conf.Positional[str] = "my-cool-experiment"
-    model: ModelType = "transformer"
-    dataset: DatasetType = "string-reverse"
-    trainer: TrainerType = "decoder-trainer"
+    model: ModelType | None = None
+    dataset: DatasetType | None = None
+    trainer: TrainerType | None = None
     output_root: str = "outputs"
-    run_name: str = ""
+    run_name: str = "run_1"
     force: bool = False
     yes: Annotated[bool, tyro.conf.arg(aliases=["-y"])] = False
 
@@ -406,6 +390,11 @@ def init_project(
     Args:
         config: Configuration for the starter project.
     """
+
+    if config.yes:
+        defaults = Init(model="transformer", dataset="string-reverse", trainer="decoder-trainer")
+        config = config.model_copy(update=defaults.model_dump())
+
     project_dir = config.project_dir
     model = config.model
     dataset = config.dataset
@@ -413,7 +402,16 @@ def init_project(
     output_root = config.output_root
     run_name = config.run_name
     force = config.force
-    yes = config.yes
+
+    if model is None:
+        print("Missing required argument: model. Please provide it or run in interactive mode.")
+        raise SystemExit(1)
+    if dataset is None:
+        print("Missing required argument: dataset. Please provide it or run in interactive mode.")
+        raise SystemExit(1)
+    if trainer is None:
+        print("Missing required argument: trainer. Please provide it or run in interactive mode.")
+        raise SystemExit(1)
 
     resolved_run_name = run_name or f"{model}__{dataset}"
     resolved_project_dir = _project_directory(project_dir, force)
@@ -441,7 +439,7 @@ def init_project(
     if model_spec.collate_fn_target:
         collate_target = model_spec.collate_fn_target
 
-        def _inject_collate(config):
+        def _inject_collate(config: Any):
             dataloader = getattr(config, "dataloader", None)
             if dataloader is not None:
                 dataloader.collate_fn = ComponentConfig(_target_=collate_target)

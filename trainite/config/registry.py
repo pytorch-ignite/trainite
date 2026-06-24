@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -17,7 +18,7 @@ class ComponentSpec(BaseModel):
     dependencies: list[str] = []
 
     @property
-    def config_cls(self) -> type[BaseModel]:
+    def config_cls(self) -> Any:
         return get_target(self.config_cls_path)
 
 
