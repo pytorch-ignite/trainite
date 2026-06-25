@@ -97,7 +97,8 @@ class Attention(nn.Module):
         cos: torch.Tensor,
         sin: torch.Tensor,
         padding_mask: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        output_attentions: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
         B, S, C = x.shape
 
         qkv = self.qkv_projection(x)
@@ -111,29 +112,85 @@ class Attention(nn.Module):
         # Apply Rotary Position Embeddings
         q, k = apply_rotary_pos_emb(q, k, cos, sin)
 
-        # padding mask shape should be (B,1,1,S) to broadcast correctly with attention scores of shape (B, num_heads, S, S)
+        is_causal = True
+        mask = None
         if padding_mask is not None:
             causal_mask = torch.ones(S, S, dtype=torch.bool, device=x.device).tril()
             mask = causal_mask & padding_mask
-            context = nn.functional.scaled_dot_product_attention(
+            is_causal = False
+
+        attn_weights = None
+        if output_attentions:
+            context, attn_weights = scaled_dot_product_attention_reference(
                 q,
                 k,
                 v,
                 attn_mask=mask,
-                is_causal=False,
-                dropout_p=self.dropout_p if self.training else 0.0,
+                dropout_p=self.dropout_p,
+                is_causal=is_causal,
+                training=self.training,
+                output_attentions=True,
             )
         else:
             context = nn.functional.scaled_dot_product_attention(
                 q,
                 k,
                 v,
-                is_causal=True,
+                attn_mask=mask,
+                is_causal=is_causal,
                 dropout_p=self.dropout_p if self.training else 0.0,
             )
         context = context.transpose(1, 2).contiguous().view(B, S, C)
         out = self.out(context)
-        return self.dropout(out), context
+        return self.dropout(out), context, attn_weights
+
+
+def scaled_dot_product_attention_reference(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attn_mask: torch.Tensor | None = None,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    scale: float | None = None,
+    enable_gqa: bool = False,
+    training: bool = True,
+    output_attentions: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor | None]:
+    """PyTorch reference implementation of scaled_dot_product_attention.
+
+    Ref: https://docs.pytorch.org/docs/2.12/generated/torch.nn.functional.scaled_dot_product_attention.html
+    """
+    L, S = query.size(-2), key.size(-2)
+    scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
+    attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
+    if is_causal:
+        assert attn_mask is None
+        temp_mask = torch.ones(L, S, dtype=torch.bool, device=query.device).tril(
+            diagonal=0
+        )
+        attn_bias = attn_bias.masked_fill(temp_mask.logical_not(), float("-inf"))
+
+    if attn_mask is not None:
+        if attn_mask.dtype == torch.bool:
+            attn_bias = attn_bias.masked_fill(attn_mask.logical_not(), float("-inf"))
+        else:
+            attn_bias = attn_mask + attn_bias
+
+    if enable_gqa:
+        key = key.repeat_interleave(query.size(-3) // key.size(-3), -3)
+        value = value.repeat_interleave(query.size(-3) // value.size(-3), -3)
+
+    attn_weight = query @ key.transpose(-2, -1) * scale_factor
+    attn_weight = attn_weight + attn_bias
+    attn_weight = torch.softmax(attn_weight, dim=-1)
+
+    saved_attn_weights = attn_weight if output_attentions else None
+
+    attn_weight = torch.nn.functional.dropout(
+        attn_weight, p=dropout_p, training=training
+    )
+    return attn_weight @ value, saved_attn_weights
 
 
 class TransformerBlock(nn.Module):
@@ -158,13 +215,22 @@ class TransformerBlock(nn.Module):
         cos: torch.Tensor,
         sin: torch.Tensor,
         padding_mask: torch.Tensor | None = None,
-    ) -> torch.Tensor:
+        output_attentions: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         normed = self.norm1(x)
-        attn_output, _ = self.attention(normed, cos, sin, padding_mask=padding_mask)
+        attn_output, _, attn_weights = self.attention(
+            normed,
+            cos,
+            sin,
+            padding_mask=padding_mask,
+            output_attentions=output_attentions,
+        )
         x = x + attn_output
 
         normed = self.norm2(x)
         x = x + self.feedforward(normed)
+        if output_attentions:
+            return x, attn_weights
         return x
 
 
@@ -199,7 +265,9 @@ class TransformerModel(nn.Module):
         self.proj = nn.Linear(hidden_size, vocab_size)
         self.norm = nn.LayerNorm(hidden_size)
 
-    def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, input_ids: torch.Tensor, output_attentions: bool = False
+    ) -> torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]:
         B, S = input_ids.shape
         x = self.embedding(input_ids) * math.sqrt(self.embedding.embedding_dim)
         cos, sin = self.rotary_emb(x, seq_len=S)
@@ -207,10 +275,22 @@ class TransformerModel(nn.Module):
             padding_mask = (input_ids != self.embedding.padding_idx).reshape(B, 1, 1, S)
         else:
             padding_mask = None
+        all_attentions = []
         for block in self.blocks:
-            x = block(x, cos, sin, padding_mask=padding_mask)
+            if output_attentions:
+                x, attn_weights = block(
+                    x, cos, sin, padding_mask=padding_mask, output_attentions=True
+                )
+                all_attentions.append(attn_weights)
+            else:
+                x = block(
+                    x, cos, sin, padding_mask=padding_mask, output_attentions=False
+                )
         x = self.norm(x)
-        return self.proj(x)
+        logits = self.proj(x)
+        if output_attentions:
+            return logits, all_attentions
+        return logits
 
     @torch.no_grad()
     def generate(
