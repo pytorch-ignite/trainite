@@ -56,17 +56,17 @@ optimizer:
 
 Requires Python >= 3.10.
 
-**Option 1 — uv:**
-
-> [!IMPORTANT]
-> This option runs `trainite` inside the local virtual environment of the cloned repository. The project directory `my-experiment` will be generated inside the `trainite/` folder. It does not work globally outside the repository folder. If you want to make `trainite` globally available from any folder, use Option 2 instead.
+**Option 1 — uv (recommended):**
 
 ```bash
 git clone https://github.com/pytorch-ignite/trainite.git
 cd trainite
 uv sync
+source .venv/bin/activate
 
-uv run trainite init my-experiment --model transformer --dataset string-reverse
+# Initialize the project in any workspace
+cd ..
+trainite init my-experiment --model transformer --dataset string-reverse
 cd my-experiment
 uv sync
 uv run python main.py config.yaml
