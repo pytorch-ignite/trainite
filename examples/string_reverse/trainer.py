@@ -456,7 +456,7 @@ class DecoderTrainer:
                 )
             name_map = {"Train": "training", "Val": "validation", "Test": "testing"}
             tag = f"inference/{name_map.get(name, name.lower())}"
-            wandb_logger.log({tag: table})
+            wandb_logger.log({tag: table}, step=self.engine.state.iteration)
 
     @torch.no_grad()
     def generate(
@@ -614,7 +614,10 @@ class DecoderTrainer:
         )
         self.test_metrics = {"ar_exact_match_acc": ar_exact, "ar_token_acc": ar_token}
         if "wandb" in self.handlers:
-            self.handlers["wandb"].log({"testing/ar_exact_match_acc": ar_exact, "testing/ar_token_acc": ar_token})
+            self.handlers["wandb"].log(
+                {"testing/ar_exact_match_acc": ar_exact, "testing/ar_token_acc": ar_token},
+                step=self.engine.state.iteration,
+            )
 
         # Sample predictions table — reuse the rows already generated above; only
         # when inference logging is enabled.
@@ -623,7 +626,7 @@ class DecoderTrainer:
             table = wandb_logger.Table(columns=["sample", "prompt", "target", "prediction"])
             for idx, (source, target, pred) in enumerate(rows[: self.inference_num_samples], 1):
                 table.add_data(idx, source.strip() or "(empty)", target.strip() or "(empty)", pred.strip() or "(empty)")
-            wandb_logger.log({"inference/testing": table})
+            wandb_logger.log({"inference/testing": table}, step=self.engine.state.iteration)
 
         return self.test_metrics
 
