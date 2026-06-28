@@ -98,10 +98,10 @@ class DecoderTrainer:
         self.total_iters: int = len(self.train_loader) * self.epochs
         self.run_dir: Path | None = None
         self.handlers: dict = {}
+        self.test_metrics: dict = {}
         self.engine = Engine(self._train_step)
         self.train_evaluator = Engine(self._eval_step)
         self.val_evaluator = Engine(self._eval_step)
-        self.test_evaluator = Engine(self._eval_step)
         self.metrics: dict = self._attach_metrics()
 
         if self.inference_every_epochs is not None:
@@ -177,7 +177,6 @@ class DecoderTrainer:
         for prefix, evaluator in [
             ("train", self.train_evaluator),
             ("val", self.val_evaluator),
-            ("test", self.test_evaluator),
         ]:
             loss = Loss(self.loss_fn, output_transform=self._flatten)
             token_acc = Accuracy(output_transform=self._flatten)
@@ -239,13 +238,6 @@ class DecoderTrainer:
                     self._log_inference,
                     self.val_loader,
                     "Val",
-                )
-            if self.test_loader is not None:
-                self.engine.add_event_handler(
-                    Events.EPOCH_COMPLETED(every=self.inference_every_epochs),
-                    self._log_inference,
-                    self.test_loader,
-                    "Test",
                 )
 
         # 3. Checkpoint
@@ -323,15 +315,6 @@ class DecoderTrainer:
                 metric_names=metric_names,
                 global_step_transform=lambda *_: self.engine.state.epoch,
             )
-        if self.test_loader:
-            wandb_logger.attach_output_handler(
-                self.test_evaluator,
-                event_name=Events.COMPLETED,
-                tag="testing",
-                metric_names=metric_names,
-                global_step_transform=lambda *_: self.engine.state.epoch,
-            )
-
         wandb_logger.attach(
             self.engine,
             log_handler=OptimizerParamsHandler(self.optimizer),
@@ -532,13 +515,15 @@ class DecoderTrainer:
         return generated
 
     @torch.no_grad()
-    def _autoregressive_eval(self, loader: DataLoader) -> tuple[float, float] | None:
+    def _autoregressive_eval(self, loader: DataLoader) -> tuple[float, float, list[tuple[str, str, str]]] | None:
         """Generate predictions token-by-token over the whole loader.
 
-        Returns (exact_match_acc, char_accuracy), or None if the tokenizer/transform
-        needed for generation is unavailable. This is the deployment-like metric:
-        the model conditions on its own outputs, so errors compound (unlike the
-        teacher-forced forward metrics).
+        Returns (exact_match_acc, char_accuracy, rows) where rows is a list of
+        (source, target, prediction) for building a sample table without a second
+        generation pass. Returns None if the tokenizer/transform needed for
+        generation is unavailable. This is the deployment-like metric: the model
+        conditions on its own outputs, so errors compound (unlike the teacher-forced
+        forward metrics).
         """
         tokenizer = self.tokenizer
         transform = self.prompt_transform
@@ -547,13 +532,14 @@ class DecoderTrainer:
             return None
 
         dataset = loader.dataset
-        total = len(dataset)  # type: ignore[arg-type]
+        total = len(dataset)  # type: ignore
         pad_token_id = getattr(tokenizer, "pad_token_id", 0)
         batch_size = getattr(loader, "batch_size", 32) or 32
 
         self.model.eval()
         preds: list[str] = []
         targets: list[str] = []
+        sources: list[str] = []
         for start in range(0, total, batch_size):
             items = [dataset[i] for i in range(start, min(start + batch_size, total))]
             prompt_ids = [torch.tensor(transform.build_prompt(it), dtype=torch.long) for it in items]
@@ -580,9 +566,10 @@ class DecoderTrainer:
             new_tokens = sequences[:, batch_input_ids.shape[1] :]
             preds.extend(tokenizer.decode(tok.tolist(), skip_special_tokens=True) for tok in new_tokens)
             targets.extend(it["target"] for it in items)
+            sources.extend(it["source"] for it in items)
 
         if not targets:
-            return 0.0, 0.0
+            return 0.0, 0.0, []
 
         exact = sum(p == t for p, t in zip(preds, targets)) / len(targets)
 
@@ -597,13 +584,13 @@ class DecoderTrainer:
             total_chars += max_len
         char_acc = correct_chars / total_chars if total_chars else 0.0
 
-        return exact, char_acc
+        return exact, char_acc, list(zip(sources, targets, preds))
 
-    def test(self, test_loader: DataLoader | None = None) -> None:
+    def test(self, test_loader: DataLoader | None = None) -> dict:
         loader = test_loader or self.test_loader
         if loader is None:
             self.logger.warning("No test loader provided. Skipping testing.")
-            return
+            return self.test_metrics
 
         # Load best model if available
         checkpoint_handler = self.handlers.get("checkpoint_best") or self.handlers.get("checkpoint_last")
@@ -614,30 +601,32 @@ class DecoderTrainer:
             checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
             self.model.load_state_dict(checkpoint["model"])
 
-        self.logger.info("Running testing...")
-        self.test_evaluator.run(loader)
-        metrics = self.test_evaluator.state.metrics
-        self.logger.info(
-            "Test results: loss=%.4f exact_acc=%.4f token_acc=%.4f",
-            metrics["loss"],
-            metrics["exact_accuracy"],
-            metrics["token_accuracy"],
-        )
-
-        # Autoregressive (deployment-like) evaluation — the honest generation metric.
+        # Autoregressive
         self.logger.info("Running autoregressive testing...")
         ar_result = self._autoregressive_eval(loader)
-        if ar_result is not None:
-            ar_exact, ar_token = ar_result
-            metrics["ar_exact_match_acc"] = ar_exact
-            metrics["ar_token_acc"] = ar_token
-            self.logger.info(
-                "Autoregressive Test results: ar_exact_match_acc=%.4f ar_token_acc=%.4f",
-                ar_exact,
-                ar_token,
-            )
-            if "wandb" in self.handlers:
-                self.handlers["wandb"].log({"testing/ar_exact_match_acc": ar_exact, "testing/ar_token_acc": ar_token})
+        if ar_result is None:
+            return self.test_metrics
+
+        ar_exact, ar_token, rows = ar_result
+        self.logger.info(
+            "Autoregressive Test results: ar_exact_match_acc=%.4f ar_token_acc=%.4f",
+            ar_exact,
+            ar_token,
+        )
+        self.test_metrics = {"ar_exact_match_acc": ar_exact, "ar_token_acc": ar_token}
+        if "wandb" in self.handlers:
+            self.handlers["wandb"].log({"testing/ar_exact_match_acc": ar_exact, "testing/ar_token_acc": ar_token})
+
+        # Sample predictions table — reuse the rows already generated above; only
+        # when inference logging is enabled.
+        if self.inference_every_epochs is not None and "wandb" in self.handlers:
+            wandb_logger = self.handlers["wandb"]
+            table = wandb_logger.Table(columns=["sample", "prompt", "target", "prediction"])
+            for idx, (source, target, pred) in enumerate(rows[: self.inference_num_samples], 1):
+                table.add_data(idx, source.strip() or "(empty)", target.strip() or "(empty)", pred.strip() or "(empty)")
+            wandb_logger.log({"inference/testing": table}, step=self.engine.state.epoch)
+
+        return self.test_metrics
 
     def run(self) -> None:
         # create run directory and handlers when the run actually starts

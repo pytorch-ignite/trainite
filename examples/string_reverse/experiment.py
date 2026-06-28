@@ -184,12 +184,12 @@ def run_single_experiment(
 
     # Explicitly run test to ensure it runs even if run() exited abnormally or was terminated
     if getattr(trainer, "test_loader", None) is not None:
-        if "ar_exact_match_acc" not in trainer.test_evaluator.state.metrics:
+        if "ar_exact_match_acc" not in trainer.test_metrics:
             print("  [experiment_script] Running final autoregressive test...")
             trainer.test()
 
-        store["test_ar_exact_match_acc"] = trainer.test_evaluator.state.metrics.get("ar_exact_match_acc", 0.0)
-        store["test_ar_token_acc"] = trainer.test_evaluator.state.metrics.get("ar_token_acc", 0.0)
+        store["test_ar_exact_match_acc"] = trainer.test_metrics.get("ar_exact_match_acc", 0.0)
+        store["test_ar_token_acc"] = trainer.test_metrics.get("ar_token_acc", 0.0)
 
     return store, elapsed, epochs_trained
 
