@@ -1,3 +1,5 @@
+preprocessor:
+  _target_: preprocessors.char_tokenizer.CharTokenizer
 model:
   _target_: models.transformer.TransformerModel
   hidden_size: 64
@@ -10,28 +12,32 @@ optimizer:
   _target_: torch.optim.AdamW
   lr: 0.001
 data:
-  train: null
-  val: null
-  test: null
   dataset:
-    _target_: dataset.string_reverse.StringReverseDataset
+    _target_: datasets.string_reverse.StringReverseDataset
     per_seq_size: 256
-    charset: "@alpha"
+    charset: '@alpha'
     min_seq_len: 1
     max_seq_len: 16
     seq_len: null
     seed: 42
+  transform:
+    _target_: datasets.string_reverse.PromptCompletionTransform
+    ignore_index: -100
   dataloader:
     batch_size: 32
     shuffle: true
     num_workers: 2
     collate_fn:
-      _target_: dataset.string_reverse.collate_fn
-  train_ratio: 0.8
+      _target_: models.transformer.CausalLMCollateFn
+  test_ratio: 0.1
   val_ratio: 0.1
 trainer:
-  log_every_steps: 10
   epochs: 3
+  log_every_steps: 10
+  early_stopping_patience: 3
+  inference_every_epochs: null
+  inference_num_samples: 5
+  max_inference_new_tokens: 16
   grad_clip_norm: null
 output:
   root: outputs

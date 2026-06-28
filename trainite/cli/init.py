@@ -2,7 +2,7 @@ import inspect
 import re
 import textwrap
 from pathlib import Path
-from typing import Annotated, Any, Iterable, Sequence
+from typing import Annotated, Any, Iterable, Literal, Sequence
 
 import questionary
 import tomlkit
@@ -40,10 +40,10 @@ MODEL_CHOICES = tuple(REGISTRY["models"].keys())
 DATASET_CHOICES = tuple(REGISTRY["datasets"].keys())
 TRAINER_CHOICES = tuple(REGISTRY["trainers"].keys())
 
-# ponytail: type choice aliases as simple str
-ModelType = str
-DatasetType = str
-TrainerType = str
+
+ModelType = Literal[MODEL_CHOICES]  # type: ignore
+DatasetType = Literal[DATASET_CHOICES]  # type: ignore
+TrainerType = Literal[TRAINER_CHOICES]  # type: ignore
 
 
 def _replace_many(text: str, replacements: Iterable[tuple[str, str]]) -> str:
@@ -369,31 +369,23 @@ class Init(BaseModel):
         output_root: Output root for generated config.
         run_name: Run name for generated config.
         force: Overwrite existing starter files.
-        yes: Skip prompts and use defaults for anything not provided.
     """
 
-    project_dir: tyro.conf.Positional[str] = "my-cool-experiment"
-    model: ModelType | None = None
-    dataset: DatasetType | None = None
-    trainer: TrainerType | None = None
+    project_dir: tyro.conf.Positional[Annotated[str, tyro.conf.arg(metavar="PROJECT_DIR")]] = "my-cool-experiment"
+    model: ModelType = "transformer"
+    dataset: DatasetType = "string-reverse"
+    trainer: TrainerType = "decoder-trainer"
     output_root: str = "outputs"
-    run_name: str = "run_1"
+    run_name: str = ""  # empty -> falls back to f"{model}__{dataset}" in init_project
     force: bool = False
-    yes: Annotated[bool, tyro.conf.arg(aliases=["-y"])] = False
 
 
-def init_project(
-    config: Init = Init(),
-) -> None:
+def init_project(config: Init) -> None:
     """Generate a starter training project.
 
     Args:
         config: Configuration for the starter project.
     """
-
-    if config.yes:
-        defaults = Init(model="transformer", dataset="string-reverse", trainer="decoder-trainer")
-        config = config.model_copy(update=defaults.model_dump())
 
     project_dir = config.project_dir
     model = config.model
@@ -402,16 +394,6 @@ def init_project(
     output_root = config.output_root
     run_name = config.run_name
     force = config.force
-
-    if model is None:
-        print("Missing required argument: model. Please provide it or run in interactive mode.")
-        raise SystemExit(1)
-    if dataset is None:
-        print("Missing required argument: dataset. Please provide it or run in interactive mode.")
-        raise SystemExit(1)
-    if trainer is None:
-        print("Missing required argument: trainer. Please provide it or run in interactive mode.")
-        raise SystemExit(1)
 
     resolved_run_name = run_name or f"{model}__{dataset}"
     resolved_project_dir = _project_directory(project_dir, force)

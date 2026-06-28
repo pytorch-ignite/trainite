@@ -9,28 +9,74 @@ Trainite is a toolbox for training language models with PyTorch-Ignite. This pro
 - `config.yaml`: The central configuration for your experiment. Edit this to change hyperparameters, dataset paths, or output settings.
 - `main.py`: The entrypoint for training. Run it with `python main.py config.yaml`.
 - `models/`: Contains the model architecture definition.
-- `dataset/`: Handles data loading and preprocessing.
-- `trainer.py`: Defines the training and evaluation logic. You can override `train_step` or `eval_step` here.
+- `datasets/`: Handles data loading and preprocessing.
+- `trainer.py`: Defines the training and evaluation logic. You can override `_train_step` or `_eval_step` here.
 - `config.py`: Contains Pydantic models for configuration validation. If you add new parameters to `config.yaml`, update the models here.
 - `utils.py`: Shared utilities for configuration and logging.
 
 ## Getting Started
 
-1. **Install Dependencies**:
-   Ensure you have PyTorch, PyTorch-Ignite, and Pydantic installed.
+You can set up and run this project using either **uv** (recommended for speed) or standard **pip**.
+
+### Option A: Using uv (Recommended)
+
+[uv](https://github.com/astral-sh/uv) is an extremely fast Python package installer and resolver.
+
+1. **Install uv** (if you don't have it):
+   * **macOS/Linux**:
+     ```bash
+     curl -LsSf https://astral.sh/uv/install.sh | sh
+     ```
+   * **Windows**:
+     ```powershell
+     powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+     ```
+   * Or via pip: `pip install uv`
+
+2. **Install Dependencies & Set Up Virtual Environment**:
    ```bash
    uv sync
    ```
 
-2. **Run Training**:
+3. **Run Training**:
    ```bash
    uv run python main.py config.yaml
    ```
 
-3. **Monitor Progress**:
-   Training logs and checkpoints are saved to the directory specified in `config.yaml` (default: `outputs/`). You can use TensorBoard to visualize metrics:
+4. **Monitor Progress**:
    ```bash
    uv run tensorboard --logdir outputs
+   ```
+
+### Option B: Using standard pip & venv
+
+If you prefer standard Python tools, you can create a virtual environment and use `pip`:
+
+1. **Create and Activate a Virtual Environment**:
+   * **macOS/Linux**:
+     ```bash
+     python3 -m venv .venv
+     source .venv/bin/activate
+     ```
+   * **Windows**:
+     ```cmd
+     python -m venv .venv
+     .venv\Scripts\activate
+     ```
+
+2. **Install Dependencies**:
+   ```bash
+   pip install -e .
+   ```
+
+3. **Run Training**:
+   ```bash
+   python main.py config.yaml
+   ```
+
+4. **Monitor Progress**:
+   ```bash
+   tensorboard --logdir outputs
    ```
 
 ## Components
@@ -38,13 +84,13 @@ Trainite is a toolbox for training language models with PyTorch-Ignite. This pro
 ### Model: transformer
 # Transformer model
 
-This is the model that learns the string-reverse task.
-
 It is a decoder-only Transformer: given a sequence of token IDs, it predicts the next token at every position.
 
 ## What goes in / out
 
-- **Input**: `input_ids` with shape `(batch, seq_len)`
+- **Input**:
+  - `input_ids` with shape `(batch, seq_len)`
+  - `attention_mask` (optional) with shape `(batch, seq_len)`
 - **Output**: logits with shape `(batch, seq_len, vocab_size)`
 
 The trainer uses these logits with cross-entropy loss.
@@ -68,13 +114,13 @@ The model is small and standard:
 Padding ID is `0`. The model ignores padded positions in attention.
 
 ### Sequence length
-`max_seq_len` should be at least as long as your longest input sequence.
+`max_seq_len` represents the precomputed cache size for RoPE. Inputs longer than this will fall back to slower on-the-fly calculations.
 
 ### Hidden size and heads
 `hidden_size` must be divisible by `num_heads`.
 
-### Positional encoding
-`hidden_size` must be even because the positional encoding uses sine and cosine pairs.
+### Rotary positional encoding
+`head_dim` (which is `hidden_size // num_heads`) must be even because RoPE rotates pairs of dimensions.
 
 ## Config knobs
 
@@ -99,16 +145,16 @@ Size of the feedforward layer inside each block.
 A common choice is `2x` to `4x` of `hidden_size`.
 
 ### `dropout`
-Dropout rate used in attention, feedforward layers, and positional encoding.
+Dropout rate used in attention and feedforward layers.
 
 ### `max_seq_len`
-Maximum sequence length supported by positional encoding.
+Precomputed cache size for the rotary position embeddings.
 
 ## Minimal config example
 
 ```yaml
 model:
-  _target_: trainite.models.transformer.build_transformer_model
+  _target_: models.transformer.TransformerModel
   hidden_size: 128
   num_layers: 4
   num_heads: 4
@@ -119,7 +165,7 @@ model:
 
 ## When to change this file
 
-Edit `trainite/models/transformer.py` if you want to:
+Edit `models/transformer.py` if you want to:
 
 - make the model wider or deeper
 - swap attention or feedforward behavior
@@ -147,44 +193,24 @@ It is useful because it is easy to understand, fast to generate, and good for ch
 
 ## What each sample looks like
 
-Each example is built as a single prompt + answer sequence:
-
-```text
-<bos> abc <eos> cba <eos>
-```
-
-Training uses teacher forcing:
-
-- the input contains both the prompt and the answer
-- the labels mask out the prompt part with `-100`
-- loss is only computed on the reversed answer
-
-So the model is not asked to copy the input. It is asked to read the input, then produce the reversed text.
-
-## What the dataset returns
-
-Each item is a dictionary:
+Each dataset item is a dictionary of raw strings:
 
 ```python
 {
-    "input_ids": Tensor,
-    "labels": Tensor,
+    "source": "abc",
+    "target": "cba",
 }
 ```
 
-Use `collate_fn` to pad a batch:
-
-- inputs are padded with `0`
-- labels are padded with `-100`
-
 ## Tokenizer
 
-The dataset uses a simple character tokenizer with these special tokens:
+The dataset uses a character-level tokenizer (`CharTokenizer`) with a universal vocabulary and these special tokens:
 
-- `0` = `<pad>`
-- `1` = `<bos>`
-- `2` = `<eos>`
-- `3` = `<unk>`
+- `0` = `<PAD>`
+- `1` = `<BOS>`
+- `2` = `<SEP>`
+- `3` = `<EOS>`
+- `4` = `<UNK>`
 
 It supports printable ASCII characters by default.
 
@@ -222,7 +248,7 @@ Controls dataset generation so runs are repeatable.
 data:
   train:
     dataset:
-      _target_: trainite.datasets.string_reverse.build_string_reverse_dataset
+      _target_: datasets.string_reverse.StringReverseDataset
       per_seq_size: 512
       charset: "@alpha"
       min_seq_len: 2
@@ -231,7 +257,7 @@ data:
 
 ## When to change this file
 
-Edit `trainite/datasets/string_reverse.py` if you want to:
+Edit `datasets/string_reverse.py` if you want to:
 
 - change the tokenization rules
 - add or remove allowed characters
@@ -247,7 +273,7 @@ If you only want to test the pipeline, keep the defaults and just change:
 - `min_seq_len` / `max_seq_len`
 
 
-### Trainer: decoder-trainer
+### Trainer: decoder_trainer
 # DecoderTrainer
 
 `DecoderTrainer` is the default training loop for this project.
@@ -275,6 +301,7 @@ and a batch that looks like:
 {
     "input_ids": Tensor,
     "labels": Tensor,
+    "attention_mask": Tensor,  # Optional
 }
 ```
 
@@ -295,14 +322,15 @@ At the end of each epoch it also runs evaluation on:
 
 - training data
 - validation data, if present
-- test data, if present
+
+At the end of the training run, it runs a final evaluation on the test data, if present.
 
 ## Logging and checkpoints
 
 `DecoderTrainer` saves a run directory like this:
 
 ```text
-output/<run_name>/<timestamp>/
+outputs/<run_name>/<timestamp>/
 ```
 
 Inside it you get:
@@ -326,6 +354,18 @@ If set, gradients are clipped before the optimizer step.
 
 This can help when training becomes unstable.
 
+### `early_stopping_patience`
+Number of epochs to wait for validation loss improvement before stopping training early. Set to `null` to disable early stopping.
+
+### `inference_every_epochs`
+Run qualitative generation/inference tests on the model every N epochs. Set to `null` to disable.
+
+### `inference_num_samples`
+Number of random prompt samples to generate and log during the evaluation inference phase.
+
+### `max_inference_new_tokens`
+Maximum number of new tokens to generate per sample.
+
 ## What to tweak first
 
 If you are just getting started, the usual first changes are:
@@ -333,11 +373,12 @@ If you are just getting started, the usual first changes are:
 - `epochs`
 - `log_every_steps`
 - `grad_clip_norm`
+- `early_stopping_patience`
 - optimizer settings in `config.yaml`
 
 ## If you want to customize behavior
 
-Edit `trainite/trainers/decoder_trainer.py` if you want to:
+Edit `trainer.py` if you want to:
 
 - change how loss is computed
 - add gradient accumulation
@@ -372,6 +413,35 @@ If the run fails or looks unstable, check these first:
 - learning rate is not too high
 
 
+### Preprocessor: char_tokenizer
+# Char Tokenizer
+
+`CharTokenizer` is a simple character-level tokenizer with a hardcoded universal vocabulary.
+
+## Features
+
+- Character-to-ID mapping of printable ASCII characters plus space.
+- Special tokens:
+  - `<PAD>` (ID 0)
+  - `<BOS>` (ID 1)
+  - `<SEP>` (ID 2)
+  - `<EOS>` (ID 3)
+  - `<UNK>` (ID 4)
+- Supports padding, truncation, and PyTorch tensor generation.
+
+## Config knobs
+
+### `_target_`
+Must be set to `preprocessors.char_tokenizer.CharTokenizer` in the template config.
+
+## Minimal config example
+
+```yaml
+preprocessor:
+  _target_: preprocessors.char_tokenizer.CharTokenizer
+```
+
+
 ## Customization
 
 ### Dataset Configuration
@@ -401,8 +471,8 @@ Define a single dataset and split ratios. Trainite will split it randomly (with 
 data:
   dataset:
     _target_: ...
-  train_ratio: 0.8
-  val_ratio: 0.2
+  test_ratio: 0.1
+  val_ratio: 0.1
   dataloader:
     batch_size: 32
 ```

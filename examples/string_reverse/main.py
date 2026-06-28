@@ -6,11 +6,11 @@ from typing import Any
 
 import torch
 from torch import nn
-from torch.utils.data import DataLoader, Dataset, random_split
+from torch.utils.data import DataLoader, Dataset, Subset, random_split
 
-from config import load_config
-from trainer import DecoderTrainer
-from utils import get_target, instantiate
+from datasets.transformed import TransformedDataset
+from utils import get_target, instantiate, load_config
+from trainer import DecoderTrainer, ProjectConfig
 
 
 def parse_args() -> argparse.Namespace:
@@ -90,25 +90,43 @@ def create_dataloader(
     return DataLoader(dataset, shuffle=shuffle, collate_fn=collate_fn, **dl_kwargs)
 
 
+def _inject_if_accepted(target_symbol: Any, **candidates: Any) -> dict[str, Any]:
+    try:
+        sig = inspect.signature(target_symbol)
+        return {k: v for k, v in candidates.items() if k in sig.parameters}
+    except Exception:
+        return {}
+
+
+def build_dataset(dataset_config: Any, transform_config: Any, tokenizer: Any) -> Dataset:
+    ds = get_target(dataset_config.target)
+    dataset = instantiate(dataset_config, **_inject_if_accepted(ds, preprocessor=tokenizer, tokenizer=tokenizer))
+    if transform_config is not None:
+        tf = get_target(transform_config.target)
+        transform = instantiate(
+            transform_config, **_inject_if_accepted(tf, preprocessor=tokenizer, tokenizer=tokenizer)
+        )
+        return TransformedDataset(dataset, transform)
+    return dataset
+
+
 def build_dataloader(split_config: Any, tokenizer: Any) -> DataLoader:
-    dataset = instantiate(split_config.dataset)
+    dataset = build_dataset(split_config.dataset, split_config.transform, tokenizer)
     return create_dataloader(dataset, split_config.dataloader, tokenizer)
 
 
 def build_loaders_from_ratios(
     data_config: Any, tokenizer: Any, seed: int
-) -> tuple[DataLoader, DataLoader | None, DataLoader | None]:
-    dataset = instantiate(data_config.dataset)
+) -> tuple[DataLoader, DataLoader, DataLoader | None]:
+    dataset = build_dataset(data_config.dataset, data_config.transform, tokenizer)
     total_len = len(dataset)
 
-    train_ratio = data_config.train_ratio if data_config.train_ratio is not None else 1.0
-    val_ratio = data_config.val_ratio if data_config.val_ratio is not None else 0.0
+    if total_len == 0:
+        raise ValueError("Training dataset is empty. Cannot perform train/val/test split.")
 
-    if train_ratio <= 0.0 or val_ratio < 0:
-        raise ValueError(f"train_ratio must be between 0 and 1. Got train_ratio={train_ratio}, val_ratio={val_ratio}")
-
-    if train_ratio + val_ratio > 1.0:
-        raise ValueError(f"Sum of train_ratio ({train_ratio}) and val_ratio ({val_ratio}) exceeds 1.0")
+    test_ratio = data_config.test_ratio
+    val_ratio = data_config.val_ratio
+    train_ratio = 1.0 - test_ratio - val_ratio
 
     train_len = int(total_len * train_ratio)
     val_len = int(total_len * val_ratio)
@@ -120,21 +138,19 @@ def build_loaders_from_ratios(
         generator=torch.Generator().manual_seed(seed),
     )
 
-    dl_config = data_config.dataloader or instantiate(None)  # fallback or default
+    dl_config = data_config.dataloader
 
     train_loader = create_dataloader(train_ds, dl_config, tokenizer, shuffle=True)
-    val_loader = create_dataloader(val_ds, dl_config, tokenizer, shuffle=False) if val_len > 0 else None
+    val_loader = create_dataloader(val_ds, dl_config, tokenizer, shuffle=False)
     test_loader = create_dataloader(test_ds, dl_config, tokenizer, shuffle=False) if test_len > 0 else None
 
     return train_loader, val_loader, test_loader
 
 
-def build_dataloaders(
-    data_config: Any, tokenizer: Any, seed: int
-) -> tuple[DataLoader, DataLoader | None, DataLoader | None]:
-    if data_config.train:
+def build_dataloaders(data_config: Any, tokenizer: Any, seed: int) -> tuple[DataLoader, DataLoader, DataLoader | None]:
+    if hasattr(data_config, "train"):
         train_loader = build_dataloader(data_config.train, tokenizer)
-        val_loader = build_dataloader(data_config.val, tokenizer) if data_config.val else None
+        val_loader = build_dataloader(data_config.val, tokenizer)
         test_loader = build_dataloader(data_config.test, tokenizer) if data_config.test else None
     else:
         train_loader, val_loader, test_loader = build_loaders_from_ratios(data_config, tokenizer, seed)
@@ -153,60 +169,22 @@ def main() -> None:
 
     args = parse_args()
     config_path = Path(args.config)
-    config = load_config(config_path)
+    config = load_config(config_path, ProjectConfig)
 
     device = resolve_device(config.device)
-    # The example code might not define config.tokenizer. Let's resolve it carefully.
-    # In examples/string_reverse/trainer.py, it got vocab_size from train_dataset.vocab_size.
-    # Wait, the dataset class itself contains vocabulary / tokenizer?
-    # Let's check examples/string_reverse/trainer.py lines 61-86.
-    # It says:
-    # "train_dataset = self.train_loader.dataset ... self.vocab_size: int = getattr(train_dataset, 'vocab_size')"
-    # Wait, in the string_reverse example, is there a tokenizer in config?
-    # Let's check examples/string_reverse/config.py ProjectConfig fields.
-    # ProjectConfig has: model, optimizer, data, trainer, output, seed, device.
-    # It does NOT have a tokenizer!
-    # Ah! The string_reverse example does not have config.tokenizer!
-    # Let's check how the model is instantiated in examples/string_reverse/trainer.py:
-    # `self.model: nn.Module = model or instantiate(config.model, vocab_size=self.vocab_size)`
-    # So the vocab_size is resolved from the dataset!
-    # Okay, let's keep examples/string_reverse/trainer.py and main.py decoupled as well.
-    # In examples/string_reverse/main.py:
-    # 1. Resolve device.
-    # 2. Build dataloaders (tokenizer is None).
-    # 3. Resolve vocab_size from train_loader's dataset:
-    #    train_dataset = train_loader.dataset
-    #    if isinstance(train_dataset, torch.utils.data.Subset):
-    #        train_dataset = train_dataset.dataset
-    #    vocab_size = getattr(train_dataset, "vocab_size")
-    # 4. Build model using config.model and vocab_size.
-    # 5. Build optimizer.
-    # 6. Run DecoderTrainer.
+    tokenizer = instantiate(config.preprocessor) if config.preprocessor is not None else None
 
-    train_loader, val_loader, test_loader = build_dataloaders(config.data, None, config.seed)
+    train_loader, val_loader, test_loader = build_dataloaders(config.data, tokenizer, config.seed)
 
-    train_dataset = train_loader.dataset
-    if isinstance(train_dataset, torch.utils.data.Subset):
-        train_dataset = train_dataset.dataset
-    vocab_size = getattr(train_dataset, "vocab_size")
-
-    # check model config configured_vocab_size
-    model_params = config.model.model_dump(by_alias=True)
-    configured_vocab_size = model_params.get("vocab_size")
-    if configured_vocab_size is not None:
-        if configured_vocab_size < vocab_size:
-            raise ValueError(
-                f"Configured model vocab_size ({configured_vocab_size}) is smaller than "
-                f"the dataset vocabulary size ({vocab_size}). "
-                f"Please increase model vocab_size or remove it from config.yaml "
-                f"to let it resolve automatically."
-            )
-        vocab_size = configured_vocab_size
-
-    model = instantiate(config.model, vocab_size=vocab_size)
-    model.to(device)
+    vocab_size = resolve_vocab_size(tokenizer, config.model)
+    model = build_model(config.model, tokenizer, vocab_size, device)
 
     optimizer = instantiate(config.optimizer, params=model.parameters())
+
+    # The transform owns the prompt format; hand it to the trainer for inference logging.
+    ds = train_loader.dataset
+    ds = ds.dataset if isinstance(ds, Subset) else ds
+    prompt_transform = getattr(ds, "transform", None)
 
     trainer = DecoderTrainer(
         config=config,
@@ -215,8 +193,8 @@ def main() -> None:
         train_loader=train_loader,
         val_loader=val_loader,
         test_loader=test_loader,
-        device=device,
-        vocab_size=vocab_size,
+        preprocessor=tokenizer,
+        prompt_transform=prompt_transform,
     )
     trainer.run()
 

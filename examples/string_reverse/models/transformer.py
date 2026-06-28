@@ -1,27 +1,58 @@
 import math
+from typing import Any
 
 import torch
+from pydantic import Field
 from torch import nn
+from torch.nn.utils.rnn import pad_sequence
+
+from config import ComponentConfig
 
 
-class PositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, max_len: int, dropout: float = 0.1) -> None:
+class RotaryEmbedding(nn.Module):
+    def __init__(self, dim: int, max_seq_len: int) -> None:
         super().__init__()
-        self.dropout = nn.Dropout(p=dropout)
+        if dim % 2 != 0:
+            raise ValueError(f"RotaryEmbedding dimension (head_dim) must be even, got {dim}.")
+        self.dim = dim
+        self.max_seq_len = max_seq_len
+        inv_freq = 1.0 / (10000.0 ** (torch.arange(0, dim, 2).float() / dim))
+        self.register_buffer("inv_freq", inv_freq, persistent=False)
 
-        if d_model % 2 != 0:
-            raise ValueError("d_model must be even for sinusoidal positional encoding.")
+        # Precompute cos and sin buffers
+        cos, sin = self._compute_embeddings(max_seq_len, device=inv_freq.device, dtype=torch.float32)
+        self.register_buffer("cos_cached", cos, persistent=False)
+        self.register_buffer("sin_cached", sin, persistent=False)
 
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2, dtype=torch.float) * (-math.log(10000.0) / d_model))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        self.register_buffer("pe", pe.unsqueeze(0))
+    def _compute_embeddings(
+        self, seq_len: int, device: torch.device, dtype: torch.dtype
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        t = torch.arange(seq_len, device=device, dtype=self.inv_freq.dtype)
+        freqs = torch.outer(t, self.inv_freq)
+        emb = torch.cat((freqs, freqs), dim=-1)
+        cos = emb.cos().unsqueeze(0).unsqueeze(0).to(dtype)
+        sin = emb.sin().unsqueeze(0).unsqueeze(0).to(dtype)
+        return cos, sin
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.pe[:, : x.size(1)]
-        return self.dropout(x)
+    def forward(self, x: torch.Tensor, seq_len: int) -> tuple[torch.Tensor, torch.Tensor]:
+        if seq_len > self.max_seq_len:
+            return self._compute_embeddings(seq_len, device=x.device, dtype=x.dtype)
+
+        return self.cos_cached[:, :, :seq_len].to(x.dtype), self.sin_cached[:, :, :seq_len].to(x.dtype)
+
+
+def rotate_half(x: torch.Tensor) -> torch.Tensor:
+    x1 = x[..., : x.shape[-1] // 2]
+    x2 = x[..., x.shape[-1] // 2 :]
+    return torch.cat((-x2, x1), dim=-1)
+
+
+def apply_rotary_pos_emb(
+    q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    q_embed = (q * cos) + (rotate_half(q) * sin)
+    k_embed = (k * cos) + (rotate_half(k) * sin)
+    return q_embed, k_embed
 
 
 class Attention(nn.Module):
@@ -40,6 +71,8 @@ class Attention(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
         padding_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         B, S, C = x.shape
@@ -51,6 +84,10 @@ class Attention(nn.Module):
         q = q.view(B, S, self.num_heads, self.head_dim).transpose(1, 2)
         k = k.view(B, S, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(B, S, self.num_heads, self.head_dim).transpose(1, 2)
+
+        # Apply Rotary Position Embeddings
+        q, k = apply_rotary_pos_emb(q, k, cos, sin)
+
         # padding mask shape should be (B,1,1,S) to broadcast correctly with attention scores of shape (B, num_heads, S, S)
         if padding_mask is not None:
             causal_mask = torch.ones(S, S, dtype=torch.bool, device=x.device).tril()
@@ -77,13 +114,7 @@ class Attention(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    def __init__(
-        self,
-        d_model: int,
-        num_heads: int,
-        feedforward_dim: int,
-        dropout: float = 0.1,
-    ) -> None:
+    def __init__(self, d_model: int, num_heads: int, feedforward_dim: int, dropout: float = 0.1) -> None:
         super().__init__()
         self.norm1 = nn.LayerNorm(d_model)
         self.attention = Attention(d_model, num_heads, dropout=dropout)
@@ -96,9 +127,15 @@ class TransformerBlock(nn.Module):
             nn.Dropout(dropout),
         )
 
-    def forward(self, x: torch.Tensor, padding_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+        padding_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         normed = self.norm1(x)
-        attn_output, _ = self.attention(normed, padding_mask=padding_mask)
+        attn_output, _ = self.attention(normed, cos, sin, padding_mask=padding_mask)
         x = x + attn_output
 
         normed = self.norm2(x)
@@ -109,18 +146,20 @@ class TransformerBlock(nn.Module):
 class TransformerModel(nn.Module):
     def __init__(
         self,
-        vocab_size: int = 32,
+        vocab_size: int = 100,
         hidden_size: int = 64,
         num_layers: int = 2,
         num_heads: int = 2,
         feedforward_dim: int = 128,
         dropout: float = 0.1,
         max_seq_len: int = 128,
-        **kwargs,
+        pad_token_id: int | None = None,
+        **kwargs: Any,
     ) -> None:
         super().__init__()
-        self.embedding = nn.Embedding(vocab_size, hidden_size, padding_idx=0)
-        self.pos_encoding = PositionalEncoding(hidden_size, max_seq_len, dropout)
+        pad_token_id = pad_token_id if pad_token_id is not None else 0
+        self.embedding = nn.Embedding(vocab_size, hidden_size, padding_idx=pad_token_id)
+        self.rotary_emb = RotaryEmbedding(dim=hidden_size // num_heads, max_seq_len=max_seq_len)
         self.blocks = nn.ModuleList(
             [
                 TransformerBlock(
@@ -135,36 +174,72 @@ class TransformerModel(nn.Module):
         self.proj = nn.Linear(hidden_size, vocab_size)
         self.norm = nn.LayerNorm(hidden_size)
 
-    def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
+    def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor | None = None) -> torch.Tensor:
         B, S = input_ids.shape
         x = self.embedding(input_ids) * math.sqrt(self.embedding.embedding_dim)
-        x = self.pos_encoding(x)
-        if (input_ids == self.embedding.padding_idx).any():
+        cos, sin = self.rotary_emb(x, seq_len=S)
+        padding_mask: torch.Tensor | None = None
+        if attention_mask is not None:
+            if not attention_mask.all().item():
+                padding_mask = attention_mask.reshape(B, 1, 1, S).to(torch.bool)
+        elif (input_ids == self.embedding.padding_idx).any().item():
             padding_mask = (input_ids != self.embedding.padding_idx).reshape(B, 1, 1, S)
-        else:
-            padding_mask = None
         for block in self.blocks:
-            x = block(x, padding_mask=padding_mask)
+            x = block(x, cos, sin, padding_mask=padding_mask)
         x = self.norm(x)
         return self.proj(x)
 
 
-def build_transformer_model(
-    vocab_size: int = 32,
-    hidden_size: int = 64,
-    num_layers: int = 2,
-    num_heads: int = 2,
-    feedforward_dim: int = 128,
-    dropout: float = 0.1,
-    max_seq_len: int = 128,
-    **kwargs,
-) -> TransformerModel:
-    return TransformerModel(
-        vocab_size=vocab_size,
-        hidden_size=hidden_size,
-        num_layers=num_layers,
-        num_heads=num_heads,
-        feedforward_dim=feedforward_dim,
-        dropout=dropout,
-        max_seq_len=max_seq_len,
-    )
+class CausalLMCollateFn:
+    """Collate sequences for decoder-only autoregressive training."""
+
+    def __init__(
+        self,
+        tokenizer: Any,
+        pad_token_id: int | None = None,
+        ignore_index: int = -100,
+    ) -> None:
+        self.tokenizer = tokenizer
+        self.pad_token_id = pad_token_id if pad_token_id is not None else tokenizer.pad_token_id
+        self.ignore_index = ignore_index
+
+    def __call__(self, batch: list[dict[str, torch.tensor]]) -> dict[str, torch.Tensor]:
+        input_ids_list = []
+        attention_mask_list = []
+        labels_list = []
+        for item in batch:
+            input_ids = item.get("input_ids")
+            labels = item.get("labels")
+
+            if input_ids is None or labels is None:
+                raise KeyError(f"Dataset item must contain 'input_ids' and 'labels' keys. Got: {list(item.keys())}")
+            attention_mask = item.get("attention_mask", torch.tensor([1] * len(input_ids)))
+
+            # We flip the sequences to have padding on the left, which allows us to use causal masking without modification
+            input_ids_list.append(input_ids.flip(0))
+            labels_list.append(labels.flip(0))
+            attention_mask_list.append(attention_mask.flip(0))
+
+        padded_input_ids = pad_sequence(
+            input_ids_list,
+            batch_first=True,
+            padding_value=self.pad_token_id if self.pad_token_id is not None else 0,
+        ).flip(1)
+        padded_attention_mask = pad_sequence(attention_mask_list, batch_first=True, padding_value=0).flip(1)
+        padded_labels = pad_sequence(labels_list, batch_first=True, padding_value=self.ignore_index).flip(1)
+
+        return {
+            "input_ids": padded_input_ids,
+            "attention_mask": padded_attention_mask,
+            "labels": padded_labels,
+        }
+
+
+class TransformerModelConfig(ComponentConfig):
+    target: str = Field(default="models.transformer.TransformerModel", alias="_target_")
+    hidden_size: int = Field(default=64, gt=0)
+    num_layers: int = Field(default=2, gt=0)
+    num_heads: int = Field(default=2, gt=0)
+    feedforward_dim: int = Field(default=128, gt=0)
+    dropout: float = Field(default=0.1, ge=0.0, lt=1.0)
+    max_seq_len: int = Field(default=128, gt=0)
