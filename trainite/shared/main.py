@@ -9,6 +9,7 @@ from torch import nn
 from torch.utils.data import DataLoader, Dataset, Subset, random_split
 
 from trainite.datasets.transformed import TransformedDataset
+from trainite.shared.debug import parse_debug_flags
 from trainite.shared.utils import get_target, instantiate, load_config
 from trainite.trainers.decoder_trainer import DecoderTrainer, ProjectConfig
 
@@ -16,6 +17,12 @@ from trainite.trainers.decoder_trainer import DecoderTrainer, ProjectConfig
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("config", nargs="?", default="config.yaml")
+    parser.add_argument(
+        "--debug",
+        type=str,
+        default=None,
+        help='Debug flags, e.g. "GRADS|LR|LOGITS" or "ALL"',
+    )
     return parser.parse_args()
 
 
@@ -186,6 +193,8 @@ def main() -> None:
     ds = ds.dataset if isinstance(ds, Subset) else ds
     prompt_transform = getattr(ds, "transform", None)
 
+    debug_flags = parse_debug_flags(args.debug)
+
     trainer = DecoderTrainer(
         config=config,
         model=model,
@@ -195,6 +204,7 @@ def main() -> None:
         test_loader=test_loader,
         preprocessor=tokenizer,
         prompt_transform=prompt_transform,
+        debug_flags=debug_flags,
     )
     trainer.run()
 

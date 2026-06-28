@@ -224,6 +224,7 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
             "# __DATASET_IMPORT__",
             f"from datasets.{dataset_spec.name} import {dataset_spec.config_cls.__name__}",
         ),
+        ("trainite.shared.debug", "debug"),
     ]
 
     if preprocessor_spec:
@@ -252,6 +253,7 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
             f"from trainer import {trainer_spec.implementation_symbol}, ProjectConfig",
         ),
         ("trainite.shared.utils", "utils"),
+        ("trainite.shared.debug", "debug"),
         ("DecoderTrainer(", f"{trainer_spec.implementation_symbol}("),
         (
             "from trainite.datasets.transformed import TransformedDataset",
@@ -298,6 +300,7 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
         {
             "trainer.py": _render_template(PROJECT_ROOT / trainer_spec.implementation_path, trainer_replacements),
             "utils.py": _render_template(PROJECT_ROOT / "trainite/shared/utils.py"),
+            "debug.py": _render_template(PROJECT_ROOT / "trainite/shared/debug.py"),
             "main.py": _render_template(PROJECT_ROOT / "trainite/shared/main.py", main_replacements),
             "README.md": _render_template(PROJECT_ROOT / "trainite/templates/project/README.md", readme_replacements),
             "config.py": _render_template(PROJECT_ROOT / "trainite/config/base.py"),

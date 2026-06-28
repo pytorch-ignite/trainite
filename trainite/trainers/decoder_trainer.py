@@ -34,6 +34,8 @@ from trainite.config.base import (
 # __PREPROCESSOR_IMPORT__
 from trainite.shared.utils import dump_config
 
+from trainite.shared.debug import DebugFlag
+
 
 class DecoderTrainerConfig(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
@@ -70,12 +72,14 @@ class DecoderTrainer:
         val_loader: DataLoader,
         test_loader: DataLoader | None = None,
         prompt_transform: Any = None,
+        debug_flags: Any = None,
     ) -> None:
         self.logger: logging.Logger = setup_logger("trainer", level=logging.INFO)
         torch.manual_seed(config.seed)
         self.config: ProjectConfig = config
         self.tokenizer = preprocessor
         self.prompt_transform = prompt_transform
+        self.debug_flags = debug_flags if debug_flags is not None else DebugFlag.NONE
         self.device: str | torch.device = self._resolve_device()
         self.epochs: int = config.trainer.epochs
         self.grad_clip_norm: float | None = getattr(config.trainer, "grad_clip_norm", None)
@@ -318,6 +322,59 @@ class DecoderTrainer:
             event_name=Events.ITERATION_STARTED,
         )
         self.handlers["tensorboard"] = tb_logger
+
+        # 6. Telemetry Debug Handlers
+        debug_flags = getattr(self, "debug_flags", DebugFlag.NONE)
+        log_freq = self.config.trainer.log_every_steps
+
+        if debug_flags & DebugFlag.GRADS:
+
+            @self.engine.on(Events.ITERATION_COMPLETED(every=log_freq))
+            def debug_grads(engine: Engine) -> None:
+                grad_norm = (
+                    sum(p.grad.data.norm(2).item() ** 2 for p in self.model.parameters() if p.grad is not None) ** 0.5
+                )
+                self.logger.info(f"[DEBUG GRADS] step={engine.state.iteration}: total_grad_norm={grad_norm:.4f}")
+
+        if debug_flags & DebugFlag.LOGITS:
+
+            @self.engine.on(Events.ITERATION_COMPLETED(every=log_freq))
+            def debug_logits(engine: Engine) -> None:
+                logits = engine.state.output.get("logits")
+                if logits is not None:
+                    mean = logits.mean().item()
+                    std = logits.std().item()
+                    has_nan = torch.isnan(logits).any().item()
+                    has_inf = torch.isinf(logits).any().item()
+                    self.logger.info(
+                        f"[DEBUG LOGITS] step={engine.state.iteration}: "
+                        f"mean={mean:.4f}, std={std:.4f}, has_nan={has_nan}, has_inf={has_inf}"
+                    )
+
+        if debug_flags & DebugFlag.LR:
+
+            @self.engine.on(Events.ITERATION_COMPLETED(every=log_freq))
+            def debug_lr(engine: Engine) -> None:
+                for i, pg in enumerate(self.optimizer.param_groups):
+                    self.logger.info(f"[DEBUG LR] step={engine.state.iteration}: group_{i}_lr={pg['lr']:.6f}")
+
+        if debug_flags & DebugFlag.DATA:
+
+            @self.engine.on(Events.ITERATION_COMPLETED(every=log_freq))
+            def debug_data(engine: Engine) -> None:
+                batch = engine.state.batch
+                if isinstance(batch, dict):
+                    shapes = {k: v.shape for k, v in batch.items() if hasattr(v, "shape")}
+                    pad_info = ""
+                    if "input_ids" in batch and getattr(self, "tokenizer", None) is not None:
+                        input_ids = batch["input_ids"]
+                        if hasattr(self.tokenizer, "pad_token_id"):
+                            pad_id = self.tokenizer.pad_token_id
+                            total_tokens = input_ids.numel()
+                            pad_tokens = (input_ids == pad_id).sum().item()
+                            pad_pct = (pad_tokens / total_tokens) * 100 if total_tokens > 0 else 0.0
+                            pad_info = f", pad_tokens={pad_pct:.1f}%"
+                    self.logger.info(f"[DEBUG DATA] step={engine.state.iteration}: shapes={shapes}{pad_info}")
 
     def _run_evaluations(self, engine: Engine) -> None:
         self.logger.info("Evaluating on training set...")

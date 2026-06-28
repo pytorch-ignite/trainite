@@ -701,3 +701,29 @@ def test_decoder_trainer_generate(project_config):
         generated = trainer.generate(input_ids, max_new_tokens=1, attention_mask=attention_mask)
         assert isinstance(generated, torch.Tensor)
         assert generated[0].tolist() == [5, 6, 7]
+
+
+def test_decoder_trainer_debug_flags(project_config):
+    from trainite.shared.debug import DebugFlag
+
+    project_config.trainer.epochs = 1
+    # Create trainer with ALL debug flags
+    base_trainer = create_trainer_from_config(project_config)
+    trainer = DecoderTrainer(
+        config=project_config,
+        model=base_trainer.model,
+        optimizer=base_trainer.optimizer,
+        preprocessor=base_trainer.tokenizer,
+        train_loader=base_trainer.train_loader,
+        val_loader=base_trainer.val_loader,
+        debug_flags=DebugFlag.ALL,
+    )
+
+    # Run a single step to check if the handlers execute without error
+    # Mock the logger to capture the debug calls
+    trainer._attach_handlers()
+    with mock.patch.object(trainer.logger, "info") as mock_info:
+        trainer.engine.run(trainer.train_loader, max_epochs=1, epoch_length=1)
+
+    # Check that at least one debug message was logged
+    assert any("[DEBUG" in call[0][0] for call in mock_info.call_args_list)

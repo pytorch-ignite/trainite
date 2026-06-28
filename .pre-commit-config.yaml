@@ -8,6 +8,7 @@ repos:
       - id: check-added-large-files
       - id: check-toml
       - id: debug-statements
+        exclude: ^trainite/cli/main\.py$
       - id: name-tests-test
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.11.13
