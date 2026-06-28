@@ -2,15 +2,15 @@ preprocessor:
   _target_: preprocessors.char_tokenizer.CharTokenizer
 model:
   _target_: models.transformer.TransformerModel
-  hidden_size: 64
-  num_layers: 2
+  hidden_size: 32
+  num_layers: 4
   num_heads: 2
   feedforward_dim: 128
   dropout: 0.1
   max_seq_len: 128
 optimizer:
   _target_: torch.optim.AdamW
-  lr: 0.001
+  lr: 0.0003
 data:
   dataset:
     _target_: datasets.string_reverse.StringReverseDataset
@@ -29,24 +29,24 @@ data:
     num_workers: 2
     collate_fn:
       _target_: models.transformer.CausalLMCollateFn
-  test_ratio: 0.1
-  val_ratio: 0.1
+  test_ratio: 0.05
+  val_ratio: 0.2
 trainer:
   epochs: 3
   log_every_steps: 10
   early_stopping_patience: 3
-  scheduler:
-    metric_name: token_accuracy
-    mode: max
-    patience: 2
-    factor: 0.5
-    min_lr: 1.0e-6
-  inference_every_epochs: null
+  inference_every_epochs: 5
   inference_num_samples: 5
   max_inference_new_tokens: 16
   grad_clip_norm: null
+  scheduler:
+    metric_name: token_accuracy
+    mode: max
+    patience: 5
+    factor: 0.5
+    min_lr: 1.0e-6
 output:
   root: outputs
   run_name: transformer__string-reverse
 seed: 42
-device: auto
+device: cuda:0

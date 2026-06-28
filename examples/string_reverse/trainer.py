@@ -12,7 +12,7 @@ from ignite.handlers import (
 )
 from ignite.handlers.fbresearch_logger import FBResearchLogger
 from ignite.handlers.param_scheduler import ReduceLROnPlateauScheduler
-from ignite.handlers.tensorboard_logger import OptimizerParamsHandler, TensorboardLogger
+from ignite.handlers.wandb_logger import OptimizerParamsHandler, WandBLogger
 from ignite.metrics import Accuracy, Loss, Metric, RunningAverage
 from ignite.utils import setup_logger
 from pydantic import BaseModel, ConfigDict, Field
@@ -293,10 +293,14 @@ class DecoderTrainer:
             self.val_evaluator.add_event_handler(Events.COMPLETED, early_stopping)
             self.handlers["early_stopping"] = early_stopping
 
-        # 5. TensorboardLogger
-        log_dir = self.run_dir / "tensorboard" if self.run_dir else None
-        tb_logger = TensorboardLogger(log_dir=log_dir)
-        tb_logger.attach_output_handler(
+        # 5. WandBLogger
+        # ponytail: set WANDB_MODE=offline to run without a wandb account/login.
+        wandb_logger = WandBLogger(
+            project=self.config.output.root.split("/")[-1],
+            name=self.run_dir.name if self.run_dir else None,
+            dir=str(self.run_dir) if self.run_dir else None,
+        )
+        wandb_logger.attach_output_handler(
             self.engine,
             event_name=Events.ITERATION_COMPLETED,
             tag="training",
@@ -304,7 +308,7 @@ class DecoderTrainer:
         )
 
         metric_names = ["loss", "exact_accuracy", "token_accuracy"]
-        tb_logger.attach_output_handler(
+        wandb_logger.attach_output_handler(
             self.train_evaluator,
             event_name=Events.EPOCH_COMPLETED,
             tag="training",
@@ -312,7 +316,7 @@ class DecoderTrainer:
             global_step_transform=lambda *_: self.engine.state.epoch,
         )
         if self.val_loader:
-            tb_logger.attach_output_handler(
+            wandb_logger.attach_output_handler(
                 self.val_evaluator,
                 event_name=Events.EPOCH_COMPLETED,
                 tag="validation",
@@ -320,7 +324,7 @@ class DecoderTrainer:
                 global_step_transform=lambda *_: self.engine.state.epoch,
             )
         if self.test_loader:
-            tb_logger.attach_output_handler(
+            wandb_logger.attach_output_handler(
                 self.test_evaluator,
                 event_name=Events.COMPLETED,
                 tag="testing",
@@ -328,12 +332,12 @@ class DecoderTrainer:
                 global_step_transform=lambda *_: self.engine.state.epoch,
             )
 
-        tb_logger.attach(
+        wandb_logger.attach(
             self.engine,
             log_handler=OptimizerParamsHandler(self.optimizer),
             event_name=Events.ITERATION_STARTED,
         )
-        self.handlers["tensorboard"] = tb_logger
+        self.handlers["wandb"] = wandb_logger
 
     def _run_evaluations(self, engine: Engine) -> None:
         self.logger.info("Evaluating on training set...")
@@ -458,24 +462,19 @@ class DecoderTrainer:
                 decoded_strs[idx],
             )
 
-        if "tensorboard" in self.handlers:
-            tb_writer = self.handlers["tensorboard"].writer
-            lines = []
+        if "wandb" in self.handlers:
+            wandb_logger = self.handlers["wandb"]
+            table = wandb_logger.Table(columns=["sample", "prompt", "target", "prediction"])
             for idx in range(num_samples):
-                prompt = sources[idx].strip() or "(empty)"
-                target = targets[idx].strip() or "(empty)"
-                pred = decoded_strs[idx].strip() or "(empty)"
-                prompt = prompt.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                target = target.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                pred = pred.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                lines.append(f"Sample {idx + 1}")
-                lines.append(f"  Prompt:     {prompt}")
-                lines.append(f"  Target:     {target}")
-                lines.append(f"  Prediction: {pred}")
-                lines.append("")
+                table.add_data(
+                    idx + 1,
+                    sources[idx].strip() or "(empty)",
+                    targets[idx].strip() or "(empty)",
+                    decoded_strs[idx].strip() or "(empty)",
+                )
             name_map = {"Train": "training", "Val": "validation", "Test": "testing"}
-            tb_tag = f"inference/{name_map.get(name, name.lower())}"
-            tb_writer.add_text(tb_tag, "\n".join(lines), global_step=engine.state.epoch)
+            tag = f"inference/{name_map.get(name, name.lower())}"
+            wandb_logger.log({tag: table}, step=engine.state.epoch)
 
     @torch.no_grad()
     def generate(
@@ -532,6 +531,74 @@ class DecoderTrainer:
 
         return generated
 
+    @torch.no_grad()
+    def _autoregressive_eval(self, loader: DataLoader) -> tuple[float, float] | None:
+        """Generate predictions token-by-token over the whole loader.
+
+        Returns (exact_match_acc, char_accuracy), or None if the tokenizer/transform
+        needed for generation is unavailable. This is the deployment-like metric:
+        the model conditions on its own outputs, so errors compound (unlike the
+        teacher-forced forward metrics).
+        """
+        tokenizer = self.tokenizer
+        transform = self.prompt_transform
+        if tokenizer is None or transform is None or not hasattr(transform, "build_prompt"):
+            self.logger.warning("Tokenizer/transform unavailable. Skipping autoregressive testing.")
+            return None
+
+        dataset = loader.dataset
+        total = len(dataset)  # type: ignore[arg-type]
+        pad_token_id = getattr(tokenizer, "pad_token_id", 0)
+        batch_size = getattr(loader, "batch_size", 32) or 32
+
+        self.model.eval()
+        preds: list[str] = []
+        targets: list[str] = []
+        for start in range(0, total, batch_size):
+            items = [dataset[i] for i in range(start, min(start + batch_size, total))]
+            prompt_ids = [torch.tensor(transform.build_prompt(it), dtype=torch.long) for it in items]
+            attn = [torch.ones_like(p) for p in prompt_ids]
+
+            # Left-pad for generation: reverse → pad_sequence → reverse
+            batch_input_ids = (
+                torch.nn.utils.rnn.pad_sequence(
+                    [t.flip(0) for t in prompt_ids], batch_first=True, padding_value=pad_token_id
+                )
+                .flip(1)
+                .to(self.device)
+            )
+            batch_attention_mask = (
+                torch.nn.utils.rnn.pad_sequence([t.flip(0) for t in attn], batch_first=True, padding_value=0)
+                .flip(1)
+                .to(self.device)
+            )
+            sequences = self.generate(
+                input_ids=batch_input_ids,
+                max_new_tokens=self.max_inference_new_tokens,
+                attention_mask=batch_attention_mask,
+            )
+            new_tokens = sequences[:, batch_input_ids.shape[1] :]
+            preds.extend(tokenizer.decode(tok.tolist(), skip_special_tokens=True) for tok in new_tokens)
+            targets.extend(it["target"] for it in items)
+
+        if not targets:
+            return 0.0, 0.0
+
+        exact = sum(p == t for p, t in zip(preds, targets)) / len(targets)
+
+        correct_chars = 0
+        total_chars = 0
+        for p, t in zip(preds, targets):
+            max_len = max(len(p), len(t))
+            # Pad with None so positions past the shorter string never spuriously match.
+            p_pad = list(p) + [None] * (max_len - len(p))
+            t_pad = list(t) + [None] * (max_len - len(t))
+            correct_chars += sum(1 for c1, c2 in zip(p_pad, t_pad) if c1 == c2)
+            total_chars += max_len
+        char_acc = correct_chars / total_chars if total_chars else 0.0
+
+        return exact, char_acc
+
     def test(self, test_loader: DataLoader | None = None) -> None:
         loader = test_loader or self.test_loader
         if loader is None:
@@ -557,6 +624,21 @@ class DecoderTrainer:
             metrics["token_accuracy"],
         )
 
+        # Autoregressive (deployment-like) evaluation — the honest generation metric.
+        self.logger.info("Running autoregressive testing...")
+        ar_result = self._autoregressive_eval(loader)
+        if ar_result is not None:
+            ar_exact, ar_token = ar_result
+            metrics["ar_exact_match_acc"] = ar_exact
+            metrics["ar_token_acc"] = ar_token
+            self.logger.info(
+                "Autoregressive Test results: ar_exact_match_acc=%.4f ar_token_acc=%.4f",
+                ar_exact,
+                ar_token,
+            )
+            if "wandb" in self.handlers:
+                self.handlers["wandb"].log({"testing/ar_exact_match_acc": ar_exact, "testing/ar_token_acc": ar_token})
+
     def run(self) -> None:
         # create run directory and handlers when the run actually starts
         if self.run_dir is None:
@@ -566,13 +648,13 @@ class DecoderTrainer:
 
         self.logger.info("starting run in %s", self.run_dir)
         config_data = self.config.model_dump(by_alias=True, polymorphic_serialization=True)
-        if "tensorboard" in self.handlers:
-            self.handlers["tensorboard"].writer.add_text("config", str(config_data))
+        if "wandb" in self.handlers:
+            self.handlers["wandb"].config.update(config_data, allow_val_change=True)
 
         self.engine.run(self.train_loader, max_epochs=self.epochs)
 
         if self.test_loader:
             self.test()
 
-        if "tensorboard" in self.handlers:
-            self.handlers["tensorboard"].close()
+        if "wandb" in self.handlers:
+            self.handlers["wandb"].close()
