@@ -646,4 +646,14 @@ class DecoderTrainer:
             self.test()
 
         if "wandb" in self.handlers:
+            self._log_model_artifact()
             self.handlers["wandb"].close()
+
+    def _log_model_artifact(self) -> None:
+        handler = self.handlers.get("checkpoint_best") or self.handlers.get("checkpoint_last")
+        if not handler or not handler.last_checkpoint:
+            return
+        wandb_logger = self.handlers["wandb"]
+        artifact = wandb_logger.Artifact(name=self.config.output.run_name, type="model")
+        artifact.add_file(str(handler.last_checkpoint))
+        wandb_logger.log_artifact(artifact)
