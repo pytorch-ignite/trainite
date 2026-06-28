@@ -256,7 +256,7 @@ class DecoderTrainer:
                 score_function=score_function,
                 score_name="val_acc",
                 n_saved=1,
-                global_step_transform=lambda *_: self.engine.state.epoch,
+                global_step_transform=lambda *_: self.engine.state.iteration,
             )
             self.val_evaluator.add_event_handler(Events.COMPLETED, checkpoint)
             self.handlers["checkpoint_best"] = checkpoint
@@ -266,7 +266,7 @@ class DecoderTrainer:
             save_handler=DiskSaver(dirname=str(self.run_dir), require_empty=False),
             filename_prefix="last",
             n_saved=1,
-            global_step_transform=lambda *_: self.engine.state.epoch,
+            global_step_transform=lambda *_: self.engine.state.iteration,
         )
         self.engine.add_event_handler(Events.EPOCH_COMPLETED, last_checkpoint)
 
@@ -286,10 +286,9 @@ class DecoderTrainer:
             self.handlers["early_stopping"] = early_stopping
 
         # 5. WandBLogger
-        # ponytail: set WANDB_MODE=offline to run without a wandb account/login.
         wandb_logger = WandBLogger(
-            project=self.config.output.root.split("/")[-1],
-            name=self.run_dir.name if self.run_dir else None,
+            project=self.config.output.root.split("/")[1],
+            name=f"{self.config.output.run_name}/{self.run_dir.name}" if self.run_dir else None,
             dir=str(self.run_dir) if self.run_dir else None,
         )
         wandb_logger.attach_output_handler(
@@ -305,7 +304,7 @@ class DecoderTrainer:
             event_name=Events.EPOCH_COMPLETED,
             tag="training",
             metric_names=metric_names,
-            global_step_transform=lambda *_: self.engine.state.epoch,
+            global_step_transform=lambda *_: self.engine.state.iteration,
         )
         if self.val_loader:
             wandb_logger.attach_output_handler(
@@ -313,7 +312,7 @@ class DecoderTrainer:
                 event_name=Events.EPOCH_COMPLETED,
                 tag="validation",
                 metric_names=metric_names,
-                global_step_transform=lambda *_: self.engine.state.epoch,
+                global_step_transform=lambda *_: self.engine.state.iteration,
             )
         wandb_logger.attach(
             self.engine,
@@ -624,7 +623,7 @@ class DecoderTrainer:
             table = wandb_logger.Table(columns=["sample", "prompt", "target", "prediction"])
             for idx, (source, target, pred) in enumerate(rows[: self.inference_num_samples], 1):
                 table.add_data(idx, source.strip() or "(empty)", target.strip() or "(empty)", pred.strip() or "(empty)")
-            wandb_logger.log({"inference/testing": table}, step=self.engine.state.epoch)
+            wandb_logger.log({"inference/testing": table})
 
         return self.test_metrics
 
@@ -654,6 +653,6 @@ class DecoderTrainer:
         if not handler or not handler.last_checkpoint:
             return
         wandb_logger = self.handlers["wandb"]
-        artifact = wandb_logger.Artifact(name=self.config.output.run_name, type="model")
+        artifact = wandb_logger.Artifact(name=self.config.output.run_name.replace("/", "_"), type="model")
         artifact.add_file(str(handler.last_checkpoint))
         wandb_logger.log_artifact(artifact)
