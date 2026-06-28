@@ -9,16 +9,14 @@ from ignite.handlers import (
     Checkpoint,
     DiskSaver,
     EarlyStopping,
-    create_lr_scheduler_with_warmup,
 )
 from ignite.handlers.fbresearch_logger import FBResearchLogger
-from ignite.handlers.param_scheduler import ParamScheduler
+from ignite.handlers.param_scheduler import ReduceLROnPlateauScheduler
 from ignite.handlers.tensorboard_logger import OptimizerParamsHandler, TensorboardLogger
 from ignite.metrics import Accuracy, Loss, Metric, RunningAverage
 from ignite.utils import setup_logger
 from pydantic import BaseModel, ConfigDict, Field
 from torch import nn
-from torch.optim.lr_scheduler import LinearLR
 from torch.utils.data import DataLoader, Subset
 
 from config import (
@@ -32,11 +30,21 @@ from preprocessors.char_tokenizer import CharTokenizerConfig
 from utils import dump_config
 
 
+class SchedulerConfig(BaseModel):
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
+    metric_name: str = "token_accuracy"
+    mode: str = "max"
+    patience: int = Field(default=2, gt=0)
+    factor: float = Field(default=0.5, gt=0.0, lt=1.0)
+    min_lr: float = Field(default=1e-6, ge=0.0)
+
+
 class DecoderTrainerConfig(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     epochs: int = Field(default=3, gt=0)
     log_every_steps: int = Field(default=10, gt=0)
     early_stopping_patience: int | None = Field(default=3, gt=0)
+    scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     # Inference logging
     inference_every_epochs: int | None = Field(default=None, gt=0)
     inference_num_samples: int = Field(default=5, gt=0)
@@ -118,6 +126,16 @@ class DecoderTrainer:
         mask = targets != self.loss_fn.ignore_index
         return logits[mask], targets[mask]
 
+    def _exact_accuracy_transform(self, output: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        # Sequence-level exact match: every non-ignored token must be correct.
+        logits = output["logits"]
+        targets = output["targets"]
+        preds = torch.argmax(logits, dim=-1)
+        mask = targets != self.loss_fn.ignore_index
+        correct = (preds == targets) | ~mask
+        seq_correct = correct.all(dim=-1)
+        return seq_correct.long(), torch.ones_like(seq_correct)
+
     def _train_step(self, engine: Engine, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         self.model.train()
         inputs = batch["input_ids"].to(self.device)
@@ -163,12 +181,15 @@ class DecoderTrainer:
         ]:
             loss = Loss(self.loss_fn, output_transform=self._flatten)
             token_acc = Accuracy(output_transform=self._flatten)
+            exact_acc = Accuracy(output_transform=self._exact_accuracy_transform)
 
             loss.attach(evaluator, "loss")
             token_acc.attach(evaluator, "token_accuracy")
+            exact_acc.attach(evaluator, "exact_accuracy")
 
             metrics[f"{prefix}_loss"] = loss
             metrics[f"{prefix}_token_accuracy"] = token_acc
+            metrics[f"{prefix}_exact_accuracy"] = exact_acc
 
         return metrics
 
@@ -188,22 +209,20 @@ class DecoderTrainer:
             output_transform=lambda output: {"loss": output["loss"].item()},
         )
 
-        # 1. Step LR scheduler every iteration
-        warmup_iters = max(2, int(0.1 * self.total_iters))
-        linear_decay = LinearLR(
+        # 1. ReduceLROnPlateau — step after each epoch's evaluation on the
+        # plateau metric. Prefer validation; fall back to train if no val_loader.
+        sched_cfg = self.config.trainer.scheduler
+        self.scheduler = ReduceLROnPlateauScheduler(
             self.optimizer,
-            start_factor=1.0,
-            end_factor=0.0,
-            total_iters=self.total_iters - warmup_iters,
+            metric_name=sched_cfg.metric_name,
+            mode=sched_cfg.mode,
+            patience=sched_cfg.patience,
+            factor=sched_cfg.factor,
+            min_lr=sched_cfg.min_lr,
+            save_history=True,
         )
-        self.scheduler: ParamScheduler = create_lr_scheduler_with_warmup(
-            linear_decay,
-            warmup_start_value=0.0,
-            warmup_end_value=self.config.optimizer.lr,
-            warmup_duration=warmup_iters,
-        )
-
-        self.engine.add_event_handler(Events.ITERATION_COMPLETED, self.scheduler)
+        plateau_evaluator = self.val_evaluator if self.val_loader else self.train_evaluator
+        plateau_evaluator.add_event_handler(Events.COMPLETED, self.scheduler)
 
         # 2. Run evaluations
         self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
@@ -284,7 +303,7 @@ class DecoderTrainer:
             output_transform=lambda output: {"batch_loss": output["loss"]},
         )
 
-        metric_names = ["loss", "token_accuracy"]
+        metric_names = ["loss", "exact_accuracy", "token_accuracy"]
         tb_logger.attach_output_handler(
             self.train_evaluator,
             event_name=Events.EPOCH_COMPLETED,
@@ -327,18 +346,22 @@ class DecoderTrainer:
             self.val_evaluator.run(self.val_loader)
             val_metrics = self.val_evaluator.state.metrics
             self.logger.info(
-                "epoch=%s train_loss=%.4f train_token_acc=%.4f val_loss=%.4f val_token_acc=%.4f",
+                "epoch=%s train_loss=%.4f train_exact_acc=%.4f train_token_acc=%.4f "
+                "val_loss=%.4f val_exact_acc=%.4f val_token_acc=%.4f",
                 epoch,
                 train_metrics["loss"],
+                train_metrics["exact_accuracy"],
                 train_metrics["token_accuracy"],
                 val_metrics["loss"],
+                val_metrics["exact_accuracy"],
                 val_metrics["token_accuracy"],
             )
         else:
             self.logger.info(
-                "epoch=%s train_loss=%.4f train_token_acc=%.4f",
+                "epoch=%s train_loss=%.4f train_exact_acc=%.4f train_token_acc=%.4f",
                 epoch,
                 train_metrics["loss"],
+                train_metrics["exact_accuracy"],
                 train_metrics["token_accuracy"],
             )
 
@@ -528,8 +551,9 @@ class DecoderTrainer:
         self.test_evaluator.run(loader)
         metrics = self.test_evaluator.state.metrics
         self.logger.info(
-            "Test results: loss=%.4f token_acc=%.4f",
+            "Test results: loss=%.4f exact_acc=%.4f token_acc=%.4f",
             metrics["loss"],
+            metrics["exact_accuracy"],
             metrics["token_accuracy"],
         )
 

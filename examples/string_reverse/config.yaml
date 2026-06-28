@@ -35,6 +35,12 @@ trainer:
   epochs: 3
   log_every_steps: 10
   early_stopping_patience: 3
+  scheduler:
+    metric_name: token_accuracy
+    mode: max
+    patience: 2
+    factor: 0.5
+    min_lr: 1.0e-6
   inference_every_epochs: null
   inference_num_samples: 5
   max_inference_new_tokens: 16
