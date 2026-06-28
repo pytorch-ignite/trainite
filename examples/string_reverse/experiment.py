@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 NUM_RUNS: int = 3
-TIME_LIMIT_SECONDS: float = 10 * 2
+TIME_LIMIT_SECONDS: float = 3600 * 2
 TEST_SEQ_LENGTHS: list[int] = [16, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320]
 
 MODEL_HIDDEN_SIZE: int = 32
