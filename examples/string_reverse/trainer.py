@@ -457,7 +457,7 @@ class DecoderTrainer:
                 )
             name_map = {"Train": "training", "Val": "validation", "Test": "testing"}
             tag = f"inference/{name_map.get(name, name.lower())}"
-            wandb_logger.log({tag: table}, step=engine.state.epoch)
+            wandb_logger.log({tag: table})
 
     @torch.no_grad()
     def generate(

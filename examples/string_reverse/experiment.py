@@ -13,6 +13,7 @@ from torch.utils.data import Subset
 
 from utils import instantiate, load_config
 from trainer import DecoderTrainer, ProjectConfig
+from datasets.string_reverse import StringReverseDatasetConfig
 from main import build_dataloaders, build_model, resolve_device, resolve_vocab_size
 from dotenv import load_dotenv
 
@@ -60,11 +61,11 @@ def build_fixed_config(
 ) -> ProjectConfig:
     cfg = ProjectConfig.model_validate(base.model_dump(by_alias=True))
     _apply_base_overrides(cfg)
-    cfg.data.dataset.seq_len = seq_len
-    cfg.data.dataset.per_seq_size = FIXED_DATASET_SIZE
-    cfg.data.dataset.min_seq_len = None
-    cfg.data.dataset.max_seq_len = None
-    cfg.data.dataset.charset = train_charset
+    ds = cfg.data.dataset.model_dump(by_alias=True)
+    ds.update(
+        seq_len=seq_len, min_seq_len=None, max_seq_len=None, per_seq_size=FIXED_DATASET_SIZE, charset=train_charset
+    )
+    cfg.data.dataset = StringReverseDatasetConfig.model_validate(ds)
     cfg.trainer.max_inference_new_tokens = seq_len + 1
     cfg.output.run_name = _make_run_name(seq_len, seed)
     cfg.seed = seed
