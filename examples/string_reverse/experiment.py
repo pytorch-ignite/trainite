@@ -14,8 +14,11 @@ from torch.utils.data import Subset
 from utils import instantiate, load_config
 from trainer import DecoderTrainer, ProjectConfig
 from main import build_dataloaders, build_model, resolve_device, resolve_vocab_size
+from dotenv import load_dotenv
 
-NUM_RUNS: int = 10
+load_dotenv()
+
+NUM_RUNS: int = 3
 TIME_LIMIT_SECONDS: float = 3600 * 2
 TEST_SEQ_LENGTHS: list[int] = [16, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320]
 
@@ -33,7 +36,7 @@ _MODEL_OVERRIDES = {
     "max_seq_len": MODEL_MAX_SEQ_LEN,
 }
 
-_OUTPUT_ROOT = f"outputs_runs_{NUM_RUNS}/d{MODEL_HIDDEN_SIZE}_l{MODEL_NUM_LAYERS}_h{MODEL_NUM_HEADS}"
+_OUTPUT_ROOT = f"outputs/string_reversal_runs{NUM_RUNS}/d{MODEL_HIDDEN_SIZE}_l{MODEL_NUM_LAYERS}_h{MODEL_NUM_HEADS}"
 
 
 def _make_run_name(seq_len: int, seed: int) -> str:
@@ -474,7 +477,7 @@ def main() -> None:
 
     base_config = load_config(Path(__file__).resolve().parent / "config.yaml", ProjectConfig)
     out_dir = _make_out_dir()
-    train_charset = "@alphanumeric"
+    train_charset = "@alphanumeric_lowercase"
 
     model_info = {
         "hidden_size": MODEL_HIDDEN_SIZE,
