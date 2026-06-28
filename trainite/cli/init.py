@@ -2,7 +2,7 @@ import inspect
 import re
 import textwrap
 from pathlib import Path
-from typing import Annotated, Any, Iterable, Literal, Sequence
+from typing import Any, Iterable, Literal, Sequence
 
 import questionary
 import tomlkit
@@ -371,12 +371,12 @@ class Init(BaseModel):
         force: Overwrite existing starter files.
     """
 
-    project_dir: tyro.conf.Positional[Annotated[str, tyro.conf.arg(metavar="PROJECT_DIR")]] = "my-cool-experiment"
+    project_dir: tyro.conf.Positional[str] = "my-cool-experiment"
     model: ModelType = "transformer"
     dataset: DatasetType = "string-reverse"
     trainer: TrainerType = "decoder-trainer"
     output_root: str = "outputs"
-    run_name: str = ""  # empty -> falls back to f"{model}__{dataset}" in init_project
+    run_name: str = ""
     force: bool = False
 
 
