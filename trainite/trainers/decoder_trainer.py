@@ -246,7 +246,7 @@ class DecoderTrainer:
                 save_handler=DiskSaver(dirname=str(self.run_dir), require_empty=False),
                 filename_prefix="best",
                 score_function=score_function,
-                score_name="val_acc",
+                score_name="val_loss",
                 n_saved=1,
                 global_step_transform=lambda *_: self.engine.state.epoch,
             )

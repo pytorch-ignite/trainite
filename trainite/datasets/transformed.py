@@ -11,5 +11,5 @@ class TransformedDataset(Dataset):
     def __len__(self):
         return len(self.dataset)
 
-    def __getitem__(self, i):
-        return self.transform(self.dataset[i])
+    def __getitem__(self, index):
+        return self.transform(self.dataset[index])
