@@ -7,8 +7,7 @@ class DebugFlag(Flag):
     LOGITS = auto()  # Log logits statistics (mean, std, NaN check)
     LR = auto()  # Log current learning rate
     DATA = auto()  # Log batch shapes and padding stats
-    ATTN = auto()  # Log attention weight statistics
-    ALL = GRADS | LOGITS | LR | DATA | ATTN
+    ALL = GRADS | LOGITS | LR | DATA
 
 
 def parse_debug_flags(flag_str: str | None) -> DebugFlag:
@@ -28,6 +27,6 @@ def parse_debug_flags(flag_str: str | None) -> DebugFlag:
         elif hasattr(DebugFlag, part):
             result |= getattr(DebugFlag, part)
         else:
-            raise ValueError(f"Unknown debug flag: {part}. Supported flags: GRADS, LOGITS, LR, DATA, ATTN, ALL, NONE")
+            raise ValueError(f"Unknown debug flag: {part}. Supported flags: GRADS, LOGITS, LR, DATA, ALL, NONE")
 
     return result

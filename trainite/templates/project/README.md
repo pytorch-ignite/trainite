@@ -80,6 +80,40 @@ If you prefer standard Python tools, you can create a virtual environment and us
    tensorboard --logdir outputs
    ```
 
+## Debug Mode
+
+This project includes two debugging tools: **telemetry flags** for diagnostic logging and **interactive debugging** via PuDB.
+
+### Telemetry Flags
+
+Add `--debug` to your training command to log internal training diagnostics:
+
+```bash
+python main.py config.yaml --debug="GRADS|LR|LOGITS"
+```
+
+Available flags:
+
+| Flag | What it logs |
+|------|-------------|
+| `GRADS` | Total gradient norm across all parameters |
+| `LOGITS` | Mean, std, NaN/Inf checks on model predictions |
+| `LR` | Current learning rate for each optimizer param group |
+| `DATA` | Batch tensor shapes and padding token percentage |
+| `ALL` | All of the above |
+
+Debug logs appear at the same frequency as your `log_every_steps` config setting.
+
+### Interactive Debugging with PuDB
+
+If you have `trainite` installed, you can launch the PuDB visual debugger:
+
+```bash
+trainite i-run main.py config.yaml
+```
+
+This opens a full-screen terminal debugger where you can set breakpoints, step through code, and inspect variables during training.
+
 ## Components
 
 ### Model: {{model_name}}

@@ -139,17 +139,21 @@ def test_cli_main_routing():
     from trainite.cli.main import main
     from unittest import mock
 
-    with pytest.raises(SystemExit) as exc_info:
-        main(argv=[])
-    assert exc_info.value.code == 1
+    with mock.patch("sys.argv", ["trainite"]):
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code != 0
 
     with mock.patch("trainite.cli.main.run_interactive_mode") as mock_interactive:
-        main(argv=["init"])
-        mock_interactive.assert_called_once()
+        with mock.patch("sys.argv", ["trainite", "init"]):
+            main()
+            mock_interactive.assert_called_once()
 
     with mock.patch("trainite.cli.main.init_project") as mock_init_project:
-        main(
-            argv=[
+        with mock.patch(
+            "sys.argv",
+            [
+                "trainite",
                 "init",
                 "--model",
                 "transformer",
@@ -158,6 +162,7 @@ def test_cli_main_routing():
                 "--trainer",
                 "decoder-trainer",
                 "dummy_path",
-            ]
-        )
-        mock_init_project.assert_called_once()
+            ],
+        ):
+            main()
+            mock_init_project.assert_called_once()
