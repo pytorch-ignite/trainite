@@ -224,13 +224,6 @@ class DecoderTrainer:
                     self.val_loader,
                     "Val",
                 )
-            if self.test_loader is not None:
-                self.engine.add_event_handler(
-                    Events.EPOCH_COMPLETED(every=self.inference_every_epochs),
-                    self._log_inference,
-                    self.test_loader,
-                    "Test",
-                )
 
         # 3. Checkpoint
         to_save = {"model": self.model, "optimizer": self.optimizer}
@@ -295,14 +288,14 @@ class DecoderTrainer:
             metric_names=metric_names,
             global_step_transform=lambda *_: self.engine.state.epoch,
         )
-        if self.val_loader:
-            tb_logger.attach_output_handler(
-                self.val_evaluator,
-                event_name=Events.EPOCH_COMPLETED,
-                tag="validation",
-                metric_names=metric_names,
-                global_step_transform=lambda *_: self.engine.state.epoch,
-            )
+
+        tb_logger.attach_output_handler(
+            self.val_evaluator,
+            event_name=Events.EPOCH_COMPLETED,
+            tag="validation",
+            metric_names=metric_names,
+            global_step_transform=lambda *_: self.engine.state.epoch,
+        )
         if self.test_loader:
             tb_logger.attach_output_handler(
                 self.test_evaluator,
