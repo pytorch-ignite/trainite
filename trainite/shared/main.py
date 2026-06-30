@@ -1,6 +1,5 @@
 import argparse
 import inspect
-import logging
 from pathlib import Path
 from typing import Any
 
@@ -159,14 +158,6 @@ def build_dataloaders(data_config: Any, tokenizer: Any, seed: int) -> tuple[Data
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-    # Silence Ignite internal logs
-    logging.getLogger("ignite.engine").setLevel(logging.WARNING)
-
     args = parse_args()
     config_path = Path(args.config)
     config = load_config(config_path, ProjectConfig)

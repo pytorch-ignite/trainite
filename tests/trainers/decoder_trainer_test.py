@@ -1,7 +1,7 @@
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Sized
+from typing import Sized, Any
 from unittest import mock
 
 import pytest
@@ -24,11 +24,13 @@ from trainite.shared.main import (
 )
 from trainite.shared.utils import instantiate
 from trainite.trainers.decoder_trainer import DecoderTrainer, DecoderTrainerConfig, ProjectConfig
+from ignite.engine import Events
+from ignite.handlers import EarlyStopping
 
 
 def create_trainer_from_config(config: ProjectConfig) -> DecoderTrainer:
     device = resolve_device(config.device)
-    tokenizer = instantiate(config.preprocessor)
+    tokenizer = instantiate(config.preprocessor)  # type: ignore
     train_loader, val_loader, test_loader = build_dataloaders(config.data, tokenizer, config.seed)
     vocab_size = resolve_vocab_size(tokenizer, config.model)
     model = build_model(config.model, tokenizer, vocab_size, device)
@@ -175,7 +177,7 @@ class GenerativeModel(SimpleModel):
 class DummyTransform:
     """Passthrough transform that also supplies a prompt format for inference."""
 
-    def __init__(self, tokenizer=None):
+    def __init__(self, tokenizer: Any = None):
         self.tokenizer = tokenizer
 
     def __call__(self, sample):
@@ -306,7 +308,7 @@ def test_decoder_trainer_auto_vocab_size(project_config):
 
     # Ensure dataset has vocab_size
     trainer = create_trainer_from_config(project_config)
-    assert trainer.vocab_size == 10
+    assert trainer.vocab_size == 10  # type: ignore
     assert isinstance(trainer.model, SimpleModel)
     assert trainer.model.embedding.num_embeddings == 10
 
@@ -356,9 +358,9 @@ def test_decoder_trainer_run_with_val(project_config, temp_run_dir):
     checkpoints = list(run_dir.glob("*.pt"))
     assert len(checkpoints) >= 2
 
-    # Check for handlers
-    assert "early_stopping" in trainer.handlers
-    assert "checkpoint_best" in trainer.handlers
+    event_handlers = trainer.val_evaluator._event_handlers.get(Events.COMPLETED, [])
+    assert any(isinstance(h[0], EarlyStopping) for h in event_handlers)
+    assert "checkpoint_best" in trainer.checkpointers
 
 
 @pytest.mark.skip(reason="Skipping this test because validation is required.")
@@ -389,9 +391,10 @@ def test_decoder_trainer_run_without_val(project_config, temp_run_dir):
     checkpoints = list(run_dir.glob("*.pt"))
     assert len(checkpoints) >= 1
 
-    # Early stopping and best checkpoint should NOT be in handlers
-    assert "early_stopping" not in trainer.handlers
-    assert "checkpoint_best" not in trainer.handlers
+    # Early stopping and best checkpoint should NOT be in handlers / attached
+    event_handlers = trainer.val_evaluator._event_handlers.get(Events.COMPLETED, [])
+    assert not any(isinstance(h[0], EarlyStopping) for h in event_handlers)
+    assert "checkpoint_best" not in trainer.checkpointers
 
 
 def test_decoder_trainer_test_no_loader(project_config):
@@ -453,14 +456,14 @@ def test_decoder_trainer_test_without_val(project_config, temp_run_dir):
     trainer.run()
 
     # checkpoint_best should not exist, it should use checkpoint_last
-    assert "checkpoint_best" not in trainer.handlers
-    assert "checkpoint_last" in trainer.handlers
+    assert "checkpoint_best" not in trainer.checkpointers
+    assert "checkpoint_last" in trainer.checkpointers
 
     with mock.patch("torch.load", side_effect=torch.load) as mock_load:
         trainer.test()
 
     # Verify that it loaded the last checkpoint
-    last_checkpoint_path = trainer.handlers["checkpoint_last"].last_checkpoint
+    last_checkpoint_path = trainer.checkpointers["checkpoint_last"].last_checkpoint
     mock_load.assert_any_call(last_checkpoint_path, map_location=trainer.device, weights_only=True)
 
 
@@ -573,8 +576,25 @@ def test_decoder_trainer_early_stopping_patience(project_config):
         project_config.trainer.early_stopping_patience = -1
 
     project_config.trainer.early_stopping_patience = 1
+    project_config.trainer.epochs = 3
     trainer = create_trainer_from_config(project_config)
-    trainer.run()
+
+    # Mock validation run to simulate increasing validation loss
+    losses = [1.0, 2.0, 3.0]
+    original_run = trainer.val_evaluator.run
+
+    def mock_run(data=None, max_epochs=None, epoch_length=None):
+        state = original_run(data, max_epochs, epoch_length)
+        epoch = trainer.engine.state.epoch
+        trainer.val_evaluator.state.metrics["loss"] = losses[epoch - 1]
+        return state
+
+    with mock.patch.object(trainer.val_evaluator, "run", side_effect=mock_run):
+        trainer.run()
+
+    # Since patience is 1 and loss went 1.0 (epoch 1) -> 2.0 (epoch 2),
+    # early stopping should trigger at the end of epoch 2, stopping the trainer.
+    assert trainer.engine.state.epoch == 2
 
 
 def test_decoder_trainer_dataloader_class_collate_fn(project_config):
