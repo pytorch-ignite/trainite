@@ -529,13 +529,16 @@ class DecoderTrainer:
             return
 
         # Load best model if available
-        checkpoint_handler = self.checkpointers.get("checkpoint_best") or self.checkpointers.get("checkpoint_last")
+        checkpoint_handler = self.checkpointers.get("checkpoint_best", None)
         if checkpoint_handler and checkpoint_handler.last_checkpoint:
             checkpoint_path = checkpoint_handler.last_checkpoint
 
             self.logger.info("Loading best model for testing from %s", checkpoint_path)
             checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
             self.model.load_state_dict(checkpoint["model"])
+        else:
+            self.logger.warning("No best model checkpoint found. Using current model for testing.")
+            return
 
         self.logger.info("Running testing...")
         self.test_evaluator.run(loader)
