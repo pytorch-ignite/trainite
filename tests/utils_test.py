@@ -2,9 +2,12 @@ import pytest
 
 from pydantic import BaseModel, ConfigDict, Field
 
+
 class MockComponent(BaseModel):
     model_config = ConfigDict(extra="allow")
     target: str = Field(alias="_target_")
+
+
 from trainite.shared.utils import get_target, instantiate
 
 

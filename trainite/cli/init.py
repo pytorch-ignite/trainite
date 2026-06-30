@@ -295,14 +295,18 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
     config_replacements = []
     if model_spec.collate_fn_config_cls:
         collate_config_cls = model_spec.collate_fn_config_cls
-        config_replacements.extend([
-            ("collate_fn: BaseModel | None = None", f"collate_fn: {collate_config_cls.__name__} | None = None"),
-            ("# __COLLATE_IMPORT__", f"from models.{model_spec.name} import {collate_config_cls.__name__}"),
-        ])
+        config_replacements.extend(
+            [
+                ("collate_fn: BaseModel | None = None", f"collate_fn: {collate_config_cls.__name__} | None = None"),
+                ("# __COLLATE_IMPORT__", f"from models.{model_spec.name} import {collate_config_cls.__name__}"),
+            ]
+        )
     else:
-        config_replacements.extend([
-            ("# __COLLATE_IMPORT__", ""),
-        ])
+        config_replacements.extend(
+            [
+                ("# __COLLATE_IMPORT__", ""),
+            ]
+        )
 
     templates.update(
         {
@@ -432,6 +436,7 @@ def init_project(config: Init) -> None:
 
     # Inject model collator into data config dataloaders
     if model_spec.collate_fn_target:
+
         class GenericComponent(BaseModel):
             model_config = ConfigDict(extra="allow")
             target: str = Field(alias="_target_")
