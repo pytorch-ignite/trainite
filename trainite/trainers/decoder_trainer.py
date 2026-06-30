@@ -84,38 +84,40 @@ class DecoderTrainer:
         self.test_loader = test_loader
         self.model = model
         self.model.to(self.device)
-
         self.inference_every_epochs = config.trainer.inference_every_epochs
         self.inference_num_samples = config.trainer.inference_num_samples
         self.max_inference_new_tokens = config.trainer.max_inference_new_tokens
         self.loss_fn: nn.CrossEntropyLoss = nn.CrossEntropyLoss()
         self.optimizer = optimizer
         self.total_iters: int = len(self.train_loader) * self.epochs
-        self.run_dir: Path | None = None
-        self.handlers: dict = {}
+        self.checkpointers: dict[str, Checkpoint] = {}
         self.engine = Engine(self._train_step)
         self.train_evaluator = Engine(self._eval_step)
         self.val_evaluator = Engine(self._eval_step)
         self.test_evaluator = Engine(self._eval_step)
         self.metrics: dict = self._attach_metrics()
 
+        # Create run directory for outputs
+        self.run_dir = self._make_run_dir()
+        dump_config(self.config, self.run_dir / "config.yaml")
+
         # Attach loggers for console
-        self.logger, self.train_fb_logger = self.attach_loggers()
+        self.logger = self.attach_loggers()
 
         # Attach learning rate scheduler
         self.attach_lr_scheduler()
-
-        # Run evaluations at the end of each epoch to log training and validation metrics
-        self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
 
         # Attach early stopping
         self.setup_early_stopping()
 
         # Attach checkpointing
-        self.setup_checkpointing()
+        self.checkpointers = self.setup_checkpointing()
 
         # Attach TensorBoard logger
-        self._setup_tensorboard()
+        self.tb_logger = self._setup_tensorboard()
+
+        # Run evaluations at the end of each epoch to log training and validation metrics
+        self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
 
         # Attach inference logger if inference logging is enabled
         if self.inference_every_epochs is not None:
@@ -195,14 +197,14 @@ class DecoderTrainer:
 
         return metrics
 
-    def attach_loggers(self) -> tuple[logging.Logger, FBResearchLogger]:
+    def attach_loggers(self) -> logging.Logger:
         logger = setup_logger(
             "trainer",
             level=logging.INFO,
             filepath=str(self.run_dir / "output.log") if self.run_dir else None,
             reset=True,
         )
-        train_fb_logger: FBResearchLogger = FBResearchLogger(logger=self.logger, show_output=True)
+        train_fb_logger: FBResearchLogger = FBResearchLogger(logger=logger, show_output=True)
         train_fb_logger.attach(
             self.engine,
             name="Train",
@@ -210,7 +212,7 @@ class DecoderTrainer:
             optimizer=self.optimizer,
             output_transform=lambda output: {"loss": output["loss"].item()},
         )
-        return logger, train_fb_logger
+        return logger
 
     def attach_lr_scheduler(self) -> None:
         warmup_iters = max(2, int(0.1 * self.total_iters))
@@ -254,10 +256,10 @@ class DecoderTrainer:
                 mode="min",
             )
             self.val_evaluator.add_event_handler(Events.COMPLETED, early_stopping)
-            self.handlers["early_stopping"] = early_stopping
 
-    def setup_checkpointing(self) -> None:
+    def setup_checkpointing(self) -> dict[str, Checkpoint]:
         to_save = {"model": self.model, "optimizer": self.optimizer}
+        checkpointers = {}
 
         def score_function(engine):
             loss = engine.state.metrics["loss"]
@@ -273,7 +275,7 @@ class DecoderTrainer:
             global_step_transform=lambda *_: self.engine.state.epoch,
         )
         self.val_evaluator.add_event_handler(Events.COMPLETED, checkpoint)
-        self.handlers["checkpoint_best"] = checkpoint
+        checkpointers["checkpoint_best"] = checkpoint
 
         last_checkpoint = Checkpoint(
             to_save=to_save,
@@ -284,9 +286,10 @@ class DecoderTrainer:
         )
         self.engine.add_event_handler(Events.EPOCH_COMPLETED, last_checkpoint)
 
-        self.handlers["checkpoint_last"] = last_checkpoint
+        checkpointers["checkpoint_last"] = last_checkpoint
+        return checkpointers
 
-    def _setup_tensorboard(self) -> None:
+    def _setup_tensorboard(self) -> TensorboardLogger:
         log_dir = self.run_dir / "tensorboard" if self.run_dir else None
         tb_logger = TensorboardLogger(log_dir=log_dir)
         metric_names = ["loss", "token_accuracy"]
@@ -333,7 +336,7 @@ class DecoderTrainer:
             log_handler=OptimizerParamsHandler(self.optimizer),
             event_name=Events.ITERATION_STARTED,
         )
-        self.handlers["tensorboard"] = tb_logger
+        return tb_logger
 
     def _run_evaluations(self, engine: Engine) -> None:
         self.logger.info("Evaluating on training set...")
@@ -454,8 +457,8 @@ class DecoderTrainer:
                 decoded_strs[idx],
             )
 
-        if "tensorboard" in self.handlers:
-            tb_writer = self.handlers["tensorboard"].writer
+        if self.tb_logger is not None:
+            tb_writer = self.tb_logger.writer
             lines = []
             for idx in range(num_samples):
                 prompt = sources[idx].strip() or "(empty)"
@@ -535,7 +538,7 @@ class DecoderTrainer:
             return
 
         # Load best model if available
-        checkpoint_handler = self.handlers.get("checkpoint_best") or self.handlers.get("checkpoint_last")
+        checkpoint_handler = self.checkpointers.get("checkpoint_best") or self.checkpointers.get("checkpoint_last")
         if checkpoint_handler and checkpoint_handler.last_checkpoint:
             checkpoint_path = checkpoint_handler.last_checkpoint
 
@@ -553,21 +556,13 @@ class DecoderTrainer:
         )
 
     def run(self) -> None:
-        # create run directory and handlers when the run actually starts
-        if self.run_dir is None:
-            self.run_dir = self._make_run_dir()
-            dump_config(self.config, self.run_dir / "config.yaml")
-            self._attach_handlers()
-
         self.logger.info("starting run in %s", self.run_dir)
         config_data = self.config.model_dump(by_alias=True, polymorphic_serialization=True)
-        if "tensorboard" in self.handlers:
-            self.handlers["tensorboard"].writer.add_text("config", str(config_data))
+        self.tb_logger.writer.add_text("config", str(config_data))
 
         self.engine.run(self.train_loader, max_epochs=self.epochs)
 
         if self.test_loader:
             self.test()
 
-        if "tensorboard" in self.handlers:
-            self.handlers["tensorboard"].close()
+        self.tb_logger.close()
