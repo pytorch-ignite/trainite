@@ -62,9 +62,13 @@ Requires Python >= 3.10.
 git clone https://github.com/pytorch-ignite/trainite.git
 cd trainite
 uv sync
+source .venv/bin/activate
 
-uv run trainite init my-experiment --model transformer --dataset string-reverse
+# Initialize the project in any workspace
+cd ..
+trainite init my-experiment --model transformer --dataset string-reverse
 cd my-experiment
+uv sync
 uv run python main.py config.yaml
 ```
 
@@ -75,8 +79,11 @@ git clone https://github.com/pytorch-ignite/trainite.git
 cd trainite
 pip install -e .
 
+# Initialize the project in any workspace
+cd ..
 trainite init my-experiment --model transformer --dataset string-reverse
 cd my-experiment
+pip install -e .
 python main.py config.yaml
 ```
 
