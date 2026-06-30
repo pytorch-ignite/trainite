@@ -99,8 +99,28 @@ class DecoderTrainer:
         self.test_evaluator = Engine(self._eval_step)
         self.metrics: dict = self._attach_metrics()
 
+        # Attach loggers for console
+        self.logger, self.train_fb_logger = self.attach_loggers()
+
+        # Attach learning rate scheduler
+        self.attach_lr_scheduler()
+
+        # Run evaluations at the end of each epoch to log training and validation metrics
+        self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
+
+        # Attach early stopping
+        self.setup_early_stopping()
+
+        # Attach checkpointing
+        self.setup_checkpointing()
+
+        # Attach TensorBoard logger
+        self._setup_tensorboard()
+
+        # Attach inference logger if inference logging is enabled
         if self.inference_every_epochs is not None:
             self._setup_inference()
+            self.attach_inference_logger()
 
     def _resolve_device(self) -> str | torch.device:
         resolved = self.config.device
@@ -175,23 +195,24 @@ class DecoderTrainer:
 
         return metrics
 
-    def _attach_handlers(self) -> None:
-        self.logger = setup_logger(
+    def attach_loggers(self) -> tuple[logging.Logger, FBResearchLogger]:
+        logger = setup_logger(
             "trainer",
             level=logging.INFO,
             filepath=str(self.run_dir / "output.log") if self.run_dir else None,
             reset=True,
         )
-        self.train_fb_logger: FBResearchLogger = FBResearchLogger(logger=self.logger, show_output=True)
-        self.train_fb_logger.attach(
+        train_fb_logger: FBResearchLogger = FBResearchLogger(logger=self.logger, show_output=True)
+        train_fb_logger.attach(
             self.engine,
             name="Train",
             every=self.config.trainer.log_every_steps,
             optimizer=self.optimizer,
             output_transform=lambda output: {"loss": output["loss"].item()},
         )
+        return logger, train_fb_logger
 
-        # 1. Step LR scheduler every iteration
+    def attach_lr_scheduler(self) -> None:
         warmup_iters = max(2, int(0.1 * self.total_iters))
         linear_decay = LinearLR(
             self.optimizer,
@@ -205,46 +226,54 @@ class DecoderTrainer:
             warmup_end_value=self.config.optimizer.lr,
             warmup_duration=warmup_iters,
         )
-
         self.engine.add_event_handler(Events.ITERATION_COMPLETED, self.scheduler)
 
-        # 2. Run evaluations
-        self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
-        if self.inference_every_epochs is not None:
-            self.engine.add_event_handler(
-                Events.EPOCH_COMPLETED(every=self.inference_every_epochs),
-                self._log_inference,
-                self.train_loader,
-                "Train",
-            )
-            if self.val_loader is not None:
-                self.engine.add_event_handler(
-                    Events.EPOCH_COMPLETED(every=self.inference_every_epochs),
-                    self._log_inference,
-                    self.val_loader,
-                    "Val",
-                )
+    def attach_inference_logger(self) -> None:
+        self.engine.add_event_handler(
+            Events.EPOCH_COMPLETED(every=self.inference_every_epochs),
+            self._log_inference,
+            self.train_loader,
+            "Train",
+        )
 
-        # 3. Checkpoint
+        self.engine.add_event_handler(
+            Events.EPOCH_COMPLETED(every=self.inference_every_epochs),
+            self._log_inference,
+            self.val_loader,
+            "Val",
+        )
+
+    def setup_early_stopping(self) -> None:
+        patience = self.config.trainer.early_stopping_patience
+        if self.val_loader and patience is not None:
+            early_stopping = EarlyStopping(
+                patience=patience,
+                score_function=lambda engine: engine.state.metrics["loss"],
+                trainer=self.engine,
+                min_delta=0.0,
+                mode="min",
+            )
+            self.val_evaluator.add_event_handler(Events.COMPLETED, early_stopping)
+            self.handlers["early_stopping"] = early_stopping
+
+    def setup_checkpointing(self) -> None:
         to_save = {"model": self.model, "optimizer": self.optimizer}
 
-        if self.val_loader:
+        def score_function(engine):
+            loss = engine.state.metrics["loss"]
+            return -loss
 
-            def score_function(engine):
-                loss = engine.state.metrics["loss"]
-                return -loss
-
-            checkpoint = Checkpoint(
-                to_save=to_save,
-                save_handler=DiskSaver(dirname=str(self.run_dir), require_empty=False),
-                filename_prefix="best",
-                score_function=score_function,
-                score_name="val_loss",
-                n_saved=1,
-                global_step_transform=lambda *_: self.engine.state.epoch,
-            )
-            self.val_evaluator.add_event_handler(Events.COMPLETED, checkpoint)
-            self.handlers["checkpoint_best"] = checkpoint
+        checkpoint = Checkpoint(
+            to_save=to_save,
+            save_handler=DiskSaver(dirname=str(self.run_dir), require_empty=False),
+            filename_prefix="best",
+            score_function=score_function,
+            score_name="val_loss",
+            n_saved=1,
+            global_step_transform=lambda *_: self.engine.state.epoch,
+        )
+        self.val_evaluator.add_event_handler(Events.COMPLETED, checkpoint)
+        self.handlers["checkpoint_best"] = checkpoint
 
         last_checkpoint = Checkpoint(
             to_save=to_save,
@@ -257,22 +286,12 @@ class DecoderTrainer:
 
         self.handlers["checkpoint_last"] = last_checkpoint
 
-        # 4. EarlyStopping
-        patience = self.config.trainer.early_stopping_patience
-        if self.val_loader and patience is not None:
-            early_stopping = EarlyStopping(
-                patience=patience,
-                score_function=lambda engine: -engine.state.metrics["loss"],
-                trainer=self.engine,
-                min_delta=0.0,
-            )
-
-            self.val_evaluator.add_event_handler(Events.COMPLETED, early_stopping)
-            self.handlers["early_stopping"] = early_stopping
-
-        # 5. TensorboardLogger
+    def _setup_tensorboard(self) -> None:
         log_dir = self.run_dir / "tensorboard" if self.run_dir else None
         tb_logger = TensorboardLogger(log_dir=log_dir)
+        metric_names = ["loss", "token_accuracy"]
+
+        # Log training iteration loss
         tb_logger.attach_output_handler(
             self.engine,
             event_name=Events.ITERATION_COMPLETED,
@@ -280,7 +299,7 @@ class DecoderTrainer:
             output_transform=lambda output: {"batch_loss": output["loss"]},
         )
 
-        metric_names = ["loss", "token_accuracy"]
+        # Log training epoch metrics
         tb_logger.attach_output_handler(
             self.train_evaluator,
             event_name=Events.EPOCH_COMPLETED,
@@ -289,6 +308,7 @@ class DecoderTrainer:
             global_step_transform=lambda *_: self.engine.state.epoch,
         )
 
+        # Log validation epoch metrics
         tb_logger.attach_output_handler(
             self.val_evaluator,
             event_name=Events.EPOCH_COMPLETED,
@@ -296,6 +316,8 @@ class DecoderTrainer:
             metric_names=metric_names,
             global_step_transform=lambda *_: self.engine.state.epoch,
         )
+
+        # Log test metrics if applicable
         if self.test_loader:
             tb_logger.attach_output_handler(
                 self.test_evaluator,
@@ -305,6 +327,7 @@ class DecoderTrainer:
                 global_step_transform=lambda *_: self.engine.state.epoch,
             )
 
+        # Log optimizer learning rates
         tb_logger.attach(
             self.engine,
             log_handler=OptimizerParamsHandler(self.optimizer),
