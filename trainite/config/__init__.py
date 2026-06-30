@@ -1,5 +1,4 @@
 from trainite.config.base import (
-    ComponentConfig,
     DataConfigBase,
     DataLoaderConfig,
     DataWithAutoSplit,
@@ -9,7 +8,6 @@ from trainite.config.base import (
 )
 
 __all__ = [
-    "ComponentConfig",
     "DataConfigBase",
     "DataWithAutoSplit",
     "DataLoaderConfig",
