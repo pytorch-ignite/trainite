@@ -119,7 +119,7 @@ class DecoderTrainer:
         # Run evaluations at the end of each epoch to log training and validation metrics
         self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
 
-        # Attach inference logger if inference logging is enabled
+        # Setup inference and attach inference logger if inference logging is enabled
         if self.inference_every_epochs is not None:
             self._setup_inference()
             self.attach_inference_logger()
