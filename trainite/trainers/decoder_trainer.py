@@ -247,7 +247,7 @@ class DecoderTrainer:
 
     def setup_early_stopping(self) -> None:
         patience = self.config.trainer.early_stopping_patience
-        if self.val_loader and patience is not None:
+        if patience is not None:
             early_stopping = EarlyStopping(
                 patience=patience,
                 score_function=lambda engine: engine.state.metrics["loss"],
@@ -344,25 +344,17 @@ class DecoderTrainer:
         train_metrics = self.train_evaluator.state.metrics
         epoch = engine.state.epoch
 
-        if self.val_loader:
-            self.logger.info("Evaluating on validation set...")
-            self.val_evaluator.run(self.val_loader)
-            val_metrics = self.val_evaluator.state.metrics
-            self.logger.info(
-                "epoch=%s train_loss=%.4f train_token_acc=%.4f val_loss=%.4f val_token_acc=%.4f",
-                epoch,
-                train_metrics["loss"],
-                train_metrics["token_accuracy"],
-                val_metrics["loss"],
-                val_metrics["token_accuracy"],
-            )
-        else:
-            self.logger.info(
-                "epoch=%s train_loss=%.4f train_token_acc=%.4f",
-                epoch,
-                train_metrics["loss"],
-                train_metrics["token_accuracy"],
-            )
+        self.logger.info("Evaluating on validation set...")
+        self.val_evaluator.run(self.val_loader)
+        val_metrics = self.val_evaluator.state.metrics
+        self.logger.info(
+            "epoch=%s train_loss=%.4f train_token_acc=%.4f val_loss=%.4f val_token_acc=%.4f",
+            epoch,
+            train_metrics["loss"],
+            train_metrics["token_accuracy"],
+            val_metrics["loss"],
+            val_metrics["token_accuracy"],
+        )
 
     def _validate_dataloader_for_inference(self, loader: DataLoader, name: str) -> None:
         dataset = loader.dataset
@@ -382,8 +374,7 @@ class DecoderTrainer:
 
         # Validate active loaders
         self._validate_dataloader_for_inference(self.train_loader, "Train")
-        if self.val_loader is not None:
-            self._validate_dataloader_for_inference(self.val_loader, "Val")
+        self._validate_dataloader_for_inference(self.val_loader, "Val")
         if self.test_loader is not None:
             self._validate_dataloader_for_inference(self.test_loader, "Test")
 
