@@ -538,7 +538,6 @@ class DecoderTrainer:
             self.model.load_state_dict(checkpoint["model"])
         else:
             self.logger.warning("No best model checkpoint found. Using current model for testing.")
-            return
 
         self.logger.info("Running testing...")
         self.test_evaluator.run(loader)
