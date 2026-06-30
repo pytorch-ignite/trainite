@@ -354,10 +354,6 @@ def test_decoder_trainer_run_with_val(project_config, temp_run_dir):
     checkpoints = list(run_dir.glob("*.pt"))
     assert len(checkpoints) >= 2
 
-    # Check for handlers
-    from ignite.engine import Events
-    from ignite.handlers import EarlyStopping
-
     event_handlers = trainer.val_evaluator._event_handlers.get(Events.COMPLETED, [])
     assert any(isinstance(h[0], EarlyStopping) for h in event_handlers)
     assert "checkpoint_best" in trainer.checkpointers
