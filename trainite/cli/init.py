@@ -29,7 +29,7 @@ class ProjectConfig(BaseModel):
     trainer: BaseModel
     output: OutputConfig
     seed: int = 42
-    device: str = "cpu"
+    device: str | None = None
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]

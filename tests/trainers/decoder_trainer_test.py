@@ -232,7 +232,7 @@ def project_config(temp_run_dir):
             max_inference_new_tokens=10,
         ),
         output=OutputConfig(root=str(temp_run_dir), run_name="test_run"),
-        device="auto",
+        device=None,
     )
 
 

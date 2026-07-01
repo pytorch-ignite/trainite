@@ -51,14 +51,14 @@ class DecoderTrainerConfig(BaseModel):
 
 class ProjectConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
-    preprocessor: BaseModel | None = None
+    preprocessor: BaseModel
     model: BaseModel
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
     data: DataConfigBase | DataWithAutoSplit
     trainer: DecoderTrainerConfig = Field(default_factory=DecoderTrainerConfig)
     output: OutputConfig
     seed: int = 42
-    device: str = "auto"
+    device: str | None = None
 
 
 # Resolve the vocabulary size for the model based on the tokenizer and model configuration.
@@ -181,7 +181,7 @@ class DecoderTrainer:
         self.logger: logging.Logger = setup_logger("trainer", level=logging.INFO)
         torch.manual_seed(config.seed)
         self.config: ProjectConfig = config
-        self.device: str | torch.device = idist.device() if config.device == "auto" else config.device
+        self.device: str | torch.device = idist.device() if config.device is None else config.device
         self.tokenizer = instantiate(config.preprocessor)
         self.train_loader, self.val_loader, self.test_loader = build_dataloaders(
             config.data, self.tokenizer, config.seed
