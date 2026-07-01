@@ -24,7 +24,6 @@ from torch.optim.lr_scheduler import LinearLR
 from torch.utils.data import DataLoader, Dataset, Subset, random_split
 
 from trainite.config.base import (
-    ComponentConfig,
     DataConfigBase,
     DataWithAutoSplit,
     OptimizerConfig,
@@ -52,8 +51,8 @@ class DecoderTrainerConfig(BaseModel):
 
 class ProjectConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
-    preprocessor: ComponentConfig
-    model: ComponentConfig
+    preprocessor: BaseModel | None = None
+    model: BaseModel
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
     data: DataConfigBase | DataWithAutoSplit
     trainer: DecoderTrainerConfig = Field(default_factory=DecoderTrainerConfig)

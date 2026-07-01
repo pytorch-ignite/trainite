@@ -1,14 +1,21 @@
 import pytest
 
-from trainite.config import ComponentConfig
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class MockComponent(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    target: str = Field(alias="_target_")
+
+
 from trainite.shared.utils import get_target, instantiate
 
 
-def cc(target: str | None = None, **kwargs: object) -> ComponentConfig:
-    """Helper to create ComponentConfig with extra arguments without type errors."""
+def cc(target: str | None = None, **kwargs: object) -> MockComponent:
+    """Helper to create MockComponent with extra arguments without type errors."""
     if target:
         kwargs["_target_"] = target
-    return ComponentConfig.model_validate(kwargs)
+    return MockComponent.model_validate(kwargs)
 
 
 def test_get_target_success():
