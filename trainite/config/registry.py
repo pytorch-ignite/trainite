@@ -29,6 +29,11 @@ class TrainerSpec(ComponentSpec):
 class ModelSpec(ComponentSpec):
     builder_symbol: str
     collate_fn_target: str | None = None
+    collate_fn_config_cls_path: str | None = None
+
+    @property
+    def collate_fn_config_cls(self) -> type[BaseModel] | None:
+        return get_target(self.collate_fn_config_cls_path) if self.collate_fn_config_cls_path else None
 
 
 class DatasetSpec(ComponentSpec):
@@ -53,6 +58,7 @@ MODEL_SPECS = {
         implementation_symbol="TransformerModel",
         builder_symbol="TransformerModel",
         collate_fn_target="trainite.models.transformer.CausalLMCollateFn",
+        collate_fn_config_cls_path="trainite.models.transformer.CausalLMCollateFnConfig",
         template_replacements=[
             ("trainite.shared.utils", "utils"),
             ("trainite.models", "models"),

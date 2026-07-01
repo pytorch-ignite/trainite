@@ -4,10 +4,10 @@ import warnings
 from typing import Any
 
 import torch
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch.utils.data import Dataset
 
-from trainite.config.base import ComponentConfig, DataLoaderConfig, DataWithAutoSplit
+from trainite.config.base import DataLoaderConfig, DataWithAutoSplit
 
 # Hardcoded universal vocabulary: all printable ASCII characters
 UNIVERSAL_VOCAB = string.ascii_letters + string.digits + string.punctuation + " "
@@ -135,7 +135,7 @@ class PromptCompletionTransform:
         source_tokens = self.tokenizer(sample["source"], add_special_tokens=False)["input_ids"]
         return [bos] + source_tokens + [sep]
 
-    def __call__(self, sample: dict[str, str]) -> dict[str, torch.Tensor]:
+    def __call__(self, sample: dict[str, str]) -> dict[str, torch.Tensor | str]:
         source = sample["source"]
         target = sample["target"]
 
@@ -164,8 +164,8 @@ class PromptCompletionTransform:
         }
 
 
-class PromptCompletionTransformConfig(ComponentConfig):
-    model_config = ConfigDict(validate_assignment=True)
+class PromptCompletionTransformConfig(BaseModel):
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: str = Field(
         default="trainite.datasets.string_reverse.PromptCompletionTransform",
         alias="_target_",
@@ -173,8 +173,8 @@ class PromptCompletionTransformConfig(ComponentConfig):
     ignore_index: int = -100
 
 
-class StringReverseDatasetConfig(ComponentConfig):
-    model_config = ConfigDict(validate_assignment=True)
+class StringReverseDatasetConfig(BaseModel):
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: str = Field(
         default="trainite.datasets.string_reverse.StringReverseDataset",
         alias="_target_",

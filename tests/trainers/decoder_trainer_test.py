@@ -7,9 +7,8 @@ from unittest import mock
 import pytest
 import torch
 import torch.nn as nn
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from trainite.config import (
-    ComponentConfig,
     DataConfigBase,
     DataLoaderConfig,
     DataWithAutoSplit,
@@ -50,11 +49,16 @@ def create_trainer_from_config(config: ProjectConfig) -> DecoderTrainer:
     )
 
 
-def cc(target: str | None = None, **kwargs: object) -> ComponentConfig:
-    """Helper to create ComponentConfig with extra arguments without type errors."""
+class MockComponent(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    target: str = Field(alias="_target_")
+
+
+def cc(target: str | None = None, **kwargs: object) -> MockComponent:
+    """Helper to create MockComponent with extra arguments without type errors."""
     if target:
         kwargs["_target_"] = target
-    return ComponentConfig.model_validate(kwargs)
+    return MockComponent.model_validate(kwargs)
 
 
 class SimpleModel(nn.Module):

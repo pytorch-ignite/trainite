@@ -11,7 +11,6 @@ from packaging.requirements import Requirement
 from pydantic import BaseModel, ConfigDict, Field
 
 from trainite.config import (
-    ComponentConfig,
     DataConfigBase,
     DataWithAutoSplit,
     OptimizerConfig,
@@ -23,8 +22,8 @@ from trainite.shared.utils import dump_config
 
 class ProjectConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
-    preprocessor: ComponentConfig | None = None
-    model: ComponentConfig
+    preprocessor: BaseModel | None = None
+    model: BaseModel
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
     data: DataConfigBase | DataWithAutoSplit
     trainer: BaseModel
@@ -210,7 +209,7 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
     # Dynamic replacements that depend on the user's model/dataset/trainer selection.
     trainer_replacements = [
         *trainer_spec.template_replacements,
-        ("model: ComponentConfig", f"model: {model_spec.config_cls.__name__}"),
+        ("model: BaseModel", f"model: {model_spec.config_cls.__name__}"),
         (
             "data: DataConfigBase | DataWithAutoSplit",
             f"data: {dataset_spec.config_cls.__name__}",
@@ -228,7 +227,7 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
     if preprocessor_spec:
         trainer_replacements.extend(
             [
-                ("preprocessor: ComponentConfig", f"preprocessor: {preprocessor_spec.config_cls.__name__}"),
+                ("preprocessor: BaseModel", f"preprocessor: {preprocessor_spec.config_cls.__name__}"),
                 (
                     "# __PREPROCESSOR_IMPORT__",
                     f"from preprocessors.{preprocessor_spec.name} import {preprocessor_spec.config_cls.__name__}",
@@ -293,13 +292,29 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
             preprocessor_spec.template_replacements,
         )
 
+    config_replacements = []
+    if model_spec.collate_fn_config_cls:
+        collate_config_cls = model_spec.collate_fn_config_cls
+        config_replacements.extend(
+            [
+                ("collate_fn: BaseModel | None = None", f"collate_fn: {collate_config_cls.__name__} | None = None"),
+                ("# __COLLATE_IMPORT__", f"from models.{model_spec.name} import {collate_config_cls.__name__}"),
+            ]
+        )
+    else:
+        config_replacements.extend(
+            [
+                ("# __COLLATE_IMPORT__", ""),
+            ]
+        )
+
     templates.update(
         {
             "trainer.py": _render_template(PROJECT_ROOT / trainer_spec.implementation_path, trainer_replacements),
             "utils.py": _render_template(PROJECT_ROOT / "trainite/shared/utils.py"),
             "main.py": _render_template(PROJECT_ROOT / "trainite/shared/main.py", main_replacements),
             "README.md": _render_template(PROJECT_ROOT / "trainite/templates/project/README.md", readme_replacements),
-            "config.py": _render_template(PROJECT_ROOT / "trainite/config/base.py"),
+            "config.py": _render_template(PROJECT_ROOT / "trainite/config/base.py", config_replacements),
             "pyproject.toml": generate_uv_project(name=project_name, version="0.1.0", dependencies=sorted(final_deps)),
         }
     )
@@ -347,8 +362,10 @@ def run_interactive_mode() -> None:
 
 
 def _update_targets(config: Any, old_prefix: str, new_prefix: str) -> None:
-    if isinstance(config, ComponentConfig) and config.target.startswith(old_prefix):
-        config.target = config.target.replace(old_prefix, new_prefix, 1)
+    if isinstance(config, BaseModel) and hasattr(config, "target"):
+        target = getattr(config, "target")
+        if isinstance(target, str) and target.startswith(old_prefix):
+            setattr(config, "target", target.replace(old_prefix, new_prefix, 1))
     elif isinstance(config, BaseModel):
         for field in config.model_fields:
             if (val := getattr(config, field)) is not None:
@@ -419,12 +436,26 @@ def init_project(config: Init) -> None:
 
     # Inject model collator into data config dataloaders
     if model_spec.collate_fn_target:
-        collate_target = model_spec.collate_fn_target
+
+        class GenericComponent(BaseModel):
+            model_config = ConfigDict(extra="allow")
+            target: str = Field(alias="_target_")
+
+        if model_spec.collate_fn_config_cls:
+            collate_config_cls = model_spec.collate_fn_config_cls
+            collate_fn_instance = collate_config_cls()
+            collate_fn_val = GenericComponent(
+                _target_=collate_fn_instance.target,
+                **collate_fn_instance.model_dump(by_alias=True, exclude={"target"}),
+            )
+        else:
+            collate_target = model_spec.collate_fn_target
+            collate_fn_val = GenericComponent(_target_=collate_target)
 
         def _inject_collate(config: Any):
             dataloader = getattr(config, "dataloader", None)
             if dataloader is not None:
-                dataloader.collate_fn = ComponentConfig(_target_=collate_target)
+                dataloader.collate_fn = collate_fn_val
             for split in ["train", "val", "test"]:
                 split_config = getattr(config, split, None)
                 if split_config is not None:

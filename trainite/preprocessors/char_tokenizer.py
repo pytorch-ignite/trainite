@@ -2,8 +2,7 @@ import string
 from typing import Any
 
 import torch
-from pydantic import Field
-from trainite.config.base import ComponentConfig
+from pydantic import BaseModel, ConfigDict, Field
 
 # Hardcoded universal vocabulary: all printable ASCII characters
 UNIVERSAL_VOCAB = string.ascii_letters + string.digits + string.punctuation + " "
@@ -150,7 +149,8 @@ class CharTokenizer:
         return out
 
 
-class CharTokenizerConfig(ComponentConfig):
+class CharTokenizerConfig(BaseModel):
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: str = Field(
         default="trainite.preprocessors.char_tokenizer.CharTokenizer",
         alias="_target_",
