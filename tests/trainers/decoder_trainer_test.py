@@ -17,37 +17,13 @@ from trainite.config import (
     OutputConfig,
     SplitConfig,
 )
-from trainite.shared.main import (
-    build_dataloaders,
-    build_model,
-    resolve_device,
-    resolve_vocab_size,
-)
-from trainite.shared.utils import instantiate
 from trainite.trainers.decoder_trainer import DecoderTrainer, DecoderTrainerConfig, ProjectConfig
 from ignite.engine import Events
 from ignite.handlers import EarlyStopping
 
 
 def create_trainer_from_config(config: ProjectConfig) -> DecoderTrainer:
-    device = resolve_device(config.device)
-    tokenizer = instantiate(config.preprocessor)  # type: ignore
-    train_loader, val_loader, test_loader = build_dataloaders(config.data, tokenizer, config.seed)
-    vocab_size = resolve_vocab_size(tokenizer, config.model)
-    model = build_model(config.model, tokenizer, vocab_size, device)
-    optimizer = instantiate(config.optimizer, params=model.parameters())
-    ds = train_loader.dataset
-    ds = ds.dataset if isinstance(ds, torch.utils.data.Subset) else ds
-    return DecoderTrainer(
-        config=config,
-        model=model,
-        optimizer=optimizer,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        test_loader=test_loader,
-        preprocessor=tokenizer,
-        prompt_transform=getattr(ds, "transform", None),
-    )
+    return DecoderTrainer(config)
 
 
 def cc(target: str | None = None, **kwargs: object) -> ComponentConfig:
@@ -251,7 +227,7 @@ def project_config(temp_run_dir):
             max_inference_new_tokens=10,
         ),
         output=OutputConfig(root=str(temp_run_dir), run_name="test_run"),
-        device="auto",
+        device="cpu",
     )
 
 
