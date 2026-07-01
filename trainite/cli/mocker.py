@@ -4,6 +4,21 @@ from types import ModuleType
 from unittest.mock import MagicMock
 
 
+def mock_dependencies(*packages):
+    import importlib
+
+    to_mock = []
+    for pkg in packages:
+        try:
+            importlib.import_module(pkg)
+        except ImportError:
+            to_mock.append(pkg)
+
+    if to_mock:
+        finder = DependencyMocker(*to_mock)
+        sys.meta_path.insert(0, finder)
+
+
 class DynamicMockModule(ModuleType):
     def __getattr__(self, name):
         return MagicMock()
@@ -31,18 +46,3 @@ class DependencyMocker:
             parent_module = sys.modules.get(parent_name)
             if parent_module:
                 setattr(parent_module, child_name, module)
-
-
-def mock_dependencies(*packages):
-    import importlib
-
-    to_mock = []
-    for pkg in packages:
-        try:
-            importlib.import_module(pkg)
-        except ImportError:
-            to_mock.append(pkg)
-
-    if to_mock:
-        finder = DependencyMocker(*to_mock)
-        sys.meta_path.insert(0, finder)
