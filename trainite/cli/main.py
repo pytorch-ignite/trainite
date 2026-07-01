@@ -4,9 +4,12 @@ from typing import Sequence
 import tyro
 
 from trainite.cli.init import Init, init_project, run_interactive_mode
+from trainite.cli.mocker import mock_dependencies
 
 
 def main(argv: Sequence[str] | None = None) -> None:
+    mock_dependencies("torch", "ignite")
+
     args_list = list(argv) if argv is not None else sys.argv[1:]
 
     commands = {
