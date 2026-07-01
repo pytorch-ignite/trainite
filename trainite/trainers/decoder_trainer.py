@@ -1,3 +1,4 @@
+import inspect
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,7 @@ from ignite.handlers import (
     EarlyStopping,
     create_lr_scheduler_with_warmup,
 )
+import ignite.distributed as idist
 from ignite.handlers.fbresearch_logger import FBResearchLogger
 from ignite.handlers.param_scheduler import ParamScheduler
 from ignite.handlers.tensorboard_logger import OptimizerParamsHandler, TensorboardLogger
@@ -19,7 +21,7 @@ from ignite.utils import setup_logger
 from pydantic import BaseModel, ConfigDict, Field
 from torch import nn
 from torch.optim.lr_scheduler import LinearLR
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, Dataset, Subset, random_split
 
 from trainite.config.base import (
     DataConfigBase,
@@ -27,11 +29,12 @@ from trainite.config.base import (
     OptimizerConfig,
     OutputConfig,
 )
+from trainite.datasets.transformed import TransformedDataset
 
 # __MODEL_IMPORT__
 # __DATASET_IMPORT__
 # __PREPROCESSOR_IMPORT__
-from trainite.shared.utils import dump_config
+from trainite.shared.utils import dump_config, get_target, instantiate
 
 
 class DecoderTrainerConfig(BaseModel):
@@ -48,46 +51,153 @@ class DecoderTrainerConfig(BaseModel):
 
 class ProjectConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
-    preprocessor: BaseModel | None = None
+    preprocessor: BaseModel
     model: BaseModel
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
     data: DataConfigBase | DataWithAutoSplit
     trainer: DecoderTrainerConfig = Field(default_factory=DecoderTrainerConfig)
     output: OutputConfig
     seed: int = 42
-    device: str = "auto"
+    device: str | None = None
+
+
+# Resolve the vocabulary size for the model based on the tokenizer and model configuration.
+def resolve_vocab_size(tokenizer: Any, model_config: Any) -> int:
+    if tokenizer is None or not hasattr(tokenizer, "vocab_size"):
+        raise ValueError("Tokenizer is missing or does not define a 'vocab_size' attribute.")
+    vocab_size = tokenizer.vocab_size
+    model_params = model_config.model_dump(by_alias=True)
+    configured_vocab_size: int | None = model_params.get("vocab_size")
+    if configured_vocab_size is not None:
+        if configured_vocab_size < vocab_size:
+            raise ValueError(
+                f"Configured model vocab_size ({configured_vocab_size}) is smaller than "
+                f"the tokenizer vocabulary size ({vocab_size}). "
+                f"Please increase model vocab_size or remove it from config.yaml "
+                f"to let it resolve automatically."
+            )
+        vocab_size = configured_vocab_size
+    return vocab_size
+
+
+# Inspects the target symbol's signature and filters the candidates to
+# only include those that are accepted by the target symbol.
+def _inject_if_accepted(target_symbol: Any, **candidates: Any) -> dict[str, Any]:
+    try:
+        sig = inspect.signature(target_symbol)
+        return {k: v for k, v in candidates.items() if k in sig.parameters}
+    except Exception:
+        return {}
+
+
+# Builds the model based on the provided configuration, tokenizer, and device.
+def build_model(model_config: Any, tokenizer: Any, vocab_size: int, device: str | torch.device) -> nn.Module:
+    target_symbol = get_target(model_config.target)
+    kwargs = _inject_if_accepted(
+        target_symbol,
+        vocab_size=vocab_size,
+        pad_token_id=tokenizer.pad_token_id,
+    )
+    model = instantiate(model_config, **kwargs)
+    model.to(device)
+    return model
+
+
+def build_dataset(dataset_config: Any, transform_config: Any, tokenizer: Any) -> Dataset:
+    ds = get_target(dataset_config.target)
+    dataset = instantiate(dataset_config, **_inject_if_accepted(ds, preprocessor=tokenizer, tokenizer=tokenizer))
+    if transform_config is not None:
+        tf = get_target(transform_config.target)
+        transform = instantiate(
+            transform_config, **_inject_if_accepted(tf, preprocessor=tokenizer, tokenizer=tokenizer)
+        )
+        return TransformedDataset(dataset, transform)
+    return dataset
+
+
+def create_dataloader(
+    dataset: Dataset,
+    dl_config: Any,
+    tokenizer: Any,
+    shuffle: bool | None = None,
+) -> DataLoader:
+    dl_kwargs = dl_config.model_dump(exclude={"collate_fn", "shuffle"})
+    if shuffle is None:
+        shuffle = getattr(dl_config, "shuffle", False)
+    collate_fn = None
+    collate_config = dl_config.collate_fn
+    if collate_config:
+        target_symbol = get_target(collate_config.target)
+        if isinstance(target_symbol, type):
+            collate_fn = instantiate(collate_config, tokenizer=tokenizer)
+        else:
+            collate_fn = target_symbol
+    return DataLoader(dataset, shuffle=shuffle, collate_fn=collate_fn, **dl_kwargs)
+
+
+def _loaders_from_splits(
+    data_config: DataConfigBase, tokenizer: Any
+) -> tuple[DataLoader, DataLoader, DataLoader | None]:
+    def _make(split_config: Any) -> DataLoader:
+        ds = build_dataset(split_config.dataset, split_config.transform, tokenizer)
+        return create_dataloader(ds, split_config.dataloader, tokenizer)
+
+    return _make(data_config.train), _make(data_config.val), _make(data_config.test) if data_config.test else None
+
+
+def _loaders_from_ratios(
+    data_config: DataWithAutoSplit, tokenizer: Any, seed: int
+) -> tuple[DataLoader, DataLoader, DataLoader | None]:
+    dataset = build_dataset(data_config.dataset, data_config.transform, tokenizer)
+    total_len = len(dataset)  # type: ignore
+    if total_len == 0:
+        raise ValueError("Training dataset is empty. Cannot perform train/val/test split.")
+    val_ratio = data_config.val_ratio
+    test_ratio = data_config.test_ratio
+    train_len = int(total_len * (1.0 - test_ratio - val_ratio))
+    val_len = int(total_len * val_ratio)
+    test_len = total_len - train_len - val_len
+    train_ds, val_ds, test_ds = random_split(
+        dataset,
+        [train_len, val_len, test_len],
+        generator=torch.Generator().manual_seed(seed),
+    )
+    dl = data_config.dataloader
+    return (
+        create_dataloader(train_ds, dl, tokenizer, shuffle=True),
+        create_dataloader(val_ds, dl, tokenizer, shuffle=False),
+        create_dataloader(test_ds, dl, tokenizer, shuffle=False) if test_len > 0 else None,
+    )
+
+
+def build_dataloaders(data_config: Any, tokenizer: Any, seed: int) -> tuple[DataLoader, DataLoader, DataLoader | None]:
+    if isinstance(data_config, DataWithAutoSplit):
+        return _loaders_from_ratios(data_config, tokenizer, seed)
+    return _loaders_from_splits(data_config, tokenizer)
 
 
 class DecoderTrainer:
-    def __init__(
-        self,
-        config: ProjectConfig,
-        model: nn.Module,
-        optimizer: torch.optim.Optimizer,
-        preprocessor: Any,
-        train_loader: DataLoader,
-        val_loader: DataLoader,
-        test_loader: DataLoader | None = None,
-        prompt_transform: Any = None,
-    ) -> None:
+    def __init__(self, config: ProjectConfig) -> None:
         self.logger: logging.Logger = setup_logger("trainer", level=logging.INFO)
         torch.manual_seed(config.seed)
         self.config: ProjectConfig = config
-        self.tokenizer = preprocessor
-        self.prompt_transform = prompt_transform
-        self.device: str | torch.device = self._resolve_device()
+        self.device: str | torch.device = idist.device() if config.device is None else config.device
+        self.tokenizer = instantiate(config.preprocessor)
+        self.train_loader, self.val_loader, self.test_loader = build_dataloaders(
+            config.data, self.tokenizer, config.seed
+        )
+        vocab_size = resolve_vocab_size(self.tokenizer, config.model)
+        self.model = build_model(config.model, self.tokenizer, vocab_size, self.device)
+        self.optimizer = instantiate(config.optimizer, params=self.model.parameters())
+        ds = self.train_loader.dataset
+        ds = ds.dataset if isinstance(ds, Subset) else ds
+        self.prompt_transform = getattr(ds, "transform", None)
         self.epochs: int = config.trainer.epochs
         self.grad_clip_norm: float | None = getattr(config.trainer, "grad_clip_norm", None)
-        self.train_loader = train_loader
-        self.val_loader = val_loader
-        self.test_loader = test_loader
-        self.model = model
-        self.model.to(self.device)
         self.inference_every_epochs = config.trainer.inference_every_epochs
         self.inference_num_samples = config.trainer.inference_num_samples
         self.max_inference_new_tokens = config.trainer.max_inference_new_tokens
         self.loss_fn: nn.CrossEntropyLoss = nn.CrossEntropyLoss()
-        self.optimizer = optimizer
         self.total_iters: int = len(self.train_loader) * self.epochs
         self.checkpointers: dict[str, Checkpoint] = {}
         self.engine = Engine(self._train_step)
@@ -122,12 +232,6 @@ class DecoderTrainer:
         if self.inference_every_epochs is not None:
             self._setup_inference()
             self.attach_inference_logger()
-
-    def _resolve_device(self) -> str | torch.device:
-        resolved = self.config.device
-        if resolved == "auto":
-            resolved = "cuda" if torch.cuda.is_available() else "cpu"
-        return resolved
 
     def _make_run_dir(self) -> Path:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

@@ -95,6 +95,7 @@ TRAINER_SPECS = {
         template_replacements=[
             ("trainite.shared.utils", "utils"),
             ("trainite.config.base", "config"),
+            ("trainite.datasets.transformed", "datasets.transformed"),
         ],
         readme_template_path=Path("trainite/templates/components/trainers/decoder_trainer.md"),
     ),

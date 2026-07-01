@@ -29,7 +29,7 @@ class ProjectConfig(BaseModel):
     trainer: BaseModel
     output: OutputConfig
     seed: int = 42
-    device: str = "auto"
+    device: str | None = None
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
@@ -251,10 +251,6 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
         ),
         ("trainite.shared.utils", "utils"),
         ("DecoderTrainer(", f"{trainer_spec.implementation_symbol}("),
-        (
-            "from trainite.datasets.transformed import TransformedDataset",
-            "from datasets.transformed import TransformedDataset",
-        ),
     ]
 
     preprocessor_name = preprocessor_spec.name if preprocessor_spec else "None"
