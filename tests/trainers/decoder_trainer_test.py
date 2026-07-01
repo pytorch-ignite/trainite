@@ -20,6 +20,7 @@ from trainite.config import (
 from trainite.trainers.decoder_trainer import DecoderTrainer, DecoderTrainerConfig, ProjectConfig
 from ignite.engine import Events
 from ignite.handlers import EarlyStopping
+import ignite.distributed as idist
 
 
 def create_trainer_from_config(config: ProjectConfig) -> DecoderTrainer:
@@ -227,7 +228,7 @@ def project_config(temp_run_dir):
             max_inference_new_tokens=10,
         ),
         output=OutputConfig(root=str(temp_run_dir), run_name="test_run"),
-        device="cpu",
+        device="auto",
     )
 
 
@@ -265,10 +266,8 @@ def test_device_auto_selection(project_config):
         device_str = trainer.device
     else:
         raise ValueError("trainer.device should be either torch.device or str")
-    if torch.cuda.is_available():
-        assert device_str == "cuda"
-    else:
-        assert device_str == "cpu"
+    device = idist.device()
+    assert device_str == device.type
 
 
 @pytest.mark.skip(reason="Obsolete after decoupling tokenizer from model and dataset vocab_size resolution")
@@ -685,14 +684,14 @@ def test_decoder_trainer_generate(project_config):
     with mock.patch.object(trainer.model, "forward") as mock_forward:
 
         def mock_forward_fn(x, attention_mask=None):
-            logits = torch.zeros(x.shape[0], x.shape[1], trainer.tokenizer.vocab_size)
+            logits = torch.zeros(x.shape[0], x.shape[1], trainer.tokenizer.vocab_size, device=idist.device())
             logits[:, -1, 7] = 10.0
             return logits
 
         mock_forward.side_effect = mock_forward_fn
 
-        input_ids = torch.tensor([[5, 6]], dtype=torch.long)
-        attention_mask = torch.ones_like(input_ids, dtype=torch.long)
+        input_ids = torch.tensor([[5, 6]], dtype=torch.long, device=idist.device())
+        attention_mask = torch.ones_like(input_ids, dtype=torch.long, device=idist.device())
 
         generated = trainer.generate(input_ids, max_new_tokens=1, attention_mask=attention_mask)
         assert isinstance(generated, torch.Tensor)
