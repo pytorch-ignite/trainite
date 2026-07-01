@@ -3,6 +3,7 @@ import inspect
 from pathlib import Path
 from typing import Any
 
+import ignite.distributed as idist
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset, Subset, random_split
@@ -16,13 +17,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("config", nargs="?", default="config.yaml")
     return parser.parse_args()
-
-
-def resolve_device(device: str) -> str | torch.device:
-    resolved = device
-    if resolved == "auto":
-        resolved = "cuda" if torch.cuda.is_available() else "cpu"
-    return resolved
 
 
 def resolve_vocab_size(tokenizer: Any, model_config: Any) -> int:
@@ -162,7 +156,7 @@ def main() -> None:
     config_path = Path(args.config)
     config = load_config(config_path, ProjectConfig)
 
-    device = resolve_device(config.device)
+    device = idist.device() if config.device is None else config.device
     tokenizer = instantiate(config.preprocessor) if config.preprocessor is not None else None
 
     train_loader, val_loader, test_loader = build_dataloaders(config.data, tokenizer, config.seed)

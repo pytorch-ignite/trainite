@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
+import ignite.distributed as idist
 from ignite.engine import Engine, Events
 from ignite.handlers import (
     Checkpoint,
@@ -56,7 +57,7 @@ class ProjectConfig(BaseModel):
     trainer: DecoderTrainerConfig = Field(default_factory=DecoderTrainerConfig)
     output: OutputConfig
     seed: int = 42
-    device: str = "auto"
+    device: str | None = None
 
 
 class DecoderTrainer:
@@ -76,7 +77,7 @@ class DecoderTrainer:
         self.config: ProjectConfig = config
         self.tokenizer = preprocessor
         self.prompt_transform = prompt_transform
-        self.device: str | torch.device = self._resolve_device()
+        self.device: str | torch.device = idist.device() if config.device is None else config.device
         self.epochs: int = config.trainer.epochs
         self.grad_clip_norm: float | None = getattr(config.trainer, "grad_clip_norm", None)
         self.train_loader = train_loader
@@ -123,12 +124,6 @@ class DecoderTrainer:
         if self.inference_every_epochs is not None:
             self._setup_inference()
             self.attach_inference_logger()
-
-    def _resolve_device(self) -> str | torch.device:
-        resolved = self.config.device
-        if resolved == "auto":
-            resolved = "cuda" if torch.cuda.is_available() else "cpu"
-        return resolved
 
     def _make_run_dir(self) -> Path:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

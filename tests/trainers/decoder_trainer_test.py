@@ -17,10 +17,10 @@ from trainite.config import (
     OutputConfig,
     SplitConfig,
 )
+import ignite.distributed as idist
 from trainite.shared.main import (
     build_dataloaders,
     build_model,
-    resolve_device,
     resolve_vocab_size,
 )
 from trainite.shared.utils import instantiate
@@ -30,7 +30,7 @@ from ignite.handlers import EarlyStopping
 
 
 def create_trainer_from_config(config: ProjectConfig) -> DecoderTrainer:
-    device = resolve_device(config.device)
+    device = idist.device() if config.device is None else config.device
     tokenizer = instantiate(config.preprocessor)  # type: ignore
     train_loader, val_loader, test_loader = build_dataloaders(config.data, tokenizer, config.seed)
     vocab_size = resolve_vocab_size(tokenizer, config.model)
@@ -251,7 +251,7 @@ def project_config(temp_run_dir):
             max_inference_new_tokens=10,
         ),
         output=OutputConfig(root=str(temp_run_dir), run_name="test_run"),
-        device="auto",
+        device=None,
     )
 
 
