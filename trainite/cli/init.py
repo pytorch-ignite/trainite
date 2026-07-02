@@ -1,4 +1,3 @@
-import logging
 import inspect
 import re
 import textwrap
@@ -19,7 +18,6 @@ from trainite.config import (
 )
 from trainite.config.registry import REGISTRY, get_dataset_spec, get_model_spec, get_preprocessor_spec, get_trainer_spec
 from trainite.shared.utils import dump_config
-from typing import Literal
 
 
 class ProjectConfig(BaseModel):
