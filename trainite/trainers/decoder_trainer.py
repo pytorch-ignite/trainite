@@ -2,7 +2,7 @@ import inspect
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import torch
 from ignite.engine import Engine, Events
@@ -15,7 +15,8 @@ from ignite.handlers import (
 import ignite.distributed as idist
 from ignite.handlers.fbresearch_logger import FBResearchLogger
 from ignite.handlers.param_scheduler import ParamScheduler
-from ignite.handlers.tensorboard_logger import OptimizerParamsHandler, TensorboardLogger
+from ignite.handlers.tensorboard_logger import TensorboardLogger
+from ignite.handlers.wandb_logger import WandBLogger
 from ignite.metrics import Accuracy, Loss, Metric, RunningAverage
 from ignite.utils import setup_logger
 from pydantic import BaseModel, ConfigDict, Field
@@ -57,6 +58,7 @@ class ProjectConfig(BaseModel):
     data: DataConfigBase | DataWithAutoSplit
     trainer: TrainerConfig = Field(default_factory=TrainerConfig)
     output: OutputConfig
+    logger: Literal["tensorboard", "wandb"] = "tensorboard"
     seed: int = 42
     device: str | None = None
 
@@ -220,8 +222,8 @@ class Trainer:
         # Attach checkpointing
         self.checkpointers = self.setup_checkpointing()
 
-        # Attach TensorBoard logger
-        self.tb_logger = self._setup_tensorboard()
+        # Attach experiment logger (TensorBoard or Weights & Biases)
+        self.exp_logger = self._setup_experiment_logger()
 
         # Run evaluations at the end of each epoch to log training and validation metrics
         self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
@@ -389,13 +391,18 @@ class Trainer:
         checkpointers["checkpoint_last"] = last_checkpoint
         return checkpointers
 
-    def _setup_tensorboard(self) -> TensorboardLogger:
-        log_dir = self.run_dir / "tensorboard" if self.run_dir else None
-        tb_logger = TensorboardLogger(log_dir=log_dir)
+    def _setup_experiment_logger(self) -> TensorboardLogger | WandBLogger:
+        if self.config.logger == "wandb":
+            exp_logger: TensorboardLogger | WandBLogger = WandBLogger(
+                project=self.config.output.run_name, dir=str(self.run_dir)
+            )
+        else:
+            log_dir = self.run_dir / "tensorboard" if self.run_dir else None
+            exp_logger = TensorboardLogger(log_dir=log_dir)
         metric_names = ["loss", "token_accuracy"]
 
         # Log training iteration loss
-        tb_logger.attach_output_handler(
+        exp_logger.attach_output_handler(
             self.engine,
             event_name=Events.ITERATION_COMPLETED,
             tag="training",
@@ -403,7 +410,7 @@ class Trainer:
         )
 
         # Log training epoch metrics
-        tb_logger.attach_output_handler(
+        exp_logger.attach_output_handler(
             self.train_evaluator,
             event_name=Events.EPOCH_COMPLETED,
             tag="training",
@@ -412,7 +419,7 @@ class Trainer:
         )
 
         # Log validation epoch metrics
-        tb_logger.attach_output_handler(
+        exp_logger.attach_output_handler(
             self.val_evaluator,
             event_name=Events.EPOCH_COMPLETED,
             tag="validation",
@@ -422,7 +429,7 @@ class Trainer:
 
         # Log test metrics if applicable
         if self.test_loader:
-            tb_logger.attach_output_handler(
+            exp_logger.attach_output_handler(
                 self.test_evaluator,
                 event_name=Events.COMPLETED,
                 tag="testing",
@@ -431,12 +438,19 @@ class Trainer:
             )
 
         # Log optimizer learning rates
-        tb_logger.attach(
+        exp_logger.attach_opt_params_handler(
             self.engine,
-            log_handler=OptimizerParamsHandler(self.optimizer),
             event_name=Events.ITERATION_STARTED,
+            optimizer=self.optimizer,
         )
-        return tb_logger
+        return exp_logger
+
+    def _log_text(self, tag: str, text: str, step: int) -> None:
+        # Both backends escape HTML in the caller; wandb renders it, TB uses markdown.
+        if self.config.logger == "wandb":
+            self.exp_logger.log({tag: self.exp_logger.Html(f"<pre>{text}</pre>")}, step=step)
+        else:
+            self.exp_logger.writer.add_text(tag, text, global_step=step)
 
     def _run_evaluations(self, engine: Engine) -> None:
         self.logger.info("Evaluating on training set...")
@@ -531,24 +545,20 @@ class Trainer:
                 decoded_strs[idx],
             )
 
-        if self.tb_logger is not None:
-            tb_writer = self.tb_logger.writer
-            lines = []
-            for idx in range(num_samples):
-                prompt = sources[idx].strip() or "(empty)"
-                target = targets[idx].strip() or "(empty)"
-                pred = decoded_strs[idx].strip() or "(empty)"
-                lines.append(f"Sample {idx + 1}")
-                lines.append(f"  Prompt:     {prompt}")
-                lines.append(f"  Target:     {target}")
-                lines.append(f"  Prediction: {pred}")
-                lines.append("")
-            name_map = {"Train": "training", "Val": "validation", "Test": "testing"}
-            tb_tag = f"inference/{name_map.get(name, name.lower())}"
-            # Fence the block so punctuation in samples renders verbatim instead
-            # of being parsed as TensorBoard markdown (which mangled `*_|#` etc).
-            text = "```\n" + "\n".join(lines) + "\n```"
-            tb_writer.add_text(tb_tag, text, global_step=engine.state.epoch)
+        lines = []
+        for idx in range(num_samples):
+            lines.append(f"Sample {idx + 1}")
+            prompt = sources[idx].strip() or "(empty)"
+            target = targets[idx].strip() or "(empty)"
+            pred = decoded_strs[idx].strip() or "(empty)"
+            for key, val in [("Prompt", prompt), ("Target", target), ("Prediction", pred)]:
+                # Escape markup so TB markdown / wandb HTML don't swallow <, >, & in outputs.
+                val = val.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                lines.append(f"  {key}:     {val}")
+            lines.append("")
+        name_map = {"Train": "training", "Val": "validation", "Test": "testing"}
+        tag = f"inference/{name_map.get(name, name.lower())}"
+        self._log_text(tag, "\n".join(lines), engine.state.epoch)
 
     @torch.no_grad()
     def generate(
@@ -637,11 +647,11 @@ class Trainer:
     def run(self) -> None:
         self.logger.info("starting run in %s", self.run_dir)
         config_data = self.config.model_dump(by_alias=True, polymorphic_serialization=True)
-        self.tb_logger.writer.add_text("config", str(config_data))
+        self._log_text("config", str(config_data), 0)
 
         self.engine.run(self.train_loader, max_epochs=self.epochs)
 
         if self.test_loader:
             self.test()
 
-        self.tb_logger.close()
+        self.exp_logger.close()
