@@ -307,7 +307,13 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
     templates.update(
         {
             "trainer.py": _render_template(PROJECT_ROOT / trainer_spec.implementation_path, trainer_replacements),
-            "utils.py": _render_template(PROJECT_ROOT / "trainite/shared/utils.py"),
+            "utils.py": _render_template(
+                PROJECT_ROOT / "trainite/shared/utils.py",
+                [
+                    ("from trainite.config.base import", "from config import"),
+                    ("from trainite.datasets.transformed import", "from datasets.transformed import"),
+                ],
+            ),
             "main.py": _render_template(PROJECT_ROOT / "trainite/shared/main.py", main_replacements),
             "README.md": _render_template(PROJECT_ROOT / "trainite/templates/project/README.md", readme_replacements),
             "config.py": _render_template(PROJECT_ROOT / "trainite/config/base.py", config_replacements),
@@ -441,7 +447,7 @@ def init_project(config: Init) -> None:
             collate_config_cls = model_spec.collate_fn_config_cls
             collate_fn_instance = collate_config_cls()
             collate_fn_val = GenericComponent(
-                _target_=collate_fn_instance.target,
+                _target_=collate_fn_instance.target,  # type: ignore
                 **collate_fn_instance.model_dump(by_alias=True, exclude={"target"}),
             )
         else:
