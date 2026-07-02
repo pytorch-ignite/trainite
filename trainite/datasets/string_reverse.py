@@ -19,6 +19,9 @@ CHARSET_PRESETS = {
     "@alpha_uppercase": string.ascii_uppercase,
     "@digits": string.digits,
     "@alphanumeric": string.ascii_letters + string.digits,
+    "@punctuation": string.punctuation,
+    "@alphanumeric_lowercase": string.ascii_lowercase + string.digits,
+    "@alphanumeric_uppercase": string.ascii_uppercase + string.digits,
 }
 
 
