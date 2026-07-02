@@ -1,27 +1,15 @@
-import inspect
 import logging
-from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 import torch
 from ignite.engine import Engine, Events
-from ignite.handlers import (
-    Checkpoint,
-    DiskSaver,
-    EarlyStopping,
-    create_lr_scheduler_with_warmup,
-)
+from ignite.handlers import Checkpoint
 import ignite.distributed as idist
-from ignite.handlers.fbresearch_logger import FBResearchLogger
-from ignite.handlers.param_scheduler import ParamScheduler
-from ignite.handlers.tensorboard_logger import OptimizerParamsHandler, TensorboardLogger
 from ignite.metrics import Accuracy, Loss, Metric, RunningAverage
 from ignite.utils import setup_logger
 from pydantic import BaseModel, ConfigDict, Field
 from torch import nn
-from torch.optim.lr_scheduler import LinearLR
-from torch.utils.data import DataLoader, Dataset, Subset, random_split
+from torch.utils.data import DataLoader, Subset
 
 from trainite.config.base import (
     DataConfigBase,
@@ -29,12 +17,19 @@ from trainite.config.base import (
     OptimizerConfig,
     OutputConfig,
 )
-from trainite.datasets.transformed import TransformedDataset
-
-# __MODEL_IMPORT__
-# __DATASET_IMPORT__
-# __PREPROCESSOR_IMPORT__
-from trainite.shared.utils import dump_config, get_target, instantiate
+from trainite.shared.utils import (
+    dump_config,
+    get_target,
+    instantiate,
+    _inject_if_accepted,
+    build_dataloaders,
+    setup_run_dir,
+    setup_console_logger,
+    setup_lr_scheduler,
+    setup_early_stopping,
+    setup_checkpointing,
+    setup_tensorboard,
+)
 
 
 class DecoderTrainerConfig(BaseModel):
@@ -80,16 +75,6 @@ def resolve_vocab_size(tokenizer: Any, model_config: Any) -> int:
     return vocab_size
 
 
-# Inspects the target symbol's signature and filters the candidates to
-# only include those that are accepted by the target symbol.
-def _inject_if_accepted(target_symbol: Any, **candidates: Any) -> dict[str, Any]:
-    try:
-        sig = inspect.signature(target_symbol)
-        return {k: v for k, v in candidates.items() if k in sig.parameters}
-    except Exception:
-        return {}
-
-
 # Builds the model based on the provided configuration, tokenizer, and device.
 def build_model(model_config: Any, tokenizer: Any, vocab_size: int, device: str | torch.device) -> nn.Module:
     target_symbol = get_target(model_config.target)
@@ -101,79 +86,6 @@ def build_model(model_config: Any, tokenizer: Any, vocab_size: int, device: str 
     model = instantiate(model_config, **kwargs)
     model.to(device)
     return model
-
-
-def build_dataset(dataset_config: Any, transform_config: Any, tokenizer: Any) -> Dataset:
-    ds = get_target(dataset_config.target)
-    dataset = instantiate(dataset_config, **_inject_if_accepted(ds, preprocessor=tokenizer, tokenizer=tokenizer))
-    if transform_config is not None:
-        tf = get_target(transform_config.target)
-        transform = instantiate(
-            transform_config, **_inject_if_accepted(tf, preprocessor=tokenizer, tokenizer=tokenizer)
-        )
-        return TransformedDataset(dataset, transform)
-    return dataset
-
-
-def create_dataloader(
-    dataset: Dataset,
-    dl_config: Any,
-    tokenizer: Any,
-    shuffle: bool | None = None,
-) -> DataLoader:
-    dl_kwargs = dl_config.model_dump(exclude={"collate_fn", "shuffle"})
-    if shuffle is None:
-        shuffle = getattr(dl_config, "shuffle", False)
-    collate_fn = None
-    collate_config = dl_config.collate_fn
-    if collate_config:
-        target_symbol = get_target(collate_config.target)
-        if isinstance(target_symbol, type):
-            collate_fn = instantiate(collate_config, tokenizer=tokenizer)
-        else:
-            collate_fn = target_symbol
-    return DataLoader(dataset, shuffle=shuffle, collate_fn=collate_fn, **dl_kwargs)
-
-
-def _loaders_from_splits(
-    data_config: DataConfigBase, tokenizer: Any
-) -> tuple[DataLoader, DataLoader, DataLoader | None]:
-    def _make(split_config: Any) -> DataLoader:
-        ds = build_dataset(split_config.dataset, split_config.transform, tokenizer)
-        return create_dataloader(ds, split_config.dataloader, tokenizer)
-
-    return _make(data_config.train), _make(data_config.val), _make(data_config.test) if data_config.test else None
-
-
-def _loaders_from_ratios(
-    data_config: DataWithAutoSplit, tokenizer: Any, seed: int
-) -> tuple[DataLoader, DataLoader, DataLoader | None]:
-    dataset = build_dataset(data_config.dataset, data_config.transform, tokenizer)
-    total_len = len(dataset)  # type: ignore
-    if total_len == 0:
-        raise ValueError("Training dataset is empty. Cannot perform train/val/test split.")
-    val_ratio = data_config.val_ratio
-    test_ratio = data_config.test_ratio
-    train_len = int(total_len * (1.0 - test_ratio - val_ratio))
-    val_len = int(total_len * val_ratio)
-    test_len = total_len - train_len - val_len
-    train_ds, val_ds, test_ds = random_split(
-        dataset,
-        [train_len, val_len, test_len],
-        generator=torch.Generator().manual_seed(seed),
-    )
-    dl = data_config.dataloader
-    return (
-        create_dataloader(train_ds, dl, tokenizer, shuffle=True),
-        create_dataloader(val_ds, dl, tokenizer, shuffle=False),
-        create_dataloader(test_ds, dl, tokenizer, shuffle=False) if test_len > 0 else None,
-    )
-
-
-def build_dataloaders(data_config: Any, tokenizer: Any, seed: int) -> tuple[DataLoader, DataLoader, DataLoader | None]:
-    if isinstance(data_config, DataWithAutoSplit):
-        return _loaders_from_ratios(data_config, tokenizer, seed)
-    return _loaders_from_splits(data_config, tokenizer)
 
 
 class DecoderTrainer:
@@ -207,23 +119,51 @@ class DecoderTrainer:
         self.metrics: dict = self._attach_metrics()
 
         # Create run directory for outputs
-        self.run_dir = self._make_run_dir()
+        self.run_dir = setup_run_dir(config.output.root, config.output.run_name)
         dump_config(self.config, self.run_dir / "config.yaml")
 
         # Attach loggers for console
-        self.logger = self.attach_loggers()
+        self.logger = setup_console_logger(
+            self.run_dir,
+            self.engine,
+            self.optimizer,
+            self.config.trainer.log_every_steps,
+        )
 
         # Attach learning rate scheduler
-        self.attach_lr_scheduler()
+        self.scheduler = setup_lr_scheduler(
+            self.optimizer,
+            self.config.optimizer.lr,
+            self.total_iters,
+            self.engine,
+        )
 
         # Attach early stopping
-        self.setup_early_stopping()
+        setup_early_stopping(
+            self.engine,
+            self.val_evaluator,
+            self.config.trainer.early_stopping_patience,
+        )
 
         # Attach checkpointing
-        self.checkpointers = self.setup_checkpointing()
+        self.checkpointers = setup_checkpointing(
+            self.run_dir,
+            self.model,
+            self.optimizer,
+            self.engine,
+            self.val_evaluator,
+        )
 
         # Attach TensorBoard logger
-        self.tb_logger = self._setup_tensorboard()
+        self.tb_logger = setup_tensorboard(
+            run_dir=self.run_dir,
+            engine=self.engine,
+            train_evaluator=self.train_evaluator,
+            val_evaluator=self.val_evaluator,
+            test_evaluator=self.test_evaluator if self.test_loader else None,
+            optimizer=self.optimizer,
+            metric_names=["loss", "token_accuracy"],
+        )
 
         # Run evaluations at the end of each epoch to log training and validation metrics
         self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
@@ -232,13 +172,6 @@ class DecoderTrainer:
         if self.inference_every_epochs is not None:
             self._setup_inference()
             self.attach_inference_logger()
-
-    def _make_run_dir(self) -> Path:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_name = self.config.output.run_name
-        run_dir = Path(self.config.output.root) / run_name / timestamp
-        run_dir.mkdir(parents=True, exist_ok=True)
-        return run_dir
 
     def _flatten(self, output: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         logits = output["logits"].reshape(-1, output["logits"].size(-1))
@@ -300,39 +233,6 @@ class DecoderTrainer:
 
         return metrics
 
-    def attach_loggers(self) -> logging.Logger:
-        logger = setup_logger(
-            "trainer",
-            level=logging.INFO,
-            filepath=str(self.run_dir / "output.log") if self.run_dir else None,
-            reset=True,
-        )
-        train_fb_logger: FBResearchLogger = FBResearchLogger(logger=logger, show_output=True)
-        train_fb_logger.attach(
-            self.engine,
-            name="Train",
-            every=self.config.trainer.log_every_steps,
-            optimizer=self.optimizer,
-            output_transform=lambda output: {"loss": output["loss"].item()},
-        )
-        return logger
-
-    def attach_lr_scheduler(self) -> None:
-        warmup_iters = max(2, int(0.1 * self.total_iters))
-        linear_decay = LinearLR(
-            self.optimizer,
-            start_factor=1.0,
-            end_factor=0.0,
-            total_iters=self.total_iters - warmup_iters,
-        )
-        self.scheduler: ParamScheduler = create_lr_scheduler_with_warmup(
-            linear_decay,
-            warmup_start_value=0.0,
-            warmup_end_value=self.config.optimizer.lr,
-            warmup_duration=warmup_iters,
-        )
-        self.engine.add_event_handler(Events.ITERATION_COMPLETED, self.scheduler)
-
     def attach_inference_logger(self) -> None:
         self.engine.add_event_handler(
             Events.EPOCH_COMPLETED(every=self.inference_every_epochs),
@@ -347,99 +247,6 @@ class DecoderTrainer:
             self.val_loader,
             "Val",
         )
-
-    def setup_early_stopping(self) -> None:
-        patience = self.config.trainer.early_stopping_patience
-        if patience is not None:
-            early_stopping = EarlyStopping(
-                patience=patience,
-                score_function=lambda engine: engine.state.metrics["loss"],
-                trainer=self.engine,
-                min_delta=0.0,
-                mode="min",
-            )
-            self.val_evaluator.add_event_handler(Events.COMPLETED, early_stopping)
-
-    def setup_checkpointing(self) -> dict[str, Checkpoint]:
-        to_save = {"model": self.model, "optimizer": self.optimizer}
-        checkpointers = {}
-
-        def score_function(engine):
-            loss = engine.state.metrics["loss"]
-            return -loss
-
-        checkpoint = Checkpoint(
-            to_save=to_save,
-            save_handler=DiskSaver(dirname=str(self.run_dir), require_empty=False),
-            filename_prefix="best",
-            score_function=score_function,
-            score_name="val_loss",
-            n_saved=1,
-            global_step_transform=lambda *_: self.engine.state.epoch,
-        )
-        self.val_evaluator.add_event_handler(Events.COMPLETED, checkpoint)
-        checkpointers["checkpoint_best"] = checkpoint
-
-        last_checkpoint = Checkpoint(
-            to_save=to_save,
-            save_handler=DiskSaver(dirname=str(self.run_dir), require_empty=False),
-            filename_prefix="last",
-            n_saved=1,
-            global_step_transform=lambda *_: self.engine.state.epoch,
-        )
-        self.engine.add_event_handler(Events.EPOCH_COMPLETED, last_checkpoint)
-
-        checkpointers["checkpoint_last"] = last_checkpoint
-        return checkpointers
-
-    def _setup_tensorboard(self) -> TensorboardLogger:
-        log_dir = self.run_dir / "tensorboard" if self.run_dir else None
-        tb_logger = TensorboardLogger(log_dir=log_dir)
-        metric_names = ["loss", "token_accuracy"]
-
-        # Log training iteration loss
-        tb_logger.attach_output_handler(
-            self.engine,
-            event_name=Events.ITERATION_COMPLETED,
-            tag="training",
-            output_transform=lambda output: {"batch_loss": output["loss"]},
-        )
-
-        # Log training epoch metrics
-        tb_logger.attach_output_handler(
-            self.train_evaluator,
-            event_name=Events.EPOCH_COMPLETED,
-            tag="training",
-            metric_names=metric_names,
-            global_step_transform=lambda *_: self.engine.state.epoch,
-        )
-
-        # Log validation epoch metrics
-        tb_logger.attach_output_handler(
-            self.val_evaluator,
-            event_name=Events.EPOCH_COMPLETED,
-            tag="validation",
-            metric_names=metric_names,
-            global_step_transform=lambda *_: self.engine.state.epoch,
-        )
-
-        # Log test metrics if applicable
-        if self.test_loader:
-            tb_logger.attach_output_handler(
-                self.test_evaluator,
-                event_name=Events.COMPLETED,
-                tag="testing",
-                metric_names=metric_names,
-                global_step_transform=lambda *_: self.engine.state.epoch,
-            )
-
-        # Log optimizer learning rates
-        tb_logger.attach(
-            self.engine,
-            log_handler=OptimizerParamsHandler(self.optimizer),
-            event_name=Events.ITERATION_STARTED,
-        )
-        return tb_logger
 
     def _run_evaluations(self, engine: Engine) -> None:
         self.logger.info("Evaluating on training set...")
