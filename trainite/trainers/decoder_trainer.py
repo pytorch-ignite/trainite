@@ -48,7 +48,6 @@ class TrainerConfig(BaseModel):
     inference_num_samples: int = Field(default=5, gt=0)
     max_inference_new_tokens: int = Field(default=16, gt=0)
     grad_clip_norm: float | None = Field(default=None, gt=0.0)
-    logger: Literal["tensorboard", "wandb"] = "tensorboard"
 
 
 class ProjectConfig(BaseModel):
@@ -59,6 +58,7 @@ class ProjectConfig(BaseModel):
     data: DataConfigBase | DataWithAutoSplit
     trainer: TrainerConfig = Field(default_factory=TrainerConfig)
     output: OutputConfig
+    logger: Literal["tensorboard", "wandb"] = "tensorboard"
     seed: int = 42
     device: str | None = None
 
@@ -374,7 +374,7 @@ class Trainer:
             score_function=score_function,
             score_name="val_loss",
             n_saved=1,
-            global_step_transform=lambda *_: self.engine.state.epoch,
+            global_step_transform=lambda *_: self.engine.state.iteration,
         )
         self.val_evaluator.add_event_handler(Events.COMPLETED, checkpoint)
         checkpointers["checkpoint_best"] = checkpoint
@@ -384,7 +384,7 @@ class Trainer:
             save_handler=DiskSaver(dirname=str(self.run_dir), require_empty=False),
             filename_prefix="last",
             n_saved=1,
-            global_step_transform=lambda *_: self.engine.state.epoch,
+            global_step_transform=lambda *_: self.engine.state.iteration,
         )
         self.engine.add_event_handler(Events.EPOCH_COMPLETED, last_checkpoint)
 
@@ -394,8 +394,9 @@ class Trainer:
     def _setup_experiment_logger(self) -> TensorboardLogger | WandBLogger:
         if self.config.logger == "wandb":
             exp_logger: TensorboardLogger | WandBLogger = WandBLogger(
-                project=self.config.output.run_name, dir=str(self.run_dir)
+                project=self.config.output.run_name, dir=str(self.run_dir), name=str(self.run_dir).split("/")[-1]
             )
+
         else:
             log_dir = self.run_dir / "tensorboard" if self.run_dir else None
             exp_logger = TensorboardLogger(log_dir=log_dir)
@@ -415,7 +416,7 @@ class Trainer:
             event_name=Events.EPOCH_COMPLETED,
             tag="training",
             metric_names=metric_names,
-            global_step_transform=lambda *_: self.engine.state.epoch,
+            global_step_transform=lambda *_: self.engine.state.iteration,
         )
 
         # Log validation epoch metrics
@@ -424,7 +425,7 @@ class Trainer:
             event_name=Events.EPOCH_COMPLETED,
             tag="validation",
             metric_names=metric_names,
-            global_step_transform=lambda *_: self.engine.state.epoch,
+            global_step_transform=lambda *_: self.engine.state.iteration,
         )
 
         # Log test metrics if applicable
@@ -434,7 +435,7 @@ class Trainer:
                 event_name=Events.COMPLETED,
                 tag="testing",
                 metric_names=metric_names,
-                global_step_transform=lambda *_: self.engine.state.epoch,
+                global_step_transform=lambda *_: self.engine.state.iteration,
             )
 
         # Log optimizer learning rates
@@ -558,7 +559,7 @@ class Trainer:
             lines.append("")
         name_map = {"Train": "training", "Val": "validation", "Test": "testing"}
         tag = f"inference/{name_map.get(name, name.lower())}"
-        self._log_text(tag, "\n".join(lines), engine.state.epoch)
+        self._log_text(tag, "\n".join(lines), engine.state.iteration)
 
     @torch.no_grad()
     def generate(
@@ -654,4 +655,19 @@ class Trainer:
         if self.test_loader:
             self.test()
 
+        if self.config.logger == "wandb":
+            self._upload_model_to_wandb()
+
         self.exp_logger.close()
+
+    def _upload_model_to_wandb(self) -> None:
+        checkpoint = self.checkpointers.get("checkpoint_best") or self.checkpointers.get("checkpoint_last")
+        checkpoint_path = checkpoint.last_checkpoint if checkpoint else None
+        if not checkpoint_path:
+            self.logger.warning("No checkpoint found; skipping model upload to Weights & Biases.")
+            return
+        # WandBLogger forwards attribute access to the wandb module (same as .log/.Html used above).
+        artifact = self.exp_logger.Artifact(name=f"{self.config.output.run_name}-model".replace("/","-"), type="model")
+        artifact.add_file(str(checkpoint_path))
+        self.exp_logger.log_artifact(artifact)
+        self.logger.info("Uploaded model checkpoint to Weights & Biases: %s", checkpoint_path)
