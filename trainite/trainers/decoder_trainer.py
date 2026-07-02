@@ -21,7 +21,7 @@ from ignite.utils import setup_logger
 from pydantic import BaseModel, ConfigDict, Field
 from torch import nn
 from torch.optim.lr_scheduler import LinearLR
-from torch.utils.data import DataLoader, Dataset, Subset, random_split
+from torch.utils.data import DataLoader, Dataset, random_split
 
 from trainite.config.base import (
     DataConfigBase,
@@ -189,9 +189,6 @@ class Trainer:
         vocab_size = resolve_vocab_size(self.tokenizer, config.model)
         self.model = build_model(config.model, self.tokenizer, vocab_size, self.device)
         self.optimizer = instantiate(config.optimizer, params=self.model.parameters())
-        ds = self.train_loader.dataset
-        ds = ds.dataset if isinstance(ds, Subset) else ds
-        self.prompt_transform = getattr(ds, "transform", None)
         self.epochs: int = config.trainer.epochs
         self.grad_clip_norm: float | None = getattr(config.trainer, "grad_clip_norm", None)
         self.inference_every_epochs = config.trainer.inference_every_epochs
@@ -228,9 +225,8 @@ class Trainer:
         # Run evaluations at the end of each epoch to log training and validation metrics
         self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
 
-        # Setup inference and attach inference logger if inference logging is enabled
+        # Attach inference logger if inference logging is enabled
         if self.inference_every_epochs is not None:
-            self._setup_inference()
             self.attach_inference_logger()
 
     def _make_run_dir(self) -> Path:
@@ -459,34 +455,6 @@ class Trainer:
             val_metrics["token_accuracy"],
         )
 
-    def _validate_dataloader_for_inference(self, loader: DataLoader, name: str) -> None:
-        dataset = loader.dataset
-        if len(dataset) == 0:
-            raise ValueError(f"{name} dataset is empty. Cannot perform inference logging.")
-        dataset = dataset.dataset if isinstance(dataset, Subset) else dataset
-        item = dataset[0]
-        if not isinstance(item, dict):
-            raise ValueError(f"{name} dataset items must be dicts with 'source' and 'target' keys.")
-        if "source" not in item or "target" not in item:
-            raise ValueError(f"{name} dataset items must contain 'source' and 'target' keys. Got: {list(item.keys())}")
-
-    def _setup_inference(self) -> None:
-        tokenizer: Any = self.tokenizer
-        if not hasattr(tokenizer, "decode") or not callable(tokenizer):
-            raise ValueError("Tokenizer must be callable and implement 'decode' method for inference logging.")
-
-        # Validate active loaders
-        self._validate_dataloader_for_inference(self.train_loader, "Train")
-        self._validate_dataloader_for_inference(self.val_loader, "Val")
-        if self.test_loader is not None:
-            self._validate_dataloader_for_inference(self.test_loader, "Test")
-
-        # The transform supplies the prompt format (source -> token ids)
-        if self.prompt_transform is None or not hasattr(self.prompt_transform, "build_prompt"):
-            raise ValueError(
-                "Inference logging requires the dataset's transform to define build_prompt(sample) -> list[int]."
-            )
-
     def _log_inference(self, engine: Engine, loader: DataLoader, name: str) -> None:
         self.logger.info(f"Epoch {engine.state.epoch}: Running inference on {name} samples...")
 
@@ -496,17 +464,17 @@ class Trainer:
         total_samples = len(dataset)  # type: ignore
         num_samples = min(self.inference_num_samples, total_samples)
 
-        # Build generation prompts via the dataset's transform (validated in _setup_inference).
+        # Read generation prompts straight off the DatapointModel contract.
         prompt_ids_list: list[torch.Tensor] = []
         prompt_attn_list: list[torch.Tensor] = []
         targets: list[str] = []
         sources: list[str] = []
         for i in range(num_samples):
             item = dataset[i]
-            source = item["source"]
-            target = item["target"]
+            source = item.source
+            target = item.target
 
-            input_ids = torch.tensor(self.prompt_transform.build_prompt(item), dtype=torch.long)
+            input_ids = item.eval_input_ids
             attention_mask = torch.ones_like(input_ids, dtype=torch.long)
 
             prompt_ids_list.append(input_ids)

@@ -8,6 +8,7 @@ from trainite.models.transformer import (
     TransformerBlock,
     TransformerModel,
 )
+from trainite.datasets.string_reverse import DatapointModel
 from trainite.preprocessors.char_tokenizer import CharTokenizer
 from trainite.shared.utils import instantiate
 
@@ -154,17 +155,22 @@ def test_causal_lm_collate_fn():
     src2 = "d"
     tgt2 = "d"
 
-    def make_item(source: str, target: str) -> dict:
+    def make_item(source: str, target: str) -> DatapointModel:
         source_ids = tokenizer.encode(source)
         target_ids = tokenizer.encode(target)
         combined = (
             [tokenizer.bos_token_id] + source_ids + [tokenizer.sep_token_id] + target_ids + [tokenizer.eos_token_id]
         )
-        return {
-            "input_ids": torch.tensor(combined[:-1], dtype=torch.long),
-            "labels": torch.tensor(combined[1:], dtype=torch.long),
-            "attention_mask": torch.ones(len(combined) - 1, dtype=torch.long),
-        }
+        return DatapointModel(
+            source=source,
+            target=target,
+            train_input_ids=torch.tensor(combined[:-1], dtype=torch.long),
+            train_label_ids=torch.tensor(combined[1:], dtype=torch.long),
+            attention_mask=torch.ones(len(combined) - 1, dtype=torch.long),
+            eval_input_ids=torch.tensor(
+                [tokenizer.bos_token_id] + source_ids + [tokenizer.sep_token_id], dtype=torch.long
+            ),
+        )
 
     batch = [make_item(src1, tgt1), make_item(src2, tgt2)]
 

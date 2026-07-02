@@ -16,6 +16,7 @@ from trainite.config import (
     OutputConfig,
     SplitConfig,
 )
+from trainite.datasets.string_reverse import DatapointModel
 from trainite.trainers.decoder_trainer import Trainer, TrainerConfig, ProjectConfig
 from ignite.engine import Events
 from ignite.handlers import EarlyStopping
@@ -102,17 +103,6 @@ class DummyClassCollateFn:
         return batch
 
 
-class SimpleDatasetWithTokenizer(SimpleDataset):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.tokenizer = "mock_tokenizer"
-
-
-class NonDictDataset(SimpleDatasetWithTokenizer):
-    def __getitem__(self, index):  # type: ignore[override]
-        return [1, 2, 3]
-
-
 class DummyTokenizer:
     def __init__(self):
         self.pad_token_id = 0
@@ -152,16 +142,24 @@ class GenerativeModel(SimpleModel):
 
 
 class DummyTransform:
-    """Passthrough transform that also supplies a prompt format for inference."""
+    """Transform emitting the DatapointModel contract (train tensors + eval prompt)."""
 
     def __init__(self, tokenizer: Any = None):
         self.tokenizer = tokenizer
 
     def __call__(self, sample):
-        return sample
-
-    def build_prompt(self, sample):
-        return [self.tokenizer.bos_token_id] + self.tokenizer.encode(sample["source"]) + [self.tokenizer.sep_token_id]
+        input_ids = sample["input_ids"]
+        prompt_ids = (
+            [self.tokenizer.bos_token_id] + self.tokenizer.encode(sample["source"]) + [self.tokenizer.sep_token_id]
+        )
+        return DatapointModel(
+            source=sample["source"],
+            target=sample["target"],
+            train_input_ids=input_ids,
+            train_label_ids=sample["labels"],
+            attention_mask=torch.ones(len(input_ids), dtype=torch.long),
+            eval_input_ids=torch.tensor(prompt_ids, dtype=torch.long),
+        )
 
 
 class GenerativeDataset(SimpleDataset):
@@ -605,46 +603,6 @@ def test_invalid_inference_params_rejected(kwargs):
         TrainerConfig(**kwargs)
 
 
-def test_setup_inference_invalid_dataset_items(project_config):
-    project_config.trainer.inference_every_epochs = 1
-    project_config.model = cc(
-        "tests.trainers.decoder_trainer_test.GenerativeModel",
-        vocab_size=10,
-        hidden_size=8,
-    )
-    project_config.data.train.dataset = cc(
-        "tests.trainers.decoder_trainer_test.SimpleDatasetWithTokenizer",
-        size=16,
-        seq_len=4,
-        vocab_size=10,
-    )
-    with pytest.raises(
-        ValueError,
-        match="must contain 'source' and 'target' keys",
-    ):
-        create_trainer_from_config(project_config)
-
-
-def test_setup_inference_non_dict_dataset_items(project_config):
-    project_config.trainer.inference_every_epochs = 1
-    project_config.model = cc(
-        "tests.trainers.decoder_trainer_test.GenerativeModel",
-        vocab_size=10,
-        hidden_size=8,
-    )
-    project_config.data.train.dataset = cc(
-        "tests.trainers.decoder_trainer_test.NonDictDataset",
-        size=16,
-        seq_len=4,
-        vocab_size=10,
-    )
-    with pytest.raises(
-        ValueError,
-        match="dataset items must be dicts with",
-    ):
-        create_trainer_from_config(project_config)
-
-
 def test_setup_inference_and_log_success(project_config, temp_run_dir):
     project_config.trainer.inference_every_epochs = 1
     project_config.trainer.max_inference_new_tokens = 32
@@ -654,6 +612,7 @@ def test_setup_inference_and_log_success(project_config, temp_run_dir):
         hidden_size=8,
     )
     transform = cc("tests.trainers.decoder_trainer_test.DummyTransform")
+    collate = cc("trainite.models.transformer.CausalLMCollateFn")
     project_config.data.train.dataset = cc(
         "tests.trainers.decoder_trainer_test.GenerativeDataset",
         size=16,
@@ -661,6 +620,7 @@ def test_setup_inference_and_log_success(project_config, temp_run_dir):
         vocab_size=10,
     )
     project_config.data.train.transform = transform
+    project_config.data.train.dataloader.collate_fn = collate
     project_config.data.val.dataset = cc(
         "tests.trainers.decoder_trainer_test.GenerativeDataset",
         size=8,
@@ -668,6 +628,7 @@ def test_setup_inference_and_log_success(project_config, temp_run_dir):
         vocab_size=10,
     )
     project_config.data.val.transform = transform
+    project_config.data.val.dataloader.collate_fn = collate
     trainer = create_trainer_from_config(project_config)
     assert trainer.max_inference_new_tokens == 32
     trainer.run()

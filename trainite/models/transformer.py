@@ -201,17 +201,14 @@ class CausalLMCollateFn:
         self.pad_token_id = pad_token_id if pad_token_id is not None else tokenizer.pad_token_id
         self.ignore_index = ignore_index
 
-    def __call__(self, batch: list[dict[str, torch.tensor]]) -> dict[str, torch.Tensor]:
+    def __call__(self, batch: list[Any]) -> dict[str, torch.Tensor]:
         input_ids_list = []
         attention_mask_list = []
         labels_list = []
         for item in batch:
-            input_ids = item.get("input_ids")
-            labels = item.get("labels")
-
-            if input_ids is None or labels is None:
-                raise KeyError(f"Dataset item must contain 'input_ids' and 'labels' keys. Got: {list(item.keys())}")
-            attention_mask = item.get("attention_mask", torch.tensor([1] * len(input_ids)))
+            input_ids = item.train_input_ids
+            labels = item.train_label_ids
+            attention_mask = item.attention_mask
 
             # We flip the sequences to have padding on the left, which allows us to use causal masking without modification
             input_ids_list.append(input_ids.flip(0))

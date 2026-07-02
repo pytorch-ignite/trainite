@@ -123,6 +123,23 @@ class StringReverseDataset(Dataset):
         }
 
 
+class DatapointModel(BaseModel):
+    """Contract for a causal-LM transformed item: training tensors + the eval prompt.
+
+    Convention: every causal-LM dataset transform returns this shape. The collate
+    fn batches the `train_*`/`attention_mask` fields; the trainer's inference loop
+    reads `eval_input_ids`/`source`/`target` directly.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    source: str
+    target: str
+    train_input_ids: torch.Tensor
+    train_label_ids: torch.Tensor
+    attention_mask: torch.Tensor
+    eval_input_ids: torch.Tensor
+
+
 class PromptCompletionTransform:
     def __init__(self, tokenizer: Any, ignore_index: int = -100) -> None:
         self.tokenizer = tokenizer
@@ -135,7 +152,7 @@ class PromptCompletionTransform:
         source_tokens = self.tokenizer(sample["source"], add_special_tokens=False)["input_ids"]
         return [bos] + source_tokens + [sep]
 
-    def __call__(self, sample: dict[str, str]) -> dict[str, torch.Tensor | str]:
+    def __call__(self, sample: dict[str, str]) -> DatapointModel:
         source = sample["source"]
         target = sample["target"]
 
@@ -155,13 +172,14 @@ class PromptCompletionTransform:
 
         attention_mask = torch.ones(len(input_ids), dtype=torch.long)
 
-        return {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "labels": labels,
-            "source": source,
-            "target": target,
-        }
+        return DatapointModel(
+            source=source,
+            target=target,
+            train_input_ids=input_ids,
+            train_label_ids=labels,
+            attention_mask=attention_mask,
+            eval_input_ids=torch.tensor(prompt_ids, dtype=torch.long),
+        )
 
 
 class PromptCompletionTransformConfig(BaseModel):

@@ -177,25 +177,25 @@ def test_prompt_completion_transform():
     sample = {"source": "abc", "target": "cba"}
     item = transform(sample)
 
-    assert "input_ids" in item
-    assert "labels" in item
-    assert "attention_mask" in item
+    # Contract: DatapointModel carries source/target strings + train tensors + eval prompt
+    assert item.source == "abc"
+    assert item.target == "cba"
 
     # Check tensor shapes and types
-    assert item["input_ids"].dtype == torch.long
-    assert item["labels"].dtype == torch.long
-    assert item["attention_mask"].dtype == torch.long
+    assert item.train_input_ids.dtype == torch.long
+    assert item.train_label_ids.dtype == torch.long
+    assert item.attention_mask.dtype == torch.long
 
     # Auto-regressive shift: input_ids and labels should match, shifted by 1
-    assert len(item["input_ids"]) == len(item["labels"])
+    assert len(item.train_input_ids) == len(item.train_label_ids)
 
     # First token of input is BOS
-    assert item["input_ids"][0].item() == tokenizer.bos_token_id
+    assert item.train_input_ids[0].item() == tokenizer.bos_token_id
     # Last token of labels is EOS
-    assert item["labels"][-1].item() == tokenizer.eos_token_id
+    assert item.train_label_ids[-1].item() == tokenizer.eos_token_id
 
     # The SEP token must exist in the labels/inputs
-    sep_idx = (item["input_ids"] == tokenizer.sep_token_id).nonzero(as_tuple=True)[0][0].item()
+    sep_idx = (item.train_input_ids == tokenizer.sep_token_id).nonzero(as_tuple=True)[0][0].item()
     assert sep_idx > 0
 
     # Ensure label masking for the prompt part (BOS + source + SEP = 1 + 3 + 1 = 5 tokens)
@@ -203,9 +203,12 @@ def test_prompt_completion_transform():
     # labels corresponds to combined_input_ids[1:], so the first len(source_tokens) + 1 tokens are masked.
     source_tokens = tokenizer("abc", add_special_tokens=False)["input_ids"]
     masked_len = len(source_tokens) + 1
-    assert (item["labels"][:masked_len] == -100).all()
+    assert (item.train_label_ids[:masked_len] == -100).all()
     # The target tokens + EOS should NOT be masked
-    assert (item["labels"][masked_len:] != -100).all()
+    assert (item.train_label_ids[masked_len:] != -100).all()
 
     # All attention mask values should be 1
-    assert item["attention_mask"].eq(1).all()
+    assert item.attention_mask.eq(1).all()
+
+    # Eval prompt is [bos] + source + [sep], no target
+    assert item.eval_input_ids.tolist() == [tokenizer.bos_token_id] + source_tokens + [tokenizer.sep_token_id]
