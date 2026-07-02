@@ -28,7 +28,7 @@ from trainite.shared.utils import (
     setup_lr_scheduler,
     setup_early_stopping,
     setup_checkpointing,
-    setup_tensorboard,
+    setup_metric_logger,
 )
 
 
@@ -155,7 +155,7 @@ class DecoderTrainer:
         )
 
         # Attach TensorBoard logger
-        self.tb_logger = setup_tensorboard(
+        self.metric_logger = setup_metric_logger(
             run_dir=self.run_dir,
             engine=self.engine,
             train_evaluator=self.train_evaluator,
@@ -358,8 +358,8 @@ class DecoderTrainer:
                 decoded_strs[idx],
             )
 
-        if self.tb_logger is not None:
-            tb_writer = self.tb_logger.writer
+        if self.metric_logger is not None:
+            tb_writer = self.metric_logger.writer
             lines = []
             for idx in range(num_samples):
                 prompt = sources[idx].strip() or "(empty)"
@@ -461,11 +461,11 @@ class DecoderTrainer:
     def run(self) -> None:
         self.logger.info("starting run in %s", self.run_dir)
         config_data = self.config.model_dump(by_alias=True, polymorphic_serialization=True)
-        self.tb_logger.writer.add_text("config", str(config_data))
+        self.metric_logger.writer.add_text("config", str(config_data))
 
         self.engine.run(self.train_loader, max_epochs=self.epochs)
 
         if self.test_loader:
             self.test()
 
-        self.tb_logger.close()
+        self.metric_logger.close()
