@@ -667,7 +667,7 @@ class Trainer:
             self.logger.warning("No checkpoint found; skipping model upload to Weights & Biases.")
             return
         # WandBLogger forwards attribute access to the wandb module (same as .log/.Html used above).
-        artifact = self.exp_logger.Artifact(name=f"{self.config.output.run_name}-model".replace("/","-"), type="model")
+        artifact = self.exp_logger.Artifact(name=f"{self.config.output.run_name}-model".replace("/", "-"), type="model")
         artifact.add_file(str(checkpoint_path))
         self.exp_logger.log_artifact(artifact)
         self.logger.info("Uploaded model checkpoint to Weights & Biases: %s", checkpoint_path)
