@@ -16,14 +16,14 @@ from trainite.config import (
     OutputConfig,
     SplitConfig,
 )
-from trainite.trainers.decoder_trainer import DecoderTrainer, DecoderTrainerConfig, ProjectConfig
+from trainite.trainers.decoder_trainer import Trainer, TrainerConfig, ProjectConfig
 from ignite.engine import Events
 from ignite.handlers import EarlyStopping
 import ignite.distributed as idist
 
 
-def create_trainer_from_config(config: ProjectConfig) -> DecoderTrainer:
-    return DecoderTrainer(config)
+def create_trainer_from_config(config: ProjectConfig) -> Trainer:
+    return Trainer(config)
 
 
 class MockComponent(BaseModel):
@@ -224,7 +224,7 @@ def project_config(temp_run_dir):
                 dataloader=DataLoaderConfig(batch_size=4),
             ),
         ),
-        trainer=DecoderTrainerConfig(
+        trainer=TrainerConfig(
             epochs=1,
             log_every_steps=1,
             inference_every_epochs=None,
@@ -241,7 +241,7 @@ def test_flatten():
     logits = torch.randn(2, 3, 5)  # B=2, S=3, V=5
     targets = torch.tensor([[1, 2, -100], [0, -100, 3]])
 
-    trainer = DecoderTrainer.__new__(DecoderTrainer)
+    trainer = Trainer.__new__(Trainer)
     trainer.loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
 
     output = {"logits": logits, "targets": targets}
@@ -475,7 +475,7 @@ def test_decoder_trainer_builds_train_and_val_loaders_from_ratios(tmp_path):
             test_ratio=0.0,
             val_ratio=0.2,
         ),
-        trainer=DecoderTrainerConfig(epochs=1),
+        trainer=TrainerConfig(epochs=1),
         output=OutputConfig(root=str(tmp_path), run_name="test"),
     )
 
@@ -508,7 +508,7 @@ def test_decoder_trainer_builds_train_val_and_test_loaders_from_ratios(tmp_path)
             test_ratio=0.2,
             val_ratio=0.2,
         ),
-        trainer=DecoderTrainerConfig(epochs=1),
+        trainer=TrainerConfig(epochs=1),
         output=OutputConfig(root=str(tmp_path), run_name="test"),
     )
 
@@ -585,7 +585,7 @@ def test_decoder_trainer_dataloader_class_collate_fn(project_config):
     assert isinstance(trainer.train_loader.collate_fn.tokenizer, DummyTokenizer)
 
 
-# Inference param validation now lives on DecoderTrainerConfig (Field(gt=0)), so bad
+# Inference param validation now lives on TrainerConfig (Field(gt=0)), so bad
 # values (non-positive or non-int) are rejected at config construction.
 @pytest.mark.parametrize(
     "kwargs",
@@ -602,7 +602,7 @@ def test_decoder_trainer_dataloader_class_collate_fn(project_config):
 )
 def test_invalid_inference_params_rejected(kwargs):
     with pytest.raises(ValidationError):
-        DecoderTrainerConfig(**kwargs)
+        TrainerConfig(**kwargs)
 
 
 def test_setup_inference_invalid_dataset_items(project_config):

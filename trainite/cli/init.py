@@ -246,11 +246,14 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
 
     main_replacements = [
         (
-            "from trainite.trainers.decoder_trainer import DecoderTrainer, ProjectConfig",
-            f"from trainer import {trainer_spec.implementation_symbol}, ProjectConfig",
+            "from trainite.trainers.decoder_trainer",
+            "from trainer",
         ),
         ("trainite.shared.utils", "utils"),
-        ("DecoderTrainer(", f"{trainer_spec.implementation_symbol}("),
+        (
+            "from trainite.datasets.transformed import TransformedDataset",
+            "from datasets.transformed import TransformedDataset",
+        ),
     ]
 
     preprocessor_name = preprocessor_spec.name if preprocessor_spec else "None"

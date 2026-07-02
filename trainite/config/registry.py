@@ -90,8 +90,8 @@ TRAINER_SPECS = {
     "decoder-trainer": TrainerSpec(
         name="decoder_trainer",
         implementation_path=Path("trainite/trainers/decoder_trainer.py"),
-        config_cls_path="trainite.trainers.decoder_trainer.DecoderTrainerConfig",
-        implementation_symbol="DecoderTrainer",
+        config_cls_path="trainite.trainers.decoder_trainer.TrainerConfig",
+        implementation_symbol="Trainer",
         template_replacements=[
             ("trainite.shared.utils", "utils"),
             ("trainite.config.base", "config"),

@@ -1,3 +1,3 @@
-from trainite.trainers.decoder_trainer import DecoderTrainer
+from trainite.trainers.decoder_trainer import Trainer
 
-__all__ = ["DecoderTrainer"]
+__all__ = ["Trainer"]

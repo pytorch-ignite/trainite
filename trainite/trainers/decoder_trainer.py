@@ -37,7 +37,7 @@ from trainite.datasets.transformed import TransformedDataset
 from trainite.shared.utils import dump_config, get_target, instantiate
 
 
-class DecoderTrainerConfig(BaseModel):
+class TrainerConfig(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     epochs: int = Field(default=3, gt=0)
     log_every_steps: int = Field(default=10, gt=0)
@@ -55,7 +55,7 @@ class ProjectConfig(BaseModel):
     model: BaseModel
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
     data: DataConfigBase | DataWithAutoSplit
-    trainer: DecoderTrainerConfig = Field(default_factory=DecoderTrainerConfig)
+    trainer: TrainerConfig = Field(default_factory=TrainerConfig)
     output: OutputConfig
     seed: int = 42
     device: str | None = None
@@ -176,7 +176,7 @@ def build_dataloaders(data_config: Any, tokenizer: Any, seed: int) -> tuple[Data
     return _loaders_from_splits(data_config, tokenizer)
 
 
-class DecoderTrainer:
+class Trainer:
     def __init__(self, config: ProjectConfig) -> None:
         self.logger: logging.Logger = setup_logger("trainer", level=logging.INFO)
         torch.manual_seed(config.seed)
