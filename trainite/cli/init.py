@@ -308,10 +308,16 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
             ]
         )
 
+    shared_repl = [
+        ("trainite.shared.utils", "utils"),
+        ("trainite.config.base", "config"),
+        ("trainite.datasets.transformed", "datasets.transformed"),
+    ]
+
     templates.update(
         {
             "trainer.py": _render_template(PROJECT_ROOT / trainer_spec.implementation_path, trainer_replacements),
-            "utils.py": _render_template(PROJECT_ROOT / "trainite/shared/utils.py"),
+            "utils.py": _render_template(PROJECT_ROOT / "trainite/shared/utils.py", shared_repl),
             "main.py": _render_template(PROJECT_ROOT / "trainite/shared/main.py", main_replacements),
             "README.md": _render_template(PROJECT_ROOT / "trainite/templates/project/README.md", readme_replacements),
             "config.py": _render_template(PROJECT_ROOT / "trainite/config/base.py", config_replacements),

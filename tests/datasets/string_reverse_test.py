@@ -9,8 +9,7 @@ from trainite.datasets.string_reverse import (
 )
 from trainite.datasets.transformed import TransformedDataset
 from trainite.preprocessors.char_tokenizer import CharTokenizer
-from trainite.trainers.decoder_trainer import build_dataset
-from trainite.shared.utils import get_target
+from trainite.shared.utils import build_dataset, get_target
 
 
 def test_string_reverse_dataset():
