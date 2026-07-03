@@ -363,7 +363,7 @@ def upload_model_to_wandb(
     run_name: str,
     logger: logging.Logger,
 ) -> None:
-    checkpoint = checkpointers.get("checkpoint_best") or checkpointers.get("checkpoint_last")
+    checkpoint = checkpointers.get("checkpoint_best")
     checkpoint_path = checkpoint.last_checkpoint if checkpoint else None
     if not checkpoint_path:
         logger.warning("No checkpoint found; skipping model upload to Weights & Biases.")
