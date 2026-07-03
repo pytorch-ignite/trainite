@@ -149,7 +149,7 @@ def test_charset_empty_raises():
 
 def test_dataset_config_min_seq_len_gt_max():
     """Config validation: min_seq_len > max_seq_len should raise."""
-    from trainite.datasets.string_reverse import StringReverseDatasetConfig
+    from trainite.config.datasets import StringReverseDatasetConfig
 
     with pytest.raises(ValueError, match="min_seq_len must be less than or equal to max_seq_len"):
         StringReverseDatasetConfig(min_seq_len=10, max_seq_len=5)
@@ -157,7 +157,7 @@ def test_dataset_config_min_seq_len_gt_max():
 
 def test_data_config_defaults():
     """Verify StringReverseDataConfig default values."""
-    from trainite.datasets.string_reverse import StringReverseDataConfig
+    from trainite.config.datasets import StringReverseDataConfig
 
     config = StringReverseDataConfig()
     assert config.test_ratio == 0.1

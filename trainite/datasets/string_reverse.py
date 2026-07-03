@@ -4,10 +4,8 @@ import warnings
 from typing import Any
 
 import torch
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict
 from torch.utils.data import Dataset
-
-from trainite.config.base import DataLoaderConfig, DataWithAutoSplit
 
 # Hardcoded universal vocabulary: all printable ASCII characters
 UNIVERSAL_VOCAB = string.ascii_letters + string.digits + string.punctuation + " "
@@ -185,54 +183,3 @@ class PromptCompletionTransform:
             attention_mask=attention_mask,
             eval_input_ids=torch.tensor(prompt_ids, dtype=torch.long),
         )
-
-
-class PromptCompletionTransformConfig(BaseModel):
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
-    target: str = Field(
-        default="trainite.datasets.string_reverse.PromptCompletionTransform",
-        alias="_target_",
-    )
-    ignore_index: int = -100
-
-
-class StringReverseDatasetConfig(BaseModel):
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
-    target: str = Field(
-        default="trainite.datasets.string_reverse.StringReverseDataset",
-        alias="_target_",
-    )
-    per_seq_size: int = Field(default=256, gt=0)
-    charset: str | None = "@alpha"
-    min_seq_len: int | None = Field(default=1, gt=0)
-    max_seq_len: int | None = Field(default=16, gt=0)
-    seq_len: int | None = Field(default=None, gt=0)
-    seed: int = 42
-
-    @model_validator(mode="after")
-    def validate_lengths(self) -> "StringReverseDatasetConfig":
-        if self.seq_len is not None and (self.min_seq_len is not None or self.max_seq_len is not None):
-            raise ValueError("Cannot specify both seq_len and min_seq_len/max_seq_len.")
-
-        if self.seq_len is None:
-            if self.min_seq_len is None or self.max_seq_len is None:
-                raise ValueError("Must specify either seq_len or both min_seq_len and max_seq_len.")
-            if self.min_seq_len > self.max_seq_len:
-                raise ValueError("min_seq_len must be less than or equal to max_seq_len.")
-        return self
-
-
-class StringReverseDataConfig(DataWithAutoSplit):
-    dataset: StringReverseDatasetConfig | None = Field(  # type: ignore[assignment]
-        default_factory=StringReverseDatasetConfig
-    )
-    transform: PromptCompletionTransformConfig | None = Field(default_factory=PromptCompletionTransformConfig)
-    test_ratio: float = 0.1
-    val_ratio: float = 0.1
-    dataloader: DataLoaderConfig = Field(
-        default_factory=lambda: DataLoaderConfig(
-            batch_size=32,
-            shuffle=True,
-            collate_fn=None,
-        )
-    )

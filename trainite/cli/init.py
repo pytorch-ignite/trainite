@@ -11,26 +11,11 @@ from packaging.requirements import Requirement
 from pydantic import BaseModel, ConfigDict, Field
 
 from trainite.config import (
-    DataConfigBase,
-    DataWithAutoSplit,
-    OptimizerConfig,
     OutputConfig,
+    ProjectConfig,
 )
 from trainite.config.registry import REGISTRY, get_dataset_spec, get_model_spec, get_preprocessor_spec, get_trainer_spec
 from trainite.shared.utils import dump_config
-
-
-class ProjectConfig(BaseModel):
-    model_config = ConfigDict(validate_assignment=True)
-    preprocessor: BaseModel | None = None
-    model: BaseModel
-    optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
-    data: DataConfigBase | DataWithAutoSplit
-    trainer: BaseModel
-    logger: Literal["wandb", "tensorboard"] = "tensorboard"
-    output: OutputConfig
-    seed: int = 42
-    device: str | None = None
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
@@ -207,43 +192,7 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
     if trainer_spec.readme_template_path:
         trainer_docs = _render_template(PROJECT_ROOT / trainer_spec.readme_template_path)
 
-    # Dynamic replacements that depend on the user's model/dataset/trainer selection.
-    trainer_replacements = [
-        *trainer_spec.template_replacements,
-        ("model: BaseModel", f"model: {model_spec.config_cls.__name__}"),
-        (
-            "data: DataConfigBase | DataWithAutoSplit",
-            f"data: {dataset_spec.config_cls.__name__}",
-        ),
-        (
-            "# __MODEL_IMPORT__",
-            f"from models.{model_spec.name} import {model_spec.config_cls.__name__}",
-        ),
-        (
-            "# __DATASET_IMPORT__",
-            f"from datasets.{dataset_spec.name} import {dataset_spec.config_cls.__name__}",
-        ),
-    ]
-
-    if preprocessor_spec:
-        trainer_replacements.extend(
-            [
-                ("preprocessor: BaseModel", f"preprocessor: {preprocessor_spec.config_cls.__name__}"),
-                (
-                    "# __PREPROCESSOR_IMPORT__",
-                    f"from preprocessors.{preprocessor_spec.name} import {preprocessor_spec.config_cls.__name__}",
-                ),
-            ]
-        )
-    else:
-        trainer_replacements.extend(
-            [
-                (
-                    "# __PREPROCESSOR_IMPORT__",
-                    "",
-                ),
-            ]
-        )
+    trainer_replacements = trainer_spec.template_replacements
 
     main_replacements = [
         (
@@ -292,35 +241,13 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
             preprocessor_spec.template_replacements,
         )
 
-    config_replacements = []
-    if model_spec.collate_fn_config_cls:
-        collate_config_cls = model_spec.collate_fn_config_cls
-        config_replacements.extend(
-            [
-                ("collate_fn: BaseModel | None = None", f"collate_fn: {collate_config_cls.__name__} | None = None"),
-                ("# __COLLATE_IMPORT__", f"from models.{model_spec.name} import {collate_config_cls.__name__}"),
-            ]
-        )
-    else:
-        config_replacements.extend(
-            [
-                ("# __COLLATE_IMPORT__", ""),
-            ]
-        )
-
-    shared_repl = [
-        ("trainite.shared.utils", "utils"),
-        ("trainite.config.base", "config"),
-        ("trainite.datasets.transformed", "datasets.transformed"),
-    ]
-
     templates.update(
         {
             "trainer.py": _render_template(PROJECT_ROOT / trainer_spec.implementation_path, trainer_replacements),
-            "utils.py": _render_template(PROJECT_ROOT / "trainite/shared/utils.py", shared_repl),
+            "utils.py": _render_template(PROJECT_ROOT / "trainite/shared/utils.py"),
             "main.py": _render_template(PROJECT_ROOT / "trainite/shared/main.py", main_replacements),
             "README.md": _render_template(PROJECT_ROOT / "trainite/templates/project/README.md", readme_replacements),
-            "config.py": _render_template(PROJECT_ROOT / "trainite/config/base.py", config_replacements),
+            "config.py": _render_template(PROJECT_ROOT / "trainite/config/base.py"),
             "pyproject.toml": generate_uv_project(name=project_name, version="0.1.0", dependencies=sorted(final_deps)),
         }
     )

@@ -1,21 +1,20 @@
 import itertools
 import logging
-from typing import Literal
+from typing import Any
 
 import ignite.distributed as idist
 import torch
 from ignite.engine import Engine, Events
 from ignite.metrics import Accuracy, Loss, Metric, RunningAverage
 from ignite.utils import setup_logger
-from pydantic import BaseModel, ConfigDict, Field
 from torch import nn
 from torch.utils.data import DataLoader
 
 from trainite.config.base import (
     DataConfigBase,
     DataWithAutoSplit,
-    OptimizerConfig,
-    OutputConfig,
+    ProjectConfig,
+    TrainerConfig,
 )
 
 # __MODEL_IMPORT__
@@ -35,31 +34,6 @@ from trainite.shared.utils import (
     setup_training_checkpointing,
     setup_wandb_checkpoint_uploads,
 )
-
-
-class TrainerConfig(BaseModel):
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
-    epochs: int = Field(default=3, gt=0)
-    log_every_steps: int = Field(default=10, gt=0)
-    early_stopping_patience: int | None = Field(default=3, gt=0)
-    # Inference logging
-    inference_every_epochs: int | None = Field(default=None, gt=0)
-    inference_num_samples: int = Field(default=5, gt=0)
-    max_inference_new_tokens: int = Field(default=16, gt=0)
-    grad_clip_norm: float | None = Field(default=None, gt=0.0)
-
-
-class ProjectConfig(BaseModel):
-    model_config = ConfigDict(validate_assignment=True)
-    preprocessor: BaseModel
-    model: BaseModel
-    optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
-    data: DataConfigBase | DataWithAutoSplit
-    trainer: TrainerConfig = Field(default_factory=TrainerConfig)
-    output: OutputConfig
-    logger: Literal["tensorboard", "wandb"] = "tensorboard"
-    seed: int = 42
-    device: str | None = None
 
 
 def _flatten(output: dict[str, torch.Tensor], ignore_index: int = -100) -> tuple[torch.Tensor, torch.Tensor]:

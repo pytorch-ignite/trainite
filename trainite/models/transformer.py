@@ -2,7 +2,6 @@ import math
 from typing import Any
 
 import torch
-from pydantic import BaseModel, ConfigDict, Field
 from torch import nn
 from torch.nn.utils.rnn import pad_sequence
 
@@ -228,24 +227,3 @@ class CausalLMCollateFn:
             "attention_mask": padded_attention_mask,
             "labels": padded_labels,
         }
-
-
-class TransformerModelConfig(BaseModel):
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
-    target: str = Field(default="trainite.models.transformer.TransformerModel", alias="_target_")
-    hidden_size: int = Field(default=64, gt=0)
-    num_layers: int = Field(default=2, gt=0)
-    num_heads: int = Field(default=2, gt=0)
-    feedforward_dim: int = Field(default=128, gt=0)
-    dropout: float = Field(default=0.1, ge=0.0, lt=1.0)
-    max_seq_len: int = Field(default=128, gt=0)
-
-
-class CausalLMCollateFnConfig(BaseModel):
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
-    target: str = Field(
-        default="trainite.models.transformer.CausalLMCollateFn",
-        alias="_target_",
-    )
-    ignore_index: int = Field(default=-100)
-    pad_token_id: int | None = Field(default=None)

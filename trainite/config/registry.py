@@ -54,11 +54,11 @@ MODEL_SPECS = {
     "transformer": ModelSpec(
         name="transformer",
         implementation_path=Path("trainite/models/transformer.py"),
-        config_cls_path="trainite.models.transformer.TransformerModelConfig",
+        config_cls_path="trainite.config.models.TransformerModelConfig",
         implementation_symbol="TransformerModel",
         builder_symbol="TransformerModel",
         collate_fn_target="trainite.models.transformer.CausalLMCollateFn",
-        collate_fn_config_cls_path="trainite.models.transformer.CausalLMCollateFnConfig",
+        collate_fn_config_cls_path="trainite.config.models.CausalLMCollateFnConfig",
         template_replacements=[
             ("trainite.shared.utils", "utils"),
             ("trainite.models", "models"),
@@ -72,8 +72,8 @@ DATASET_SPECS = {
     "string-reverse": DatasetSpec(
         name="string_reverse",
         implementation_path=Path("trainite/datasets/string_reverse.py"),
-        config_cls_path="trainite.datasets.string_reverse.StringReverseDataConfig",
-        dataset_config_cls_path="trainite.datasets.string_reverse.StringReverseDatasetConfig",
+        config_cls_path="trainite.config.datasets.StringReverseDataConfig",
+        dataset_config_cls_path="trainite.config.datasets.StringReverseDatasetConfig",
         implementation_symbol="StringReverseDataset",
         builder_symbol="StringReverseDataset",
         template_replacements=[
@@ -90,7 +90,7 @@ TRAINER_SPECS = {
     "decoder-trainer": TrainerSpec(
         name="decoder_trainer",
         implementation_path=Path("trainite/trainers/decoder_trainer.py"),
-        config_cls_path="trainite.trainers.decoder_trainer.TrainerConfig",
+        config_cls_path="trainite.config.trainers.TrainerConfig",
         implementation_symbol="Trainer",
         template_replacements=[
             ("trainite.shared.utils", "utils"),
@@ -105,7 +105,7 @@ PREPROCESSOR_SPECS = {
     "char": PreProcessorSpec(
         name="char_tokenizer",
         implementation_path=Path("trainite/preprocessors/char_tokenizer.py"),
-        config_cls_path="trainite.preprocessors.char_tokenizer.CharTokenizerConfig",
+        config_cls_path="trainite.config.preprocessors.CharTokenizerConfig",
         implementation_symbol="CharTokenizer",
         template_replacements=[
             ("trainite.config.base", "config"),

@@ -5,6 +5,13 @@ from trainite.config.base import (
     OptimizerConfig,
     OutputConfig,
     SplitConfig,
+    ModelConfig,
+    PreprocessorConfig,
+    DatasetConfig,
+    TransformConfig,
+    CollateFnConfig,
+    TrainerConfig,
+    ProjectConfig,
 )
 
 __all__ = [
@@ -14,4 +21,11 @@ __all__ = [
     "OptimizerConfig",
     "OutputConfig",
     "SplitConfig",
+    "ModelConfig",
+    "PreprocessorConfig",
+    "DatasetConfig",
+    "TransformConfig",
+    "CollateFnConfig",
+    "TrainerConfig",
+    "ProjectConfig",
 ]

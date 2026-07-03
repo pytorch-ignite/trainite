@@ -1,5 +1,5 @@
 import torch
-from trainite.preprocessors.char_tokenizer import UNIVERSAL_VOCAB, CharTokenizer, CharTokenizerConfig
+from trainite.preprocessors import UNIVERSAL_VOCAB, CharTokenizer, CharTokenizerConfig
 
 
 def test_char_tokenizer_vocab_size():
