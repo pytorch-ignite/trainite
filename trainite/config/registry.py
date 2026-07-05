@@ -59,11 +59,7 @@ MODEL_SPECS = {
         builder_symbol="TransformerModel",
         collate_fn_target="trainite.models.transformer.CausalLMCollateFn",
         collate_fn_config_cls_path="trainite.config.models.CausalLMCollateFnConfig",
-        template_replacements=[
-            ("trainite.shared.utils", "utils"),
-            ("trainite.models", "models"),
-            ("trainite.config.base", "config"),
-        ],
+        template_replacements=[],
         readme_template_path=Path("trainite/templates/components/models/transformer.md"),
     ),
 }
@@ -76,11 +72,7 @@ DATASET_SPECS = {
         dataset_config_cls_path="trainite.config.datasets.StringReverseDatasetConfig",
         implementation_symbol="StringReverseDataset",
         builder_symbol="StringReverseDataset",
-        template_replacements=[
-            ("trainite.shared.utils", "utils"),
-            ("trainite.datasets", "datasets"),
-            ("trainite.config.base", "config"),
-        ],
+        template_replacements=[],
         readme_template_path=Path("trainite/templates/components/datasets/string_reverse.md"),
         preprocessor_spec_name="char",
     ),
@@ -107,9 +99,7 @@ PREPROCESSOR_SPECS = {
         implementation_path=Path("trainite/preprocessors/char_tokenizer.py"),
         config_cls_path="trainite.config.preprocessors.CharTokenizerConfig",
         implementation_symbol="CharTokenizer",
-        template_replacements=[
-            ("trainite.config.base", "config"),
-        ],
+        template_replacements=[],
         readme_template_path=Path("trainite/templates/components/preprocessors/char.md"),
     ),
 }
