@@ -115,13 +115,9 @@ def _inject_if_accepted(target_symbol: Any, **candidates: Any) -> dict[str, Any]
 
 
 # Builds the model based on the provided configuration, tokenizer, and device.
-def build_model(model_config: Any, tokenizer: Any, vocab_size: int, device: str | torch.device) -> nn.Module:
+def build_model(model_config: Any, device: str | torch.device, **kwargs) -> nn.Module:
     target_symbol = get_target(model_config.target)
-    kwargs = _inject_if_accepted(
-        target_symbol,
-        vocab_size=vocab_size,
-        pad_token_id=tokenizer.pad_token_id,
-    )
+    kwargs = _inject_if_accepted(target_symbol, **kwargs)
     model = instantiate(model_config, **kwargs)
     model.to(device)
     return model
@@ -292,7 +288,7 @@ def setup_checkpointing(
     return checkpointers
 
 
-def setup_experiment_logger(
+def setup_experiment_tracking(
     backend: Literal["tensorboard", "wandb"],
     engine: Engine,
     val_evaluator: Engine,

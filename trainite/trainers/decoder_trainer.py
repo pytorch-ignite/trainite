@@ -1,5 +1,6 @@
 import logging
-from typing import Any, Literal
+from typing import Literal
+import itertools
 
 import torch
 import ignite.distributed as idist
@@ -30,7 +31,7 @@ from trainite.shared.utils import (
     make_run_dir,
     setup_checkpointing,
     setup_console_logger,
-    setup_experiment_logger,
+    setup_experiment_tracking,
     upload_model_to_wandb,
 )
 
@@ -60,46 +61,29 @@ class ProjectConfig(BaseModel):
     device: str | None = None
 
 
-# Resolve the vocabulary size for the model based on the tokenizer and model configuration.
-def resolve_vocab_size(tokenizer: Any, model_config: Any) -> int:
-    if tokenizer is None or not hasattr(tokenizer, "vocab_size"):
-        raise ValueError("Tokenizer is missing or does not define a 'vocab_size' attribute.")
-    vocab_size = tokenizer.vocab_size
-    model_params = model_config.model_dump(by_alias=True)
-    configured_vocab_size: int | None = model_params.get("vocab_size")
-    if configured_vocab_size is not None:
-        if configured_vocab_size < vocab_size:
-            raise ValueError(
-                f"Configured model vocab_size ({configured_vocab_size}) is smaller than "
-                f"the tokenizer vocabulary size ({vocab_size}). "
-                f"Please increase model vocab_size or remove it from config.yaml "
-                f"to let it resolve automatically."
-            )
-        vocab_size = configured_vocab_size
-    return vocab_size
-
-
 class Trainer:
     def __init__(self, config: ProjectConfig) -> None:
         self.logger: logging.Logger = setup_logger("trainer", level=logging.INFO)
         torch.manual_seed(config.seed)
         self.config: ProjectConfig = config
+        self.trainer_config: TrainerConfig = self.trainer_config
         self.device: str | torch.device = idist.device() if config.device is None else config.device
         self.tokenizer = instantiate(config.preprocessor)
         self.train_loader, self.val_loader, self.test_loader = build_dataloaders(
             config.data, self.tokenizer, config.seed
         )
-        vocab_size = resolve_vocab_size(self.tokenizer, config.model)
-        self.model = build_model(config.model, self.tokenizer, vocab_size, self.device)
+        self.model = build_model(
+            config.model, self.device, vocab_size=self.tokenizer.vocab_size, pad_token_id=self.tokenizer.pad_token_id
+        )
         self.optimizer = instantiate(config.optimizer, params=self.model.parameters())
-        self.epochs: int = config.trainer.epochs
-        self.grad_clip_norm: float | None = getattr(config.trainer, "grad_clip_norm", None)
-        self.inference_every_epochs = config.trainer.inference_every_epochs
-        self.inference_num_samples = config.trainer.inference_num_samples
-        self.max_inference_new_tokens = config.trainer.max_inference_new_tokens
-        self.loss_fn: nn.CrossEntropyLoss = nn.CrossEntropyLoss()
+        self.epochs: int = self.trainer_config.epochs
+        self.grad_clip_norm: float | None = getattr(self.trainer_config, "grad_clip_norm", None)
+        self.inference_every_epochs = self.trainer_config.inference_every_epochs
+        self.inference_num_samples = self.trainer_config.inference_num_samples
+        self.max_inference_new_tokens = self.trainer_config.max_inference_new_tokens
+        self.criterion: nn.CrossEntropyLoss = nn.CrossEntropyLoss()
         self.total_iters: int = len(self.train_loader) * self.epochs
-        self.engine = Engine(self._train_step)
+        self.trainer = Engine(self._train_step)
         self.train_evaluator = Engine(self._eval_step)
         self.val_evaluator = Engine(self._eval_step)
         self.test_evaluator = Engine(self._eval_step)
@@ -110,26 +94,28 @@ class Trainer:
         dump_config(self.config, self.run_dir / "config.yaml")
 
         # Attach loggers for console
-        self.logger = setup_console_logger(self.run_dir, self.engine, config.trainer.log_every_steps, self.optimizer)
+        self.logger = setup_console_logger(
+            self.run_dir, self.trainer, self.trainer_config.log_every_steps, self.optimizer
+        )
 
         # Attach learning rate scheduler
-        attach_lr_scheduler(self.engine, self.optimizer, self.total_iters, config.optimizer.lr)
+        attach_lr_scheduler(self.trainer, self.optimizer, self.total_iters, config.optimizer.lr)
 
         # Attach early stopping
-        attach_early_stopping(self.val_evaluator, self.engine, config.trainer.early_stopping_patience)
+        attach_early_stopping(self.val_evaluator, self.trainer, self.trainer_config.early_stopping_patience)
 
         # Attach checkpointing
         self.checkpointers = setup_checkpointing(
-            self.engine,
+            self.trainer,
             self.val_evaluator,
             {"model": self.model, "optimizer": self.optimizer},
             self.run_dir,
         )
 
         # Attach experiment logger (TensorBoard or Weights & Biases)
-        self.exp_logger = setup_experiment_logger(
+        self.exp_logger = setup_experiment_tracking(
             config.logger,
-            self.engine,
+            self.trainer,
             self.val_evaluator,
             self.train_evaluator,
             self.test_evaluator,
@@ -141,7 +127,7 @@ class Trainer:
         )
 
         # Run evaluations at the end of each epoch to log training and validation metrics
-        self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
+        self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
 
         # Attach inference logger if inference logging is enabled
         if self.inference_every_epochs is not None:
@@ -150,7 +136,7 @@ class Trainer:
     def _flatten(self, output: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         logits = output["logits"].reshape(-1, output["logits"].size(-1))
         targets = output["targets"].reshape(-1)
-        mask = targets != self.loss_fn.ignore_index
+        mask = targets != self.criterion.ignore_index
         return logits[mask], targets[mask]
 
     def _train_step(self, engine: Engine, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
@@ -163,7 +149,7 @@ class Trainer:
 
         self.optimizer.zero_grad(set_to_none=True)
         logits = self.model(inputs, attention_mask=attention_mask)
-        loss = self.loss_fn(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
+        loss = self.criterion(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
         loss.backward()
 
         if self.grad_clip_norm is not None:
@@ -188,7 +174,7 @@ class Trainer:
         return {"logits": logits, "targets": targets}
 
     def _attach_metrics(self) -> dict[str, Metric]:
-        RunningAverage(output_transform=lambda output: output["loss"]).attach(self.engine, "loss")
+        RunningAverage(output_transform=lambda output: output["loss"]).attach(self.trainer, "loss")
 
         metrics = {}
         for prefix, evaluator in [
@@ -196,7 +182,7 @@ class Trainer:
             ("val", self.val_evaluator),
             ("test", self.test_evaluator),
         ]:
-            loss = Loss(self.loss_fn, output_transform=self._flatten)
+            loss = Loss(self.criterion, output_transform=self._flatten)
             token_acc = Accuracy(output_transform=self._flatten)
 
             loss.attach(evaluator, "loss")
@@ -208,14 +194,14 @@ class Trainer:
         return metrics
 
     def attach_inference_logger(self) -> None:
-        self.engine.add_event_handler(
+        self.trainer.add_event_handler(
             Events.EPOCH_COMPLETED(every=self.inference_every_epochs),
             self._log_inference,
             self.train_loader,
             "Train",
         )
 
-        self.engine.add_event_handler(
+        self.trainer.add_event_handler(
             Events.EPOCH_COMPLETED(every=self.inference_every_epochs),
             self._log_inference,
             self.val_loader,
@@ -426,7 +412,8 @@ class Trainer:
         config_data = self.config.model_dump(by_alias=True, polymorphic_serialization=True)
         self._log_text("config", str(config_data), 0)
 
-        self.engine.run(self.train_loader, max_epochs=self.epochs)
+        # Run training loop, limiting the number of iterations to match the validation set size
+        self.trainer.run(itertools.islice(self.train_loader, len(self.val_loader)))
 
         if self.test_loader:
             self.test()
