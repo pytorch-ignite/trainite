@@ -89,7 +89,7 @@ class Trainer:
         self.logger = attach_console_logger(self.engine, self.optimizer, self.run_dir, config.trainer.log_every_steps)
 
         # Attach learning rate scheduler
-        self.scheduler = attach_lr_scheduler(self.engine, self.optimizer, self.total_iters, config.optimizer.lr)
+        attach_lr_scheduler(self.engine, self.optimizer, self.total_iters, config.optimizer.lr)
 
         # Attach early stopping
         attach_early_stopping(self.val_evaluator, self.engine, config.trainer.early_stopping_patience)
