@@ -11,8 +11,6 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from trainite.config.base import (
-    DataConfigBase,
-    DataWithAutoSplit,
     ProjectConfig,
     TrainerConfig,
 )
