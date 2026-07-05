@@ -305,9 +305,7 @@ def setup_experiment_logger(
     run_name: str,
 ) -> TensorboardLogger | WandBLogger:
     if backend == "wandb":
-        exp_logger: TensorboardLogger | WandBLogger = WandBLogger(
-            project=run_name, dir=str(run_dir), name=str(run_dir).split("/")[-1]
-        )
+        exp_logger = WandBLogger(project=run_name, dir=str(run_dir), name=str(run_dir).split("/")[-1])
     else:
         log_dir = run_dir / "tensorboard" if run_dir else None
         exp_logger = TensorboardLogger(log_dir=log_dir)
