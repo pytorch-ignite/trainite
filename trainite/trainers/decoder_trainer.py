@@ -2,8 +2,8 @@ import logging
 from typing import Literal
 import itertools
 
-import torch
 import ignite.distributed as idist
+import torch
 from ignite.engine import Engine, Events
 from ignite.metrics import Accuracy, Loss, Metric, RunningAverage
 from ignite.utils import setup_logger
