@@ -1,12 +1,10 @@
 import itertools
 import logging
-from pathlib import Path
 from typing import Literal
 
 import ignite.distributed as idist
 import torch
 from ignite.engine import Engine, Events
-from ignite.handlers.checkpoint import CheckpointEvents
 from ignite.metrics import Accuracy, Loss, Metric, RunningAverage
 from ignite.utils import setup_logger
 from pydantic import BaseModel, ConfigDict, Field
@@ -35,6 +33,7 @@ from trainite.shared.utils import (
     setup_console_logger,
     setup_experiment_tracking,
     setup_training_checkpointing,
+    setup_wandb_checkpoint_uploads,
 )
 
 
@@ -143,7 +142,14 @@ class Trainer:
 
         # Real-time W&B uploads
         if config.logger == "wandb":
-            self._setup_wandb_checkpoint_uploads()
+            setup_wandb_checkpoint_uploads(
+                self.trainer,
+                self.val_evaluator,
+                self.checkpointers,
+                self.exp_logger,
+                config.output.run_name,
+                self.logger,
+            )
 
         # Run evaluations at the end of each epoch to log training and validation metrics
         self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
@@ -252,36 +258,6 @@ class Trainer:
             val_metrics["loss"],
             val_metrics["token_accuracy"],
         )
-
-    def _setup_wandb_checkpoint_uploads(self) -> None:
-        """Register events and upload handlers to automatically log checkpoints to W&B in real-time."""
-        self.val_evaluator.register_events(*CheckpointEvents)
-        self.trainer.register_events(*CheckpointEvents)
-
-        def upload_best_model_artifact(engine):
-            best_checkpoint = self.checkpointers.get("checkpoint_best")
-            checkpoint_path = best_checkpoint.last_checkpoint if best_checkpoint else None
-            if checkpoint_path and Path(checkpoint_path).exists():
-                self.logger.info(f"Uploading new best model artifact to W&B: {checkpoint_path}")
-                artifact = self.exp_logger.Artifact(
-                    name=f"{self.config.output.run_name}-model".replace("/", "-"), type="model"
-                )
-                artifact.add_file(str(checkpoint_path))
-                self.exp_logger.log_artifact(artifact)
-
-        def upload_last_checkpoint_artifact(engine):
-            last_checkpoint = self.checkpointers.get("checkpoint_last")
-            checkpoint_path = last_checkpoint.last_checkpoint if last_checkpoint else None
-            if checkpoint_path and Path(checkpoint_path).exists():
-                self.logger.info(f"Uploading last checkpoint artifact to W&B: {checkpoint_path}")
-                artifact = self.exp_logger.Artifact(
-                    name=f"{self.config.output.run_name}-checkpoint".replace("/", "-"), type="checkpoint"
-                )
-                artifact.add_file(str(checkpoint_path))
-                self.exp_logger.log_artifact(artifact)
-
-        self.val_evaluator.add_event_handler(CheckpointEvents.SAVED_CHECKPOINT, upload_best_model_artifact)
-        self.trainer.add_event_handler(CheckpointEvents.SAVED_CHECKPOINT, upload_last_checkpoint_artifact)
 
     def _log_inference(self, engine: Engine, loader: DataLoader, name: str) -> None:
         self.logger.info(f"Epoch {engine.state.epoch}: Running inference on {name} samples...")

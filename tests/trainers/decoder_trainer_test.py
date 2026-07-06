@@ -390,7 +390,8 @@ def test_upload_model_to_wandb(mock_setup, project_config, temp_run_dir):
     mock_setup.return_value = mock_logger
 
     trainer = create_trainer_from_config(project_config)
-    trainer.checkpointers = {"checkpoint_best": mock.MagicMock(last_checkpoint="best_model_1.pt")}
+    trainer.checkpointers.clear()
+    trainer.checkpointers["checkpoint_best"] = mock.MagicMock(last_checkpoint="best_model_1.pt")
 
     with mock.patch("pathlib.Path.exists", return_value=True):
         from ignite.handlers.checkpoint import CheckpointEvents
@@ -408,7 +409,7 @@ def test_upload_model_to_wandb_no_checkpoint(mock_setup, project_config):
     mock_setup.return_value = mock_logger
 
     trainer = create_trainer_from_config(project_config)
-    trainer.checkpointers = {}  # nothing saved
+    trainer.checkpointers.clear()
 
     from ignite.handlers.checkpoint import CheckpointEvents
 
@@ -424,7 +425,8 @@ def test_upload_last_checkpoint_to_wandb(mock_setup, project_config, temp_run_di
     mock_setup.return_value = mock_logger
 
     trainer = create_trainer_from_config(project_config)
-    trainer.checkpointers = {"checkpoint_last": mock.MagicMock(last_checkpoint="last_model_1.pt")}
+    trainer.checkpointers.clear()
+    trainer.checkpointers["checkpoint_last"] = mock.MagicMock(last_checkpoint="last_model_1.pt")
 
     with mock.patch("pathlib.Path.exists", return_value=True):
         from ignite.handlers.checkpoint import CheckpointEvents
