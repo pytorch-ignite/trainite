@@ -17,7 +17,7 @@ from trainite.config import (
     SplitConfig,
 )
 from trainite.datasets.string_reverse import DatapointModel
-from trainite.trainers.decoder_trainer import Trainer, TrainerConfig, ProjectConfig
+from trainite.trainers.decoder_trainer import Trainer, TrainerConfig, ProjectConfig, _flatten
 from trainite.shared.utils import upload_model_to_wandb
 from ignite.engine import Events
 from ignite.handlers import EarlyStopping
@@ -240,11 +240,8 @@ def test_flatten():
     logits = torch.randn(2, 3, 5)  # B=2, S=3, V=5
     targets = torch.tensor([[1, 2, -100], [0, -100, 3]])
 
-    trainer = Trainer.__new__(Trainer)
-    trainer.loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
-
     output = {"logits": logits, "targets": targets}
-    flat_logits, flat_targets = trainer._flatten(output)
+    flat_logits, flat_targets = _flatten(output, ignore_index=-100)
 
     assert flat_logits.shape == (4, 5)  # 6 tokens total, 2 are masked
     assert flat_targets.shape == (4,)

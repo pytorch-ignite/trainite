@@ -147,12 +147,6 @@ class Trainer:
         if self.inference_every_epochs is not None:
             self.attach_inference_logger()
 
-    def _flatten(self, output: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
-        logits = output["logits"].reshape(-1, output["logits"].size(-1))
-        targets = output["targets"].reshape(-1)
-        mask = targets != self.loss_fn.ignore_index
-        return logits[mask], targets[mask]
-
     def _train_step(self, engine: Engine, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         self.model.train()
         inputs = batch["input_ids"].to(self.device)
@@ -190,14 +184,19 @@ class Trainer:
     def _attach_metrics(self) -> dict[str, Metric]:
         RunningAverage(output_transform=lambda output: output["loss"]).attach(self.engine, "loss")
 
+        ignore_index = self.loss_fn.ignore_index
+
+        def transform_fn(output):
+            return _flatten(output, ignore_index=ignore_index)
+
         metrics = {}
         for prefix, evaluator in [
             ("train", self.train_evaluator),
             ("val", self.val_evaluator),
             ("test", self.test_evaluator),
         ]:
-            loss = Loss(self.loss_fn, output_transform=self._flatten)
-            token_acc = Accuracy(output_transform=self._flatten)
+            loss = Loss(self.loss_fn, output_transform=transform_fn)
+            token_acc = Accuracy(output_transform=transform_fn)
 
             loss.attach(evaluator, "loss")
             token_acc.attach(evaluator, "token_accuracy")
@@ -440,3 +439,10 @@ class Trainer:
             )
 
         self.exp_logger.close()
+
+
+def _flatten(output: dict[str, torch.Tensor], ignore_index: int = -100) -> tuple[torch.Tensor, torch.Tensor]:
+    logits = output["logits"].reshape(-1, output["logits"].size(-1))
+    targets = output["targets"].reshape(-1)
+    mask = targets != ignore_index
+    return logits[mask], targets[mask]
