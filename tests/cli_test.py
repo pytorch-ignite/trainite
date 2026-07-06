@@ -45,6 +45,7 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
         expected_files = [
             "config.yaml",
             "config.py",
+            "config_base.py",
             f"models/{model_spec.name}.py",
             f"datasets/{dataset_spec.name}.py",
             "datasets/transformed.py",
@@ -62,6 +63,7 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
         # Check if python files are parseable
         python_files = [
             "config.py",
+            "config_base.py",
             f"models/{model_spec.name}.py",
             f"datasets/{dataset_spec.name}.py",
             "datasets/transformed.py",

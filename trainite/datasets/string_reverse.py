@@ -1,7 +1,7 @@
 import random
 import string
 import warnings
-from typing import Any
+from typing import Any, Literal
 
 import torch
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -189,7 +189,10 @@ class PromptCompletionTransform:
 
 class PromptCompletionTransformConfig(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
-    target: str = Field(
+    target: Literal[
+        "trainite.datasets.string_reverse.PromptCompletionTransform",
+        "datasets.string_reverse.PromptCompletionTransform",
+    ] = Field(
         default="trainite.datasets.string_reverse.PromptCompletionTransform",
         alias="_target_",
     )
@@ -198,7 +201,9 @@ class PromptCompletionTransformConfig(BaseModel):
 
 class StringReverseDatasetConfig(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
-    target: str = Field(
+    target: Literal[
+        "trainite.datasets.string_reverse.StringReverseDataset", "datasets.string_reverse.StringReverseDataset"
+    ] = Field(
         default="trainite.datasets.string_reverse.StringReverseDataset",
         alias="_target_",
     )

@@ -1,5 +1,5 @@
 import math
-from typing import Any
+from typing import Any, Literal
 
 import torch
 from pydantic import BaseModel, ConfigDict, Field
@@ -231,8 +231,10 @@ class CausalLMCollateFn:
 
 
 class TransformerModelConfig(BaseModel):
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
-    target: str = Field(default="trainite.models.transformer.TransformerModel", alias="_target_")
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+    target: Literal["trainite.models.transformer.TransformerModel", "models.transformer.TransformerModel"] = Field(
+        default="trainite.models.transformer.TransformerModel", alias="_target_"
+    )
     hidden_size: int = Field(default=64, gt=0)
     num_layers: int = Field(default=2, gt=0)
     num_heads: int = Field(default=2, gt=0)
@@ -243,9 +245,8 @@ class TransformerModelConfig(BaseModel):
 
 class CausalLMCollateFnConfig(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
-    target: str = Field(
-        default="trainite.models.transformer.CausalLMCollateFn",
-        alias="_target_",
+    target: Literal["trainite.models.transformer.CausalLMCollateFn", "models.transformer.CausalLMCollateFn"] = Field(
+        default="trainite.models.transformer.CausalLMCollateFn", alias="_target_"
     )
     ignore_index: int = Field(default=-100)
     pad_token_id: int | None = Field(default=None)

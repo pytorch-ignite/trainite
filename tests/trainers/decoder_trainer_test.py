@@ -15,9 +15,10 @@ from trainite.config import (
     OptimizerConfig,
     OutputConfig,
     SplitConfig,
+    ProjectConfig,
 )
 from trainite.datasets.string_reverse import DatapointModel
-from trainite.trainers.decoder_trainer import Trainer, TrainerConfig, ProjectConfig
+from trainite.trainers.decoder_trainer import Trainer, DecoderTrainerConfig
 from ignite.engine import Events
 from ignite.handlers import EarlyStopping
 import ignite.distributed as idist
@@ -222,7 +223,7 @@ def project_config(temp_run_dir):
                 dataloader=DataLoaderConfig(batch_size=4),
             ),
         ),
-        trainer=TrainerConfig(
+        trainer=DecoderTrainerConfig(
             epochs=1,
             log_every_steps=1,
             inference_every_epochs=None,
@@ -510,7 +511,7 @@ def test_decoder_trainer_builds_train_and_val_loaders_from_ratios(tmp_path):
             test_ratio=0.0,
             val_ratio=0.2,
         ),
-        trainer=TrainerConfig(epochs=1),
+        trainer=DecoderTrainerConfig(epochs=1),
         output=OutputConfig(root=str(tmp_path), run_name="test"),
     )
 
@@ -543,7 +544,7 @@ def test_decoder_trainer_builds_train_val_and_test_loaders_from_ratios(tmp_path)
             test_ratio=0.2,
             val_ratio=0.2,
         ),
-        trainer=TrainerConfig(epochs=1),
+        trainer=DecoderTrainerConfig(epochs=1),
         output=OutputConfig(root=str(tmp_path), run_name="test"),
     )
 
@@ -637,7 +638,7 @@ def test_decoder_trainer_dataloader_class_collate_fn(project_config):
 )
 def test_invalid_inference_params_rejected(kwargs):
     with pytest.raises(ValidationError):
-        TrainerConfig(**kwargs)
+        DecoderTrainerConfig(**kwargs)
 
 
 def test_setup_inference_and_log_success(project_config, temp_run_dir):

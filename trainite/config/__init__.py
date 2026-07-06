@@ -4,8 +4,14 @@ from trainite.config.base import (
     DataWithAutoSplit,
     OptimizerConfig,
     OutputConfig,
+    ProjectConfigBase,
     SplitConfig,
+    TargetedConfig,
+    TrainerConfig,
 )
+
+# trainite-internal only, config/__init__.py is never copied to generated projects
+ProjectConfig = ProjectConfigBase
 
 __all__ = [
     "DataConfigBase",
@@ -13,5 +19,9 @@ __all__ = [
     "DataLoaderConfig",
     "OptimizerConfig",
     "OutputConfig",
+    "ProjectConfigBase",
+    "ProjectConfig",
     "SplitConfig",
+    "TargetedConfig",
+    "TrainerConfig",
 ]

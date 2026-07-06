@@ -1,37 +1,35 @@
-import inspect
+"""Trainite starter project generator.
+
+This module implements the two-track model for project generation:
+1. Copied files: Source files from trainite are copied verbatim and run through
+   import path rewriting to make them local to the generated project structure.
+2. Synthesized files: Files like config.py, pyproject.toml, and README.md are
+   generated dynamically based on selected components.
+"""
+
 import re
-import textwrap
 from pathlib import Path
-from typing import Any, Iterable, Literal, Sequence
+from typing import Any, Iterable, Literal, NamedTuple, Sequence
 
 import questionary
 import tomlkit
 import tyro
 from packaging.requirements import Requirement
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
-from trainite.config import (
-    DataConfigBase,
-    DataWithAutoSplit,
-    OptimizerConfig,
-    OutputConfig,
+from trainite.config import OutputConfig, ProjectConfigBase
+from trainite.config.registry import (
+    REGISTRY,
+    get_dataset_spec,
+    get_model_spec,
+    get_preprocessor_spec,
+    get_trainer_spec,
+    DatasetSpec,
+    ModelSpec,
+    PreProcessorSpec,
+    TrainerSpec,
 )
-from trainite.config.registry import REGISTRY, get_dataset_spec, get_model_spec, get_preprocessor_spec, get_trainer_spec
 from trainite.shared.utils import dump_config
-
-
-class ProjectConfig(BaseModel):
-    model_config = ConfigDict(validate_assignment=True)
-    preprocessor: BaseModel | None = None
-    model: BaseModel
-    optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
-    data: DataConfigBase | DataWithAutoSplit
-    trainer: BaseModel
-    logger: Literal["wandb", "tensorboard"] = "tensorboard"
-    output: OutputConfig
-    seed: int = 42
-    device: str | None = None
-
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = PACKAGE_ROOT.parent
@@ -40,26 +38,19 @@ MODEL_CHOICES = tuple(REGISTRY["models"].keys())
 DATASET_CHOICES = tuple(REGISTRY["datasets"].keys())
 TRAINER_CHOICES = tuple(REGISTRY["trainers"].keys())
 
-
 ModelType = Literal[MODEL_CHOICES]  # type: ignore
 DatasetType = Literal[DATASET_CHOICES]  # type: ignore
 TrainerType = Literal[TRAINER_CHOICES]  # type: ignore
 
 
-def _replace_many(text: str, replacements: Iterable[tuple[str, str]]) -> str:
-    for old, new in replacements:
-        text = text.replace(old, new)
-    if not text.endswith("\n"):
-        text += "\n"
-    return text
+class Specs(NamedTuple):
+    model: ModelSpec
+    dataset: DatasetSpec
+    trainer: TrainerSpec
+    preprocessor: PreProcessorSpec | None
 
 
-def _render_template(path: Path, replacements: Iterable[tuple[str, str]] = ()) -> str:
-    return _replace_many(path.read_text(), replacements)
-
-
-def _render_class_source(cls: type) -> str:
-    return textwrap.dedent(inspect.getsource(cls)).strip()
+# --- Interactive prompts ---
 
 
 def _prompt_text(prompt: str, default: str, instruction: str | None = None) -> str:
@@ -81,19 +72,18 @@ def _prompt_choice(prompt: str, choices: Sequence[str], default: str, instructio
     return result
 
 
+# --- Filesystem helpers ---
+
+
 def _project_directory(raw_project_dir: str, force: bool) -> Path:
     raw_path = Path(raw_project_dir).expanduser()
-
     parent = raw_path.parent
     name = raw_path.name
 
     def _normalize_name(n: str) -> str:
         n = n.strip().lower()
-        # Replace any character that is not alnum, dot, underscore or hyphen with a hyphen
         n = re.sub(r"[^a-z0-9._-]+", "-", n)
-        # Collapse consecutive hyphens
         n = re.sub(r"-+", "-", n)
-        # Strip leading/trailing separators
         n = n.strip("-_.")
         if not n:
             n = "project"
@@ -102,7 +92,6 @@ def _project_directory(raw_project_dir: str, force: bool) -> Path:
         return n
 
     normalized_name = _normalize_name(name)
-
     project_dir = (parent / normalized_name).resolve()
 
     if project_dir.exists():
@@ -124,9 +113,40 @@ def _write_file(path: Path, content: str, force: bool) -> None:
     path.write_text(content)
 
 
+# --- Import-path rewriting ---
+
+
+def _module_rewrites(sources: dict[str, Path]) -> list[tuple[str, str]]:
+    rewrites = [("trainite.config", "config")]
+    for gen_path_str, src_path in sources.items():
+        src_posix = src_path.with_suffix("").as_posix()
+        src_module = src_posix.replace("/", ".")
+        gen_module = gen_path_str.removesuffix(".py").replace("/", ".")
+        rewrites.append((src_module, gen_module))
+    rewrites.sort(key=lambda x: len(x[0]), reverse=True)
+    return rewrites
+
+
+def _rewrite_modules(text: str, rewrites: Iterable[tuple[str, str]]) -> str:
+    for old, new in rewrites:
+        text = re.sub(rf"\b{re.escape(old)}\b", new, text)
+    if not text.endswith("\n"):
+        text += "\n"
+    return text
+
+
+def _rewrite_name(dotted: str, rewrites: Sequence[tuple[str, str]]) -> str:
+    for old, new in rewrites:
+        if dotted == old or dotted.startswith(old + "."):
+            return new + dotted[len(old) :]
+    return dotted
+
+
+# --- pyproject.toml / dependencies ---
+
+
 def generate_uv_project(name: str, version: str, dependencies: list[str]) -> str:
     doc = tomlkit.document()
-
     deps_arr = tomlkit.item(dependencies)
     deps_arr.multiline(True)
 
@@ -141,23 +161,17 @@ def generate_uv_project(name: str, version: str, dependencies: list[str]) -> str
     return tomlkit.dumps(doc)
 
 
-def parse_dependencies(
-    file_path: Path,
-) -> tuple[dict[str, str], dict[str, str]]:
+def parse_dependencies(file_path: Path) -> tuple[dict[str, str], dict[str, str]]:
     with open(file_path, "r") as f:
         data = tomlkit.parse(f.read())
 
-    # 1. Main dependencies
     required_deps = data["dependency-groups"]["generated"]
 
-    # 2. Optional dependencies
-    # ponytail: type-annotate empty list
     other_deps: list[str] = []
     optional_deps = data["project"].get("optional-dependencies", {})
     for group_deps in optional_deps.values():
         other_deps.extend(group_deps)
 
-    # 3. Dependency groups (PEP 735)
     dependency_groups = data["dependency-groups"]
     for group, group_deps in dependency_groups.items():
         if group != "generated":
@@ -176,16 +190,9 @@ def parse_dependencies(
     return dep_map, other_dep_map
 
 
-def _build_templates(model_name: str, dataset_name: str, trainer_name: str, project_name: str) -> dict[str, str]:
-    model_spec = get_model_spec(model_name)
-    dataset_spec = get_dataset_spec(dataset_name)
-    trainer_spec = get_trainer_spec(trainer_name)
-    preprocessor_spec = (
-        get_preprocessor_spec(dataset_spec.preprocessor_spec_name) if dataset_spec.preprocessor_spec_name else None
-    )
-    specs = [model_spec, dataset_spec, trainer_spec, preprocessor_spec]
+def _collect_dependencies(specs: Specs) -> list[str]:
     spec_deps = set()
-    for spec in specs:
+    for spec in [specs.model, specs.dataset, specs.trainer, specs.preprocessor]:
         if spec is not None:
             spec_deps.update(spec.dependencies)
     required_deps, other_deps = parse_dependencies(PROJECT_ROOT / "pyproject.toml")
@@ -195,137 +202,282 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
             raise ValueError(f"Dependency '{dep}' required by the selected templates is not listed in pyproject.toml")
         val = required_deps[dep] if dep in required_deps else other_deps[dep]
         final_deps.add(val)
+    return sorted(list(final_deps))
+
+
+# --- config.py aggregator ---
+
+
+def _render_config_py(
+    model_cfg: type,
+    data_cfg: type,
+    trainer_cfg: type,
+    preprocessor_cfg: type | None,
+    rewrites: Sequence[tuple[str, str]],
+) -> str:
+    template_path = PROJECT_ROOT / "trainite/templates/project/config.py"
+    content = template_path.read_text()
+
+    import_base = _rewrite_name("trainite.config.base", rewrites)
+    model_module = _rewrite_name(model_cfg.__module__, rewrites)
+    data_module = _rewrite_name(data_cfg.__module__, rewrites)
+    trainer_module = _rewrite_name(trainer_cfg.__module__, rewrites)
+
+    imports_list = [
+        f"from {model_module} import {model_cfg.__name__} as ModelConfig",
+        f"from {data_module} import {data_cfg.__name__} as DataConfig",
+        f"from {trainer_module} import {trainer_cfg.__name__} as TrainerConfig",
+    ]
+
+    if preprocessor_cfg is not None:
+        prep_module = _rewrite_name(preprocessor_cfg.__module__, rewrites)
+        imports_list.append(f"from {prep_module} import {preprocessor_cfg.__name__} as PreprocessorConfig")
+        preprocessor_def = ""
+    else:
+        preprocessor_def = "PreprocessorConfig = None"
+
+    imports_str = "\n".join(imports_list)
+    if preprocessor_def:
+        imports_str = f"{imports_str}\n{preprocessor_def}"
+
+    import re
+
+    # Strip linter helper block
+    content = re.sub(
+        r"# --- template-checking-only ---.*?# --- end-template-checking-only ---\n*",
+        "",
+        content,
+        flags=re.DOTALL,
+    )
+
+    actual_imports = f"from {import_base} import ProjectConfigBase\n{imports_str}"
+
+    content = content.replace("# {{imports}}", actual_imports)
+    return content
+
+
+# --- Template (file-content) building ---
+
+
+def _render_readme(specs: Specs, project_name: str) -> str:
     model_docs = ""
-    if model_spec.readme_template_path:
-        model_docs = _render_template(PROJECT_ROOT / model_spec.readme_template_path)
+    if specs.model.readme_template_path:
+        model_docs = (PROJECT_ROOT / specs.model.readme_template_path).read_text()
 
     dataset_docs = ""
-    if dataset_spec.readme_template_path:
-        dataset_docs = _render_template(PROJECT_ROOT / dataset_spec.readme_template_path)
+    if specs.dataset.readme_template_path:
+        dataset_docs = (PROJECT_ROOT / specs.dataset.readme_template_path).read_text()
 
     trainer_docs = ""
-    if trainer_spec.readme_template_path:
-        trainer_docs = _render_template(PROJECT_ROOT / trainer_spec.readme_template_path)
+    if specs.trainer.readme_template_path:
+        trainer_docs = (PROJECT_ROOT / specs.trainer.readme_template_path).read_text()
 
-    # Dynamic replacements that depend on the user's model/dataset/trainer selection.
-    trainer_replacements = [
-        *trainer_spec.template_replacements,
-        ("model: BaseModel", f"model: {model_spec.config_cls.__name__}"),
-        (
-            "data: DataConfigBase | DataWithAutoSplit",
-            f"data: {dataset_spec.config_cls.__name__}",
-        ),
-        (
-            "# __MODEL_IMPORT__",
-            f"from models.{model_spec.name} import {model_spec.config_cls.__name__}",
-        ),
-        (
-            "# __DATASET_IMPORT__",
-            f"from datasets.{dataset_spec.name} import {dataset_spec.config_cls.__name__}",
-        ),
-    ]
-
-    if preprocessor_spec:
-        trainer_replacements.extend(
-            [
-                ("preprocessor: BaseModel", f"preprocessor: {preprocessor_spec.config_cls.__name__}"),
-                (
-                    "# __PREPROCESSOR_IMPORT__",
-                    f"from preprocessors.{preprocessor_spec.name} import {preprocessor_spec.config_cls.__name__}",
-                ),
-            ]
-        )
-    else:
-        trainer_replacements.extend(
-            [
-                (
-                    "# __PREPROCESSOR_IMPORT__",
-                    "",
-                ),
-            ]
-        )
-
-    main_replacements = [
-        (
-            "from trainite.trainers.decoder_trainer",
-            "from trainer",
-        ),
-        ("trainite.shared.utils", "utils"),
-        (
-            "from trainite.datasets.transformed import TransformedDataset",
-            "from datasets.transformed import TransformedDataset",
-        ),
-    ]
-
-    preprocessor_name = preprocessor_spec.name if preprocessor_spec else "None"
+    preprocessor_name = specs.preprocessor.name if specs.preprocessor else "None"
     preprocessor_docs = ""
-    if preprocessor_spec and preprocessor_spec.readme_template_path:
-        preprocessor_docs = _render_template(PROJECT_ROOT / preprocessor_spec.readme_template_path)
+    if specs.preprocessor and specs.preprocessor.readme_template_path:
+        preprocessor_docs = (PROJECT_ROOT / specs.preprocessor.readme_template_path).read_text()
 
-    readme_replacements = [
+    readme_path = PROJECT_ROOT / "trainite/templates/project/README.md"
+    content = readme_path.read_text()
+
+    replacements = [
         ("{{project_name}}", project_name),
-        ("{{model_name}}", model_spec.name),
+        ("{{model_name}}", specs.model.name),
         ("{{model_docs}}", model_docs),
-        ("{{dataset_name}}", dataset_spec.name),
+        ("{{dataset_name}}", specs.dataset.name),
         ("{{dataset_docs}}", dataset_docs),
-        ("{{trainer_name}}", trainer_spec.name),
+        ("{{trainer_name}}", specs.trainer.name),
         ("{{trainer_docs}}", trainer_docs),
         ("{{preprocessor_name}}", preprocessor_name),
         ("{{preprocessor_docs}}", preprocessor_docs),
     ]
 
-    templates = {
-        f"models/{model_spec.name}.py": _render_template(
-            PROJECT_ROOT / model_spec.implementation_path,
-            model_spec.template_replacements,
-        ),
-        f"datasets/{dataset_spec.name}.py": _render_template(
-            PROJECT_ROOT / dataset_spec.implementation_path,
-            dataset_spec.template_replacements,
-        ),
-        "datasets/transformed.py": _render_template(PROJECT_ROOT / "trainite/datasets/transformed.py"),
+    for placeholder, val in replacements:
+        content = content.replace(placeholder, val)
+    return content
+
+
+def _source_map(specs: Specs) -> dict[str, Path]:
+    """Builds a map of generated files to their trainite source files.
+
+    Note on config_base.py vs config.py:
+    StringReverseDataConfig (in datasets/string_reverse.py) inherits DataWithAutoSplit,
+    a real structural base class (split ratios + validator, not a marker).
+    If that base class lived inside config.py, and config.py also imports
+    StringReverseDataConfig to build the concrete ProjectConfig, we get a circular
+    import cycle (config.py -> datasets/string_reverse.py -> config.py).
+    By separating structural base classes into config_base.py (a leaf module with
+    no external components imports) and config.py (the root module that imports both
+    config_base.py and component configs), we avoid circular import cycles entirely.
+    """
+    mapping = {
+        f"models/{specs.model.name}.py": specs.model.implementation_path,
+        f"datasets/{specs.dataset.name}.py": specs.dataset.implementation_path,
+        "datasets/transformed.py": Path("trainite/datasets/transformed.py"),
+        "trainer.py": specs.trainer.implementation_path,
+        "utils.py": Path("trainite/shared/utils.py"),
+        "main.py": Path("trainite/shared/main.py"),
+        "config_base.py": Path("trainite/config/base.py"),
     }
+    if specs.preprocessor:
+        mapping[f"preprocessors/{specs.preprocessor.name}.py"] = specs.preprocessor.implementation_path
+    return mapping
 
-    if preprocessor_spec:
-        templates[f"preprocessors/{preprocessor_spec.name}.py"] = _render_template(
-            PROJECT_ROOT / preprocessor_spec.implementation_path,
-            preprocessor_spec.template_replacements,
-        )
 
-    config_replacements = []
-    if model_spec.collate_fn_config_cls:
-        collate_config_cls = model_spec.collate_fn_config_cls
-        config_replacements.extend(
-            [
-                ("collate_fn: BaseModel | None = None", f"collate_fn: {collate_config_cls.__name__} | None = None"),
-                ("# __COLLATE_IMPORT__", f"from models.{model_spec.name} import {collate_config_cls.__name__}"),
-            ]
-        )
-    else:
-        config_replacements.extend(
-            [
-                ("# __COLLATE_IMPORT__", ""),
-            ]
-        )
+def _build_templates(
+    specs: Specs, sources: dict[str, Path], rewrites: list[tuple[str, str]], project_name: str
+) -> dict[str, str]:
+    templates = {}
 
-    shared_repl = [
-        ("trainite.shared.utils", "utils"),
-        ("trainite.config.base", "config"),
-        ("trainite.datasets.transformed", "datasets.transformed"),
-    ]
+    def _checked(dest: str, content: str) -> str:
+        if leftover := re.search(r"\btrainite\.\w", content):
+            raise ValueError(
+                f"{dest}: '{leftover.group()}' was not rewritten; add its source to the generated file map"
+            )
+        return content
 
-    templates.update(
-        {
-            "trainer.py": _render_template(PROJECT_ROOT / trainer_spec.implementation_path, trainer_replacements),
-            "utils.py": _render_template(PROJECT_ROOT / "trainite/shared/utils.py", shared_repl),
-            "main.py": _render_template(PROJECT_ROOT / "trainite/shared/main.py", main_replacements),
-            "README.md": _render_template(PROJECT_ROOT / "trainite/templates/project/README.md", readme_replacements),
-            "config.py": _render_template(PROJECT_ROOT / "trainite/config/base.py", config_replacements),
-            "pyproject.toml": generate_uv_project(name=project_name, version="0.1.0", dependencies=sorted(final_deps)),
-        }
+    for dest, src in sources.items():
+        content = src.read_text()
+        rewritten = _rewrite_modules(content, rewrites)
+        templates[dest] = _checked(dest, rewritten)
+
+    config_py_content = _render_config_py(
+        specs.model.config_cls,
+        specs.dataset.config_cls,
+        specs.trainer.config_cls,
+        specs.preprocessor.config_cls if specs.preprocessor else None,
+        rewrites,
     )
+    templates["config.py"] = _checked("config.py", config_py_content)
+    templates["README.md"] = _render_readme(specs, project_name)
+    dependencies = _collect_dependencies(specs)
+    templates["pyproject.toml"] = generate_uv_project(project_name, "0.1.0", dependencies)
 
     return templates
+
+
+# --- Starter config object (dumped to config.yaml) ---
+
+
+def _inject_collate_fn(model_spec: ModelSpec, data_config: Any) -> None:
+    if not model_spec.collate_fn_target:
+        return
+
+    from trainite.config.base import TargetedConfig
+
+    if model_spec.collate_fn_config_cls:
+        collate_fn_instance = model_spec.collate_fn_config_cls()
+        collate_fn_val = TargetedConfig.model_validate(collate_fn_instance.model_dump(by_alias=True))
+    else:
+        collate_fn_val = TargetedConfig(_target_=model_spec.collate_fn_target)
+
+    def _inject(config: Any) -> None:
+        dataloader = getattr(config, "dataloader", None)
+        if dataloader is not None:
+            dataloader.collate_fn = collate_fn_val
+        for split in ["train", "val", "test"]:
+            split_config = getattr(config, split, None)
+            if split_config is not None:
+                _inject(split_config)
+
+    _inject(data_config)
+
+
+def _update_targets(config: Any, rewrites: Sequence[tuple[str, str]]) -> None:
+    if isinstance(config, BaseModel) and hasattr(config, "target"):
+        target = getattr(config, "target")
+        if isinstance(target, str):
+            setattr(config, "target", _rewrite_name(target, rewrites))
+    if isinstance(config, BaseModel):
+        for field in type(config).model_fields:
+            if (val := getattr(config, field)) is not None:
+                _update_targets(val, rewrites)
+
+
+def _build_starter_config(
+    specs: Specs, output_config: OutputConfig, rewrites: Sequence[tuple[str, str]]
+) -> ProjectConfigBase:
+    model_component = specs.model.config_cls()
+    data_config = specs.dataset.config_cls()
+    trainer_component = specs.trainer.config_cls()
+    preprocessor_component = specs.preprocessor.config_cls() if specs.preprocessor else None
+
+    _inject_collate_fn(specs.model, data_config)
+
+    starter_config = ProjectConfigBase(
+        preprocessor=preprocessor_component,
+        model=model_component,
+        data=data_config,
+        trainer=trainer_component,
+        output=output_config,
+    )
+
+    _update_targets(starter_config, rewrites)
+    return starter_config
+
+
+# --- Entry points ---
+
+
+class Init(BaseModel):
+    """Generate a starter training project.
+
+    Run ``trainite init`` without any arguments to enter interactive mode,
+    where each option is prompted one at a time.
+
+    Args:
+        project_dir: Directory to create the starter project in.
+        model: Starter model template to use.
+        dataset: Starter dataset template to use.
+        trainer: Starter trainer template to use.
+        output_root: Output root for generated config.
+        run_name: Run name for generated config.
+        force: Overwrite existing starter files.
+    """
+
+    project_dir: tyro.conf.Positional[str] = "my-cool-experiment"
+    model: ModelType = "transformer"
+    dataset: DatasetType = "string-reverse"
+    trainer: TrainerType = "decoder-trainer"
+    output_root: str = "outputs"
+    run_name: str = ""
+    force: bool = False
+
+
+def _resolve_specs(config: Init) -> Specs:
+    model_spec = get_model_spec(config.model)
+    dataset_spec = get_dataset_spec(config.dataset)
+    trainer_spec = get_trainer_spec(config.trainer)
+    preprocessor_spec = (
+        get_preprocessor_spec(dataset_spec.preprocessor_spec_name) if dataset_spec.preprocessor_spec_name else None
+    )
+    return Specs(
+        model=model_spec,
+        dataset=dataset_spec,
+        trainer=trainer_spec,
+        preprocessor=preprocessor_spec,
+    )
+
+
+def init_project(config: Init) -> None:
+    project_dir = _project_directory(config.project_dir, config.force)
+    specs = _resolve_specs(config)
+    sources = _source_map(specs)
+    rewrites = _module_rewrites(sources)
+
+    templates = _build_templates(specs, sources, rewrites, project_dir.name)
+
+    resolved_run_name = config.run_name or f"{config.model}__{config.dataset}"
+    output_config = OutputConfig(root=config.output_root, run_name=resolved_run_name)
+    starter_config = _build_starter_config(specs, output_config, rewrites)
+
+    dump_config(starter_config, project_dir / "config.yaml")
+    for filename, content in templates.items():
+        _write_file(project_dir / filename, content, config.force)
+
+    print("\n✔ Generated config.yaml")
+    for filename in templates:
+        print(f"✔ Generated {filename}")
 
 
 def run_interactive_mode() -> None:
@@ -365,141 +517,3 @@ def run_interactive_mode() -> None:
     )
 
     init_project(config)
-
-
-def _update_targets(config: Any, old_prefix: str, new_prefix: str) -> None:
-    if isinstance(config, BaseModel) and hasattr(config, "target"):
-        target = getattr(config, "target")
-        if isinstance(target, str) and target.startswith(old_prefix):
-            setattr(config, "target", target.replace(old_prefix, new_prefix, 1))
-    elif isinstance(config, BaseModel):
-        for field in config.model_fields:
-            if (val := getattr(config, field)) is not None:
-                _update_targets(val, old_prefix, new_prefix)
-
-
-class Init(BaseModel):
-    """Generate a starter training project.
-
-    Run ``trainite init`` without any arguments to enter interactive mode,
-    where each option is prompted one at a time.
-
-    Args:
-        project_dir: Directory to create the starter project in.
-        model: Starter model template to use.
-        dataset: Starter dataset template to use.
-        trainer: Starter trainer template to use.
-        output_root: Output root for generated config.
-        run_name: Run name for generated config.
-        force: Overwrite existing starter files.
-    """
-
-    project_dir: tyro.conf.Positional[str] = "my-cool-experiment"
-    model: ModelType = "transformer"
-    dataset: DatasetType = "string-reverse"
-    trainer: TrainerType = "decoder-trainer"
-    output_root: str = "outputs"
-    run_name: str = ""
-    force: bool = False
-
-
-def init_project(config: Init) -> None:
-    """Generate a starter training project.
-
-    Args:
-        config: Configuration for the starter project.
-    """
-
-    project_dir = config.project_dir
-    model = config.model
-    dataset = config.dataset
-    trainer = config.trainer
-    output_root = config.output_root
-    run_name = config.run_name
-    force = config.force
-
-    resolved_run_name = run_name or f"{model}__{dataset}"
-    resolved_project_dir = _project_directory(project_dir, force)
-
-    output_config = OutputConfig(root=output_root, run_name=resolved_run_name)
-
-    # Build templates for the starter project
-    templates = _build_templates(model, dataset, trainer, resolved_project_dir.name)
-
-    model_spec = get_model_spec(model)
-    dataset_spec = get_dataset_spec(dataset)
-    trainer_spec = get_trainer_spec(trainer)
-    preprocessor_spec = (
-        get_preprocessor_spec(dataset_spec.preprocessor_spec_name) if dataset_spec.preprocessor_spec_name else None
-    )
-
-    # Instantiate configs from specs
-    model_component = model_spec.config_cls()
-    data_config = dataset_spec.config_cls()
-    trainer_component = trainer_spec.config_cls()
-
-    preprocessor_component = preprocessor_spec.config_cls() if preprocessor_spec else None
-
-    # Inject model collator into data config dataloaders
-    if model_spec.collate_fn_target:
-
-        class GenericComponent(BaseModel):
-            model_config = ConfigDict(extra="allow")
-            target: str = Field(alias="_target_")
-
-        if model_spec.collate_fn_config_cls:
-            collate_config_cls = model_spec.collate_fn_config_cls
-            collate_fn_instance = collate_config_cls()
-            collate_fn_val = GenericComponent(
-                _target_=collate_fn_instance.target,
-                **collate_fn_instance.model_dump(by_alias=True, exclude={"target"}),
-            )
-        else:
-            collate_target = model_spec.collate_fn_target
-            collate_fn_val = GenericComponent(_target_=collate_target)
-
-        def _inject_collate(config: Any):
-            dataloader = getattr(config, "dataloader", None)
-            if dataloader is not None:
-                dataloader.collate_fn = collate_fn_val
-            for split in ["train", "val", "test"]:
-                split_config = getattr(config, split, None)
-                if split_config is not None:
-                    _inject_collate(split_config)
-
-        _inject_collate(data_config)
-
-    starter_config = ProjectConfig(
-        preprocessor=preprocessor_component,
-        model=model_component,
-        data=data_config,
-        trainer=trainer_component,
-        output=output_config,
-    )
-
-    # Update targets to point to the local project structure
-    _update_targets(
-        starter_config,
-        f"trainite.models.{model_spec.name}",
-        f"models.{model_spec.name}",
-    )
-    _update_targets(
-        starter_config,
-        f"trainite.datasets.{dataset_spec.name}",
-        f"datasets.{dataset_spec.name}",
-    )
-
-    if preprocessor_spec:
-        _update_targets(
-            starter_config,
-            f"trainite.preprocessors.{preprocessor_spec.name}",
-            f"preprocessors.{preprocessor_spec.name}",
-        )
-
-    dump_config(starter_config, resolved_project_dir / "config.yaml")
-    for filename, content in templates.items():
-        _write_file(resolved_project_dir / filename, content, force)
-
-    print("\n✔ Generated config.yaml")
-    for filename in templates:
-        print(f"✔ Generated {filename}")

@@ -1,5 +1,5 @@
 import string
-from typing import Any
+from typing import Any, Literal
 
 import torch
 from pydantic import BaseModel, ConfigDict, Field
@@ -150,8 +150,10 @@ class CharTokenizer:
 
 
 class CharTokenizerConfig(BaseModel):
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
-    target: str = Field(
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+    target: Literal[
+        "trainite.preprocessors.char_tokenizer.CharTokenizer", "preprocessors.char_tokenizer.CharTokenizer"
+    ] = Field(
         default="trainite.preprocessors.char_tokenizer.CharTokenizer",
         alias="_target_",
     )

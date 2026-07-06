@@ -1,26 +1,29 @@
 import itertools
 import logging
-from typing import Literal
+from typing import cast
 
 import ignite.distributed as idist
 import torch
 from ignite.engine import Engine, Events
 from ignite.metrics import Accuracy, Loss, Metric, RunningAverage
 from ignite.utils import setup_logger
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 from torch import nn
 from torch.utils.data import DataLoader
 
 from trainite.config.base import (
-    DataConfigBase,
-    DataWithAutoSplit,
-    OptimizerConfig,
-    OutputConfig,
+    ProjectConfigBase,
+    TrainerConfig,
 )
 
-# __MODEL_IMPORT__
-# __DATASET_IMPORT__
-# __PREPROCESSOR_IMPORT__
+
+class DecoderTrainerConfig(TrainerConfig):
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+    inference_every_epochs: int | None = Field(default=None, gt=0)
+    inference_num_samples: int = Field(default=5, gt=0)
+    max_inference_new_tokens: int = Field(default=16, gt=0)
+
+
 from trainite.shared.utils import (
     attach_early_stopping,
     attach_lr_scheduler,
@@ -37,38 +40,15 @@ from trainite.shared.utils import (
 )
 
 
-class TrainerConfig(BaseModel):
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
-    epochs: int = Field(default=3, gt=0)
-    log_every_steps: int = Field(default=10, gt=0)
-    early_stopping_patience: int | None = Field(default=3, gt=0)
-    # Inference logging
-    inference_every_epochs: int | None = Field(default=None, gt=0)
-    inference_num_samples: int = Field(default=5, gt=0)
-    max_inference_new_tokens: int = Field(default=16, gt=0)
-    grad_clip_norm: float | None = Field(default=None, gt=0.0)
-
-
-class ProjectConfig(BaseModel):
-    model_config = ConfigDict(validate_assignment=True)
-    preprocessor: BaseModel
-    model: BaseModel
-    optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
-    data: DataConfigBase | DataWithAutoSplit
-    trainer: TrainerConfig = Field(default_factory=TrainerConfig)
-    output: OutputConfig
-    logger: Literal["tensorboard", "wandb"] = "tensorboard"
-    seed: int = 42
-    device: str | None = None
-
-
 class Trainer:
-    def __init__(self, config: ProjectConfig) -> None:
+    def __init__(self, config: ProjectConfigBase) -> None:
         self.logger: logging.Logger = setup_logger("trainer", level=logging.INFO)
         torch.manual_seed(config.seed)
-        self.config: ProjectConfig = config
-        self.trainer_config: TrainerConfig = config.trainer
+        self.config: ProjectConfigBase = config
+        self.trainer_config = cast(DecoderTrainerConfig, config.trainer)
         self.device: str | torch.device = idist.device() if config.device is None else config.device
+        if config.preprocessor is None:
+            raise ValueError("Preprocessor configuration must be provided.")
         self.tokenizer = instantiate(config.preprocessor)
         self.train_loader, self.val_loader, self.test_loader = build_dataloaders(
             config.data, self.tokenizer, config.seed

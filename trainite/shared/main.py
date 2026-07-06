@@ -2,7 +2,8 @@ import argparse
 from pathlib import Path
 
 from trainite.shared.utils import load_config
-from trainite.trainers.decoder_trainer import Trainer, ProjectConfig
+from trainite.config import ProjectConfig
+from trainite.trainers.decoder_trainer import Trainer
 
 
 def main() -> None:
