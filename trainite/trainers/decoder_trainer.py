@@ -28,9 +28,10 @@ from trainite.shared.utils import (
     dump_config,
     instantiate,
     make_run_dir,
-    setup_checkpointing,
+    setup_best_model_checkpoint,
     setup_console_logger,
     setup_experiment_logger,
+    setup_training_checkpointing,
     upload_model_to_wandb,
 )
 
@@ -119,12 +120,19 @@ class Trainer:
         attach_early_stopping(self.val_evaluator, self.engine, config.trainer.early_stopping_patience)
 
         # Attach checkpointing
-        self.checkpointers = setup_checkpointing(
-            self.engine,
-            self.val_evaluator,
-            {"model": self.model, "optimizer": self.optimizer},
-            self.run_dir,
-        )
+        self.checkpointers = {
+            "checkpoint_best": setup_best_model_checkpoint(
+                self.engine,
+                self.val_evaluator,
+                {"model": self.model, "optimizer": self.optimizer},
+                self.run_dir,
+            ),
+            "checkpoint_last": setup_training_checkpointing(
+                self.engine,
+                {"model": self.model, "optimizer": self.optimizer},
+                self.run_dir,
+            ),
+        }
 
         # Attach experiment logger (TensorBoard or Weights & Biases)
         self.exp_logger = setup_experiment_logger(

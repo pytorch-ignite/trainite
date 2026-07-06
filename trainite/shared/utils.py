@@ -255,14 +255,28 @@ def attach_early_stopping(
     return None
 
 
-def setup_checkpointing(
+def setup_training_checkpointing(
+    engine: Engine,
+    to_save: dict[str, Any],
+    run_dir: Path,
+) -> Checkpoint:
+    last_checkpoint = Checkpoint(
+        to_save=to_save,
+        save_handler=DiskSaver(dirname=str(run_dir), require_empty=False),
+        filename_prefix="last",
+        n_saved=1,
+        global_step_transform=lambda *_: engine.state.iteration,
+    )
+    engine.add_event_handler(Events.EPOCH_COMPLETED, last_checkpoint)
+    return last_checkpoint
+
+
+def setup_best_model_checkpoint(
     engine: Engine,
     val_evaluator: Engine,
     to_save: dict[str, Any],
     run_dir: Path,
-) -> dict[str, Checkpoint]:
-    checkpointers = {}
-
+) -> Checkpoint:
     def score_function(engine_val):
         loss = engine_val.state.metrics["loss"]
         return -loss
@@ -277,19 +291,7 @@ def setup_checkpointing(
         global_step_transform=lambda *_: engine.state.iteration,
     )
     val_evaluator.add_event_handler(Events.COMPLETED, checkpoint)
-    checkpointers["checkpoint_best"] = checkpoint
-
-    last_checkpoint = Checkpoint(
-        to_save=to_save,
-        save_handler=DiskSaver(dirname=str(run_dir), require_empty=False),
-        filename_prefix="last",
-        n_saved=1,
-        global_step_transform=lambda *_: engine.state.iteration,
-    )
-    engine.add_event_handler(Events.EPOCH_COMPLETED, last_checkpoint)
-
-    checkpointers["checkpoint_last"] = last_checkpoint
-    return checkpointers
+    return checkpoint
 
 
 def setup_experiment_logger(
