@@ -1,6 +1,4 @@
-import inspect
 import re
-import textwrap
 from pathlib import Path
 from typing import Any, Iterable, Literal, Sequence
 
@@ -8,13 +6,24 @@ import questionary
 import tomlkit
 import tyro
 from packaging.requirements import Requirement
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
 from trainite.config import (
     OutputConfig,
     ProjectConfig,
 )
-from trainite.config.registry import REGISTRY, get_dataset_spec, get_model_spec, get_preprocessor_spec, get_trainer_spec
+from trainite.config.base import CollateFnConfig
+from trainite.config.registry import (
+    REGISTRY,
+    DatasetSpec,
+    ModelSpec,
+    PreProcessorSpec,
+    TrainerSpec,
+    get_dataset_spec,
+    get_model_spec,
+    get_preprocessor_spec,
+    get_trainer_spec,
+)
 from trainite.shared.utils import dump_config
 
 
@@ -41,10 +50,6 @@ def _replace_many(text: str, replacements: Iterable[tuple[str, str]]) -> str:
 
 def _render_template(path: Path, replacements: Iterable[tuple[str, str]] = ()) -> str:
     return _replace_many(path.read_text(), replacements)
-
-
-def _render_class_source(cls: type) -> str:
-    return textwrap.dedent(inspect.getsource(cls)).strip()
 
 
 def _prompt_text(prompt: str, default: str, instruction: str | None = None) -> str:
@@ -161,13 +166,29 @@ def parse_dependencies(
     return dep_map, other_dep_map
 
 
-def _build_templates(model_name: str, dataset_name: str, trainer_name: str, project_name: str) -> dict[str, str]:
-    model_spec = get_model_spec(model_name)
-    dataset_spec = get_dataset_spec(dataset_name)
-    trainer_spec = get_trainer_spec(trainer_name)
-    preprocessor_spec = (
-        get_preprocessor_spec(dataset_spec.preprocessor_spec_name) if dataset_spec.preprocessor_spec_name else None
-    )
+def _module_rewrites(sources: dict[str, Path]) -> list[tuple[str, str]]:
+    """Map each copied module's package path to its path in the generated project.
+
+    Derived from the generated file layout itself, so import rewrites can never
+    drift out of sync with where files actually land.
+    """
+    pairs = []
+    for dest, src in sources.items():
+        src_module = ".".join(src.with_suffix("").parts)
+        dest_module = ".".join(Path(dest).with_suffix("").parts)
+        pairs.append((src_module, dest_module))
+    # Longest first, so one module name never clobbers another that it prefixes
+    pairs.sort(key=lambda pair: len(pair[0]), reverse=True)
+    return pairs
+
+
+def _build_templates(
+    model_spec: ModelSpec,
+    dataset_spec: DatasetSpec,
+    trainer_spec: TrainerSpec,
+    preprocessor_spec: PreProcessorSpec | None,
+    project_name: str,
+) -> tuple[dict[str, str], list[tuple[str, str]]]:
     specs = [model_spec, dataset_spec, trainer_spec, preprocessor_spec]
     spec_deps = set()
     for spec in specs:
@@ -180,84 +201,47 @@ def _build_templates(model_name: str, dataset_name: str, trainer_name: str, proj
             raise ValueError(f"Dependency '{dep}' required by the selected templates is not listed in pyproject.toml")
         val = required_deps[dep] if dep in required_deps else other_deps[dep]
         final_deps.add(val)
-    model_docs = ""
-    if model_spec.readme_template_path:
-        model_docs = _render_template(PROJECT_ROOT / model_spec.readme_template_path)
 
-    dataset_docs = ""
-    if dataset_spec.readme_template_path:
-        dataset_docs = _render_template(PROJECT_ROOT / dataset_spec.readme_template_path)
+    # Generated file -> source file it is copied from
+    sources = {
+        f"models/{model_spec.name}.py": model_spec.implementation_path,
+        f"datasets/{dataset_spec.name}.py": dataset_spec.implementation_path,
+        "datasets/transformed.py": Path("trainite/datasets/transformed.py"),
+        "trainer.py": trainer_spec.implementation_path,
+        "utils.py": Path("trainite/shared/utils.py"),
+        "main.py": Path("trainite/shared/main.py"),
+        "config.py": Path("trainite/config/base.py"),
+    }
+    if preprocessor_spec:
+        sources[f"preprocessors/{preprocessor_spec.name}.py"] = preprocessor_spec.implementation_path
 
-    trainer_docs = ""
-    if trainer_spec.readme_template_path:
-        trainer_docs = _render_template(PROJECT_ROOT / trainer_spec.readme_template_path)
+    rewrites = _module_rewrites(sources)
+    templates = {dest: _render_template(PROJECT_ROOT / src, rewrites) for dest, src in sources.items()}
 
-    trainer_replacements = trainer_spec.template_replacements
-
-    main_replacements = [
-        (
-            "from trainite.trainers.decoder_trainer",
-            "from trainer",
-        ),
-        ("trainite.shared.utils", "utils"),
-        (
-            "from trainite.datasets.transformed import TransformedDataset",
-            "from datasets.transformed import TransformedDataset",
-        ),
-    ]
-
-    preprocessor_name = preprocessor_spec.name if preprocessor_spec else "None"
-    preprocessor_docs = ""
-    if preprocessor_spec and preprocessor_spec.readme_template_path:
-        preprocessor_docs = _render_template(PROJECT_ROOT / preprocessor_spec.readme_template_path)
+    def _docs(spec: Any) -> str:
+        if spec is not None and spec.readme_template_path:
+            return _render_template(PROJECT_ROOT / spec.readme_template_path)
+        return ""
 
     readme_replacements = [
         ("{{project_name}}", project_name),
         ("{{model_name}}", model_spec.name),
-        ("{{model_docs}}", model_docs),
+        ("{{model_docs}}", _docs(model_spec)),
         ("{{dataset_name}}", dataset_spec.name),
-        ("{{dataset_docs}}", dataset_docs),
+        ("{{dataset_docs}}", _docs(dataset_spec)),
         ("{{trainer_name}}", trainer_spec.name),
-        ("{{trainer_docs}}", trainer_docs),
-        ("{{preprocessor_name}}", preprocessor_name),
-        ("{{preprocessor_docs}}", preprocessor_docs),
+        ("{{trainer_docs}}", _docs(trainer_spec)),
+        ("{{preprocessor_name}}", preprocessor_spec.name if preprocessor_spec else "None"),
+        ("{{preprocessor_docs}}", _docs(preprocessor_spec)),
     ]
-
-    utils_replacements = [
-        ("trainite.config.base", "config"),
-        ("trainite.datasets.transformed", "datasets.transformed"),
-    ]
-
-    templates = {
-        f"models/{model_spec.name}.py": _render_template(
-            PROJECT_ROOT / model_spec.implementation_path,
-            model_spec.template_replacements,
-        ),
-        f"datasets/{dataset_spec.name}.py": _render_template(
-            PROJECT_ROOT / dataset_spec.implementation_path,
-            dataset_spec.template_replacements,
-        ),
-        "datasets/transformed.py": _render_template(PROJECT_ROOT / "trainite/datasets/transformed.py"),
-    }
-
-    if preprocessor_spec:
-        templates[f"preprocessors/{preprocessor_spec.name}.py"] = _render_template(
-            PROJECT_ROOT / preprocessor_spec.implementation_path,
-            preprocessor_spec.template_replacements,
-        )
-
-    templates.update(
-        {
-            "trainer.py": _render_template(PROJECT_ROOT / trainer_spec.implementation_path, trainer_replacements),
-            "utils.py": _render_template(PROJECT_ROOT / "trainite/shared/utils.py", utils_replacements),
-            "main.py": _render_template(PROJECT_ROOT / "trainite/shared/main.py", main_replacements),
-            "README.md": _render_template(PROJECT_ROOT / "trainite/templates/project/README.md", readme_replacements),
-            "config.py": _render_template(PROJECT_ROOT / "trainite/config/base.py"),
-            "pyproject.toml": generate_uv_project(name=project_name, version="0.1.0", dependencies=sorted(final_deps)),
-        }
+    templates["README.md"] = _render_template(
+        PROJECT_ROOT / "trainite/templates/project/README.md", readme_replacements
+    )
+    templates["pyproject.toml"] = generate_uv_project(
+        name=project_name, version="0.1.0", dependencies=sorted(final_deps)
     )
 
-    return templates
+    return templates, rewrites
 
 
 def run_interactive_mode() -> None:
@@ -299,15 +283,19 @@ def run_interactive_mode() -> None:
     init_project(config)
 
 
-def _update_targets(config: Any, old_prefix: str, new_prefix: str) -> None:
+def _update_targets(config: Any, rewrites: Sequence[tuple[str, str]]) -> None:
+    """Rewrite ``_target_`` import paths to point at the generated project's modules."""
     if isinstance(config, BaseModel) and hasattr(config, "target"):
         target = getattr(config, "target")
-        if isinstance(target, str) and target.startswith(old_prefix):
-            setattr(config, "target", target.replace(old_prefix, new_prefix, 1))
+        if isinstance(target, str):
+            for old_module, new_module in rewrites:
+                if target.startswith(old_module + "."):
+                    setattr(config, "target", new_module + target[len(old_module) :])
+                    break
     elif isinstance(config, BaseModel):
         for field in config.model_fields:
             if (val := getattr(config, field)) is not None:
-                _update_targets(val, old_prefix, new_prefix)
+                _update_targets(val, rewrites)
 
 
 class Init(BaseModel):
@@ -355,14 +343,16 @@ def init_project(config: Init) -> None:
 
     output_config = OutputConfig(root=output_root, run_name=resolved_run_name)
 
-    # Build templates for the starter project
-    templates = _build_templates(model, dataset, trainer, resolved_project_dir.name)
-
     model_spec = get_model_spec(model)
     dataset_spec = get_dataset_spec(dataset)
     trainer_spec = get_trainer_spec(trainer)
     preprocessor_spec = (
         get_preprocessor_spec(dataset_spec.preprocessor_spec_name) if dataset_spec.preprocessor_spec_name else None
+    )
+
+    # Build templates for the starter project
+    templates, rewrites = _build_templates(
+        model_spec, dataset_spec, trainer_spec, preprocessor_spec, resolved_project_dir.name
     )
 
     # Instantiate configs from specs
@@ -374,21 +364,10 @@ def init_project(config: Init) -> None:
 
     # Inject model collator into data config dataloaders
     if model_spec.collate_fn_target:
-
-        class GenericComponent(BaseModel):
-            model_config = ConfigDict(extra="allow")
-            target: str = Field(alias="_target_")
-
         if model_spec.collate_fn_config_cls:
-            collate_config_cls = model_spec.collate_fn_config_cls
-            collate_fn_instance = collate_config_cls()
-            collate_fn_val = GenericComponent(
-                _target_=collate_fn_instance.target,
-                **collate_fn_instance.model_dump(by_alias=True, exclude={"target"}),
-            )
+            collate_fn_val = CollateFnConfig.model_validate(model_spec.collate_fn_config_cls())
         else:
-            collate_target = model_spec.collate_fn_target
-            collate_fn_val = GenericComponent(_target_=collate_target)
+            collate_fn_val = CollateFnConfig(_target_=model_spec.collate_fn_target)
 
         def _inject_collate(config: Any):
             dataloader = getattr(config, "dataloader", None)
@@ -410,23 +389,7 @@ def init_project(config: Init) -> None:
     )
 
     # Update targets to point to the local project structure
-    _update_targets(
-        starter_config,
-        f"trainite.models.{model_spec.name}",
-        f"models.{model_spec.name}",
-    )
-    _update_targets(
-        starter_config,
-        f"trainite.datasets.{dataset_spec.name}",
-        f"datasets.{dataset_spec.name}",
-    )
-
-    if preprocessor_spec:
-        _update_targets(
-            starter_config,
-            f"trainite.preprocessors.{preprocessor_spec.name}",
-            f"preprocessors.{preprocessor_spec.name}",
-        )
+    _update_targets(starter_config, rewrites)
 
     dump_config(starter_config, resolved_project_dir / "config.yaml")
     for filename, content in templates.items():

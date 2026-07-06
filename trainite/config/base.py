@@ -2,9 +2,8 @@ from typing import Any, Self, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-class ModelConfig(BaseModel):
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
-    target: str = Field(alias="_target_")
+class CoerceFromModel(BaseModel):
+    """Accepts any BaseModel instance as input by dumping it to a dict first."""
 
     @model_validator(mode="before")
     @classmethod
@@ -14,52 +13,31 @@ class ModelConfig(BaseModel):
         return data
 
 
-class PreprocessorConfig(BaseModel):
+class TargetedConfig(CoerceFromModel):
+    """Config for a component addressed by a ``_target_`` import path."""
+
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: str = Field(alias="_target_")
 
-    @model_validator(mode="before")
-    @classmethod
-    def validate_from_any_model(cls, data: Any) -> Any:
-        if isinstance(data, BaseModel):
-            return data.model_dump(by_alias=True)
-        return data
+
+class ModelConfig(TargetedConfig):
+    pass
 
 
-class DatasetConfig(BaseModel):
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
-    target: str = Field(alias="_target_")
-
-    @model_validator(mode="before")
-    @classmethod
-    def validate_from_any_model(cls, data: Any) -> Any:
-        if isinstance(data, BaseModel):
-            return data.model_dump(by_alias=True)
-        return data
+class PreprocessorConfig(TargetedConfig):
+    pass
 
 
-class TransformConfig(BaseModel):
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
-    target: str = Field(alias="_target_")
-
-    @model_validator(mode="before")
-    @classmethod
-    def validate_from_any_model(cls, data: Any) -> Any:
-        if isinstance(data, BaseModel):
-            return data.model_dump(by_alias=True)
-        return data
+class DatasetConfig(TargetedConfig):
+    pass
 
 
-class CollateFnConfig(BaseModel):
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
-    target: str = Field(alias="_target_")
+class TransformConfig(TargetedConfig):
+    pass
 
-    @model_validator(mode="before")
-    @classmethod
-    def validate_from_any_model(cls, data: Any) -> Any:
-        if isinstance(data, BaseModel):
-            return data.model_dump(by_alias=True)
-        return data
+
+class CollateFnConfig(TargetedConfig):
+    pass
 
 
 class OutputConfig(BaseModel):
@@ -68,17 +46,9 @@ class OutputConfig(BaseModel):
     run_name: str
 
 
-class OptimizerConfig(BaseModel):
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
+class OptimizerConfig(TargetedConfig):
     target: str = Field(alias="_target_", default="torch.optim.AdamW")
     lr: float = Field(default=1e-3, gt=0.0)
-
-    @model_validator(mode="before")
-    @classmethod
-    def validate_from_any_model(cls, data: Any) -> Any:
-        if isinstance(data, BaseModel):
-            return data.model_dump(by_alias=True)
-        return data
 
 
 class DataLoaderConfig(BaseModel):
@@ -122,7 +92,7 @@ class DataWithAutoSplit(BaseModel):
         return self
 
 
-class TrainerConfig(BaseModel):
+class TrainerConfig(CoerceFromModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     epochs: int = Field(default=3, gt=0)
     log_every_steps: int = Field(default=10, gt=0)
@@ -132,13 +102,6 @@ class TrainerConfig(BaseModel):
     inference_num_samples: int = Field(default=5, gt=0)
     max_inference_new_tokens: int = Field(default=16, gt=0)
     grad_clip_norm: float | None = Field(default=None, gt=0.0)
-
-    @model_validator(mode="before")
-    @classmethod
-    def validate_from_any_model(cls, data: Any) -> Any:
-        if isinstance(data, BaseModel):
-            return data.model_dump(by_alias=True)
-        return data
 
 
 class ProjectConfig(BaseModel):
