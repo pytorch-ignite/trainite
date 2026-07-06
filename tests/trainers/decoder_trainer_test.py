@@ -393,29 +393,12 @@ def test_upload_model_to_wandb(mock_setup, project_config, temp_run_dir):
     trainer.checkpointers.clear()
     trainer.checkpointers["checkpoint_best"] = mock.MagicMock(last_checkpoint="best_model_1.pt")
 
-    with mock.patch("pathlib.Path.exists", return_value=True):
-        from ignite.handlers.checkpoint import CheckpointEvents
-
-        trainer.val_evaluator.fire_event(CheckpointEvents.SAVED_CHECKPOINT)
-
-    mock_logger.Artifact.return_value.add_file.assert_called_once_with("best_model_1.pt")
-    mock_logger.log_artifact.assert_called_once_with(mock_logger.Artifact.return_value)
-
-
-@mock.patch("trainite.trainers.decoder_trainer.setup_experiment_tracking")
-def test_upload_model_to_wandb_no_checkpoint(mock_setup, project_config):
-    project_config.logger = "wandb"
-    mock_logger = mock.MagicMock()
-    mock_setup.return_value = mock_logger
-
-    trainer = create_trainer_from_config(project_config)
-    trainer.checkpointers.clear()
-
     from ignite.handlers.checkpoint import CheckpointEvents
 
     trainer.val_evaluator.fire_event(CheckpointEvents.SAVED_CHECKPOINT)
 
-    mock_logger.log_artifact.assert_not_called()
+    mock_logger.Artifact.return_value.add_file.assert_called_once_with("best_model_1.pt")
+    mock_logger.log_artifact.assert_called_once_with(mock_logger.Artifact.return_value)
 
 
 @mock.patch("trainite.trainers.decoder_trainer.setup_experiment_tracking")
@@ -428,10 +411,9 @@ def test_upload_last_checkpoint_to_wandb(mock_setup, project_config, temp_run_di
     trainer.checkpointers.clear()
     trainer.checkpointers["checkpoint_last"] = mock.MagicMock(last_checkpoint="last_model_1.pt")
 
-    with mock.patch("pathlib.Path.exists", return_value=True):
-        from ignite.handlers.checkpoint import CheckpointEvents
+    from ignite.handlers.checkpoint import CheckpointEvents
 
-        trainer.trainer.fire_event(CheckpointEvents.SAVED_CHECKPOINT)
+    trainer.trainer.fire_event(CheckpointEvents.SAVED_CHECKPOINT)
 
     mock_logger.Artifact.return_value.add_file.assert_called_once_with("last_model_1.pt")
     mock_logger.log_artifact.assert_called_once_with(mock_logger.Artifact.return_value)

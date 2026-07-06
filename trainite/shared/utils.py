@@ -384,27 +384,22 @@ def setup_wandb_checkpoint_uploads(
     logger: logging.Logger,
 ) -> None:
     """Register events and upload handlers to automatically log checkpoints to W&B in real-time."""
-
     val_evaluator.register_events(*CheckpointEvents)
     trainer.register_events(*CheckpointEvents)
 
     def upload_best_model_artifact(engine):
-        best_checkpoint = checkpointers.get("checkpoint_best")
-        checkpoint_path = best_checkpoint.last_checkpoint if best_checkpoint else None
-        if checkpoint_path and Path(checkpoint_path).exists():
-            logger.info(f"Uploading new best model artifact to W&B: {checkpoint_path}")
-            artifact = exp_logger.Artifact(name=f"{run_name}-model".replace("/", "-"), type="model")
-            artifact.add_file(str(checkpoint_path))
-            exp_logger.log_artifact(artifact)
+        checkpoint_path = checkpointers["checkpoint_best"].last_checkpoint
+        logger.info(f"Uploading new best model artifact to W&B: {checkpoint_path}")
+        artifact = exp_logger.Artifact(name=f"{run_name}-model".replace("/", "-"), type="model")
+        artifact.add_file(str(checkpoint_path))
+        exp_logger.log_artifact(artifact)
 
     def upload_last_checkpoint_artifact(engine):
-        last_checkpoint = checkpointers.get("checkpoint_last")
-        checkpoint_path = last_checkpoint.last_checkpoint if last_checkpoint else None
-        if checkpoint_path and Path(checkpoint_path).exists():
-            logger.info(f"Uploading last checkpoint artifact to W&B: {checkpoint_path}")
-            artifact = exp_logger.Artifact(name=f"{run_name}-checkpoint".replace("/", "-"), type="checkpoint")
-            artifact.add_file(str(checkpoint_path))
-            exp_logger.log_artifact(artifact)
+        checkpoint_path = checkpointers["checkpoint_last"].last_checkpoint
+        logger.info(f"Uploading last checkpoint artifact to W&B: {checkpoint_path}")
+        artifact = exp_logger.Artifact(name=f"{run_name}-checkpoint".replace("/", "-"), type="checkpoint")
+        artifact.add_file(str(checkpoint_path))
+        exp_logger.log_artifact(artifact)
 
     val_evaluator.add_event_handler(CheckpointEvents.SAVED_CHECKPOINT, upload_best_model_artifact)
     trainer.add_event_handler(CheckpointEvents.SAVED_CHECKPOINT, upload_last_checkpoint_artifact)
