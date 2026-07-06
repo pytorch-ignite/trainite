@@ -3,7 +3,7 @@ import inspect
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal, TypeVar
+from typing import Any, Callable, Literal, TypeVar
 
 import torch
 import yaml
@@ -115,13 +115,9 @@ def _inject_if_accepted(target_symbol: Any, **candidates: Any) -> dict[str, Any]
 
 
 # Builds the model based on the provided configuration, tokenizer, and device.
-def build_model(model_config: Any, tokenizer: Any, vocab_size: int, device: str | torch.device) -> nn.Module:
+def build_model(model_config: Any, device: str | torch.device, **kwargs) -> nn.Module:
     target_symbol = get_target(model_config.target)
-    kwargs = _inject_if_accepted(
-        target_symbol,
-        vocab_size=vocab_size,
-        pad_token_id=tokenizer.pad_token_id,
-    )
+    kwargs = _inject_if_accepted(target_symbol, **kwargs)
     model = instantiate(model_config, **kwargs)
     model.to(device)
     return model
@@ -276,17 +272,24 @@ def setup_best_model_checkpoint(
     val_evaluator: Engine,
     to_save: dict[str, Any],
     run_dir: Path,
+    score_function: Callable[[Engine], float] | None = None,
+    score_name: str | None = None,
 ) -> Checkpoint:
-    def score_function(engine_val):
-        loss = engine_val.state.metrics["loss"]
-        return -loss
+    if score_function is None:
+
+        def score_function(engine_val):
+            loss = engine_val.state.metrics["loss"]
+            return -loss
+
+    if score_name is None:
+        score_name = "val_loss"
 
     checkpoint = Checkpoint(
         to_save=to_save,
         save_handler=DiskSaver(dirname=str(run_dir), require_empty=False),
         filename_prefix="best",
         score_function=score_function,
-        score_name="val_loss",
+        score_name=score_name,
         n_saved=1,
         global_step_transform=lambda *_: engine.state.iteration,
     )
