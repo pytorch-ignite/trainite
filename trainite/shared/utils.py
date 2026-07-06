@@ -272,7 +272,7 @@ def setup_best_model_checkpoint(
     val_evaluator: Engine,
     to_save: dict[str, Any],
     run_dir: Path,
-    score_function: Callable[[Engine], float],
+    score_function: Callable,
     score_name: str,
 ) -> Checkpoint:
     checkpoint = Checkpoint(

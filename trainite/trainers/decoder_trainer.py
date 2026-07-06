@@ -112,21 +112,20 @@ class Trainer:
             return -loss
 
         # Attach checkpointing
-        self.checkpointers = {
-            "checkpoint_best": setup_best_model_checkpoint(
-                self.trainer,
-                self.val_evaluator,
-                {"model": self.model, "optimizer": self.optimizer},
-                self.run_dir,
-                score_function=score_function,
-                score_name="val_loss",
-            ),
-            "checkpoint_last": setup_training_checkpointing(
-                self.trainer,
-                {"model": self.model, "optimizer": self.optimizer},
-                self.run_dir,
-            ),
-        }
+        self.checkpointers = {}
+        self.checkpointers["checkpoint_best"] = setup_best_model_checkpoint(
+            self.trainer,
+            self.val_evaluator,
+            {"model": self.model, "optimizer": self.optimizer},
+            self.run_dir,
+            score_function=score_function,
+            score_name="val_loss",
+        )
+        self.checkpointers["checkpoint_last"] = setup_training_checkpointing(
+            self.trainer,
+            {"model": self.model, "optimizer": self.optimizer},
+            self.run_dir,
+        )
 
         # Attach experiment logger (TensorBoard or Weights & Biases)
         self.exp_logger = setup_experiment_tracking(
@@ -259,8 +258,6 @@ class Trainer:
         self.val_evaluator.register_events(*CheckpointEvents)
         self.trainer.register_events(*CheckpointEvents)
 
-        # 1. Upload best model artifact immediately when a better one is saved
-        @self.val_evaluator.on(CheckpointEvents.SAVED_CHECKPOINT)
         def upload_best_model_artifact(engine):
             best_checkpoint = self.checkpointers.get("checkpoint_best")
             checkpoint_path = best_checkpoint.last_checkpoint if best_checkpoint else None
@@ -272,8 +269,6 @@ class Trainer:
                 artifact.add_file(str(checkpoint_path))
                 self.exp_logger.log_artifact(artifact)
 
-        # 2. Upload last epoch checkpoint artifact immediately when saved
-        @self.trainer.on(CheckpointEvents.SAVED_CHECKPOINT)
         def upload_last_checkpoint_artifact(engine):
             last_checkpoint = self.checkpointers.get("checkpoint_last")
             checkpoint_path = last_checkpoint.last_checkpoint if last_checkpoint else None
@@ -284,6 +279,9 @@ class Trainer:
                 )
                 artifact.add_file(str(checkpoint_path))
                 self.exp_logger.log_artifact(artifact)
+
+        self.val_evaluator.add_event_handler(CheckpointEvents.SAVED_CHECKPOINT, upload_best_model_artifact)
+        self.trainer.add_event_handler(CheckpointEvents.SAVED_CHECKPOINT, upload_last_checkpoint_artifact)
 
     def _log_inference(self, engine: Engine, loader: DataLoader, name: str) -> None:
         self.logger.info(f"Epoch {engine.state.epoch}: Running inference on {name} samples...")
