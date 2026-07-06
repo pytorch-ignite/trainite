@@ -106,6 +106,11 @@ class Trainer:
         # Attach early stopping
         attach_early_stopping(self.val_evaluator, self.trainer, self.trainer_config.early_stopping_patience)
 
+        # Define validation scoring function for best model
+        def score_function(engine_val):
+            loss = engine_val.state.metrics["loss"]
+            return -loss
+
         # Attach checkpointing
         self.checkpointers = {
             "checkpoint_best": setup_best_model_checkpoint(
@@ -113,6 +118,8 @@ class Trainer:
                 self.val_evaluator,
                 {"model": self.model, "optimizer": self.optimizer},
                 self.run_dir,
+                score_function=score_function,
+                score_name="val_loss",
             ),
             "checkpoint_last": setup_training_checkpointing(
                 self.trainer,
@@ -135,35 +142,9 @@ class Trainer:
             config.output.run_name,
         )
 
+        # Real-time W&B uploads
         if config.logger == "wandb":
-            self.val_evaluator.register_events(*CheckpointEvents)
-            self.trainer.register_events(*CheckpointEvents)
-
-            # 1. Upload best model artifact immediately when a better one is saved
-            @self.val_evaluator.on(CheckpointEvents.SAVED_CHECKPOINT)
-            def upload_best_model_artifact(engine):
-                best_checkpoint = self.checkpointers.get("checkpoint_best")
-                checkpoint_path = best_checkpoint.last_checkpoint if best_checkpoint else None
-                if checkpoint_path and Path(checkpoint_path).exists():
-                    self.logger.info(f"Uploading new best model artifact to W&B: {checkpoint_path}")
-                    artifact = self.exp_logger.Artifact(
-                        name=f"{config.output.run_name}-model".replace("/", "-"), type="model"
-                    )
-                    artifact.add_file(str(checkpoint_path))
-                    self.exp_logger.log_artifact(artifact)
-
-            # 2. Upload last epoch checkpoint artifact immediately when saved
-            @self.trainer.on(CheckpointEvents.SAVED_CHECKPOINT)
-            def upload_last_checkpoint_artifact(engine):
-                last_checkpoint = self.checkpointers.get("checkpoint_last")
-                checkpoint_path = last_checkpoint.last_checkpoint if last_checkpoint else None
-                if checkpoint_path and Path(checkpoint_path).exists():
-                    self.logger.info(f"Uploading last checkpoint artifact to W&B: {checkpoint_path}")
-                    artifact = self.exp_logger.Artifact(
-                        name=f"{config.output.run_name}-checkpoint".replace("/", "-"), type="checkpoint"
-                    )
-                    artifact.add_file(str(checkpoint_path))
-                    self.exp_logger.log_artifact(artifact)
+            self._setup_wandb_checkpoint_uploads()
 
         # Run evaluations at the end of each epoch to log training and validation metrics
         self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
@@ -272,6 +253,37 @@ class Trainer:
             val_metrics["loss"],
             val_metrics["token_accuracy"],
         )
+
+    def _setup_wandb_checkpoint_uploads(self) -> None:
+        """Register events and upload handlers to automatically log checkpoints to W&B in real-time."""
+        self.val_evaluator.register_events(*CheckpointEvents)
+        self.trainer.register_events(*CheckpointEvents)
+
+        # 1. Upload best model artifact immediately when a better one is saved
+        @self.val_evaluator.on(CheckpointEvents.SAVED_CHECKPOINT)
+        def upload_best_model_artifact(engine):
+            best_checkpoint = self.checkpointers.get("checkpoint_best")
+            checkpoint_path = best_checkpoint.last_checkpoint if best_checkpoint else None
+            if checkpoint_path and Path(checkpoint_path).exists():
+                self.logger.info(f"Uploading new best model artifact to W&B: {checkpoint_path}")
+                artifact = self.exp_logger.Artifact(
+                    name=f"{self.config.output.run_name}-model".replace("/", "-"), type="model"
+                )
+                artifact.add_file(str(checkpoint_path))
+                self.exp_logger.log_artifact(artifact)
+
+        # 2. Upload last epoch checkpoint artifact immediately when saved
+        @self.trainer.on(CheckpointEvents.SAVED_CHECKPOINT)
+        def upload_last_checkpoint_artifact(engine):
+            last_checkpoint = self.checkpointers.get("checkpoint_last")
+            checkpoint_path = last_checkpoint.last_checkpoint if last_checkpoint else None
+            if checkpoint_path and Path(checkpoint_path).exists():
+                self.logger.info(f"Uploading last checkpoint artifact to W&B: {checkpoint_path}")
+                artifact = self.exp_logger.Artifact(
+                    name=f"{self.config.output.run_name}-checkpoint".replace("/", "-"), type="checkpoint"
+                )
+                artifact.add_file(str(checkpoint_path))
+                self.exp_logger.log_artifact(artifact)
 
     def _log_inference(self, engine: Engine, loader: DataLoader, name: str) -> None:
         self.logger.info(f"Epoch {engine.state.epoch}: Running inference on {name} samples...")

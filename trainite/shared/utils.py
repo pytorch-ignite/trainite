@@ -272,18 +272,9 @@ def setup_best_model_checkpoint(
     val_evaluator: Engine,
     to_save: dict[str, Any],
     run_dir: Path,
-    score_function: Callable[[Engine], float] | None = None,
-    score_name: str | None = None,
+    score_function: Callable[[Engine], float],
+    score_name: str,
 ) -> Checkpoint:
-    if score_function is None:
-
-        def score_function(engine_val):
-            loss = engine_val.state.metrics["loss"]
-            return -loss
-
-    if score_name is None:
-        score_name = "val_loss"
-
     checkpoint = Checkpoint(
         to_save=to_save,
         save_handler=DiskSaver(dirname=str(run_dir), require_empty=False),
