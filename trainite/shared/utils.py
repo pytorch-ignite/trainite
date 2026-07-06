@@ -357,23 +357,6 @@ def setup_experiment_tracking(
     return exp_logger
 
 
-def upload_model_to_wandb(
-    exp_logger: Any,
-    checkpointers: dict[str, Checkpoint],
-    run_name: str,
-    logger: logging.Logger,
-) -> None:
-    checkpoint = checkpointers.get("checkpoint_best")
-    checkpoint_path = checkpoint.last_checkpoint if checkpoint else None
-    if not checkpoint_path:
-        logger.warning("No checkpoint found; skipping model upload to Weights & Biases.")
-        return
-    artifact = exp_logger.Artifact(name=f"{run_name}-model".replace("/", "-"), type="model")
-    artifact.add_file(str(checkpoint_path))
-    exp_logger.log_artifact(artifact)
-    logger.info("Uploaded model checkpoint to Weights & Biases: %s", checkpoint_path)
-
-
 def setup_console_logger(
     run_dir: Path,
     engine: Engine,

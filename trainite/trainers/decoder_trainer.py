@@ -1,9 +1,11 @@
 import logging
+from pathlib import Path
 from typing import Any, Literal
 
 import ignite.distributed as idist
 import torch
 from ignite.engine import Engine, Events
+from ignite.handlers.checkpoint import CheckpointEvents
 from ignite.metrics import Accuracy, Loss, Metric, RunningAverage
 from ignite.utils import setup_logger
 from pydantic import BaseModel, ConfigDict, Field
@@ -30,9 +32,8 @@ from trainite.shared.utils import (
     make_run_dir,
     setup_best_model_checkpoint,
     setup_console_logger,
-    setup_training_checkpointing,
     setup_experiment_tracking,
-    upload_model_to_wandb,
+    setup_training_checkpointing,
 )
 
 
@@ -147,6 +148,36 @@ class Trainer:
             bool(self.test_loader),
             config.output.run_name,
         )
+
+        if config.logger == "wandb":
+            self.val_evaluator.register_events(*CheckpointEvents)
+            self.engine.register_events(*CheckpointEvents)
+
+            # 1. Upload best model artifact immediately when a better one is saved
+            @self.val_evaluator.on(CheckpointEvents.SAVED_CHECKPOINT)
+            def upload_best_model_artifact(engine):
+                best_checkpoint = self.checkpointers.get("checkpoint_best")
+                checkpoint_path = best_checkpoint.last_checkpoint if best_checkpoint else None
+                if checkpoint_path and Path(checkpoint_path).exists():
+                    self.logger.info(f"Uploading new best model artifact to W&B: {checkpoint_path}")
+                    artifact = self.exp_logger.Artifact(
+                        name=f"{config.output.run_name}-model".replace("/", "-"), type="model"
+                    )
+                    artifact.add_file(str(checkpoint_path))
+                    self.exp_logger.log_artifact(artifact)
+
+            # 2. Upload last epoch checkpoint artifact immediately when saved
+            @self.engine.on(CheckpointEvents.SAVED_CHECKPOINT)
+            def upload_last_checkpoint_artifact(engine):
+                last_checkpoint = self.checkpointers.get("checkpoint_last")
+                checkpoint_path = last_checkpoint.last_checkpoint if last_checkpoint else None
+                if checkpoint_path and Path(checkpoint_path).exists():
+                    self.logger.info(f"Uploading last checkpoint artifact to W&B: {checkpoint_path}")
+                    artifact = self.exp_logger.Artifact(
+                        name=f"{config.output.run_name}-checkpoint".replace("/", "-"), type="checkpoint"
+                    )
+                    artifact.add_file(str(checkpoint_path))
+                    self.exp_logger.log_artifact(artifact)
 
         # Run evaluations at the end of each epoch to log training and validation metrics
         self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
@@ -438,13 +469,5 @@ class Trainer:
 
         if self.test_loader:
             self.test()
-
-        if self.config.logger == "wandb":
-            upload_model_to_wandb(
-                self.exp_logger,
-                self.checkpointers,
-                self.config.output.run_name,
-                self.logger,
-            )
 
         self.exp_logger.close()
