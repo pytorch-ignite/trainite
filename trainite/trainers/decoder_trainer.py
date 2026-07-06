@@ -181,6 +181,26 @@ class Trainer:
         logits = self.model(inputs, attention_mask=attention_mask)
         return {"logits": logits, "targets": targets}
 
+    def run(self) -> None:
+        self.logger.info("starting run in %s", self.run_dir)
+        config_data = self.config.model_dump(by_alias=True, polymorphic_serialization=True)
+        self._log_text("config", str(config_data), 0)
+
+        self.engine.run(self.train_loader, max_epochs=self.epochs)
+
+        if self.test_loader:
+            self.test()
+
+        if self.config.logger == "wandb":
+            upload_model_to_wandb(
+                self.exp_logger,
+                self.checkpointers,
+                self.config.output.run_name,
+                self.logger,
+            )
+
+        self.exp_logger.close()
+
     def _attach_metrics(self) -> dict[str, Metric]:
         RunningAverage(output_transform=lambda output: output["loss"]).attach(self.engine, "loss")
 
@@ -419,26 +439,6 @@ class Trainer:
             metrics["loss"],
             metrics["token_accuracy"],
         )
-
-    def run(self) -> None:
-        self.logger.info("starting run in %s", self.run_dir)
-        config_data = self.config.model_dump(by_alias=True, polymorphic_serialization=True)
-        self._log_text("config", str(config_data), 0)
-
-        self.engine.run(self.train_loader, max_epochs=self.epochs)
-
-        if self.test_loader:
-            self.test()
-
-        if self.config.logger == "wandb":
-            upload_model_to_wandb(
-                self.exp_logger,
-                self.checkpointers,
-                self.config.output.run_name,
-                self.logger,
-            )
-
-        self.exp_logger.close()
 
 
 def _flatten(output: dict[str, torch.Tensor], ignore_index: int = -100) -> tuple[torch.Tensor, torch.Tensor]:
