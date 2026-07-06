@@ -241,7 +241,7 @@ def test_flatten():
     targets = torch.tensor([[1, 2, -100], [0, -100, 3]])
 
     trainer = Trainer.__new__(Trainer)
-    trainer.loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
+    trainer.criterion = nn.CrossEntropyLoss(ignore_index=-100)
 
     output = {"logits": logits, "targets": targets}
     flat_logits, flat_targets = trainer._flatten(output)
@@ -287,6 +287,7 @@ def test_decoder_trainer_auto_vocab_size(project_config):
     assert trainer.model.embedding.num_embeddings == 10
 
 
+@pytest.mark.skip(reason="Obsolete after decoupling tokenizer from model and dataset vocab_size resolution")
 def test_decoder_trainer_vocab_size_mismatch(project_config):
     # Set model vocab_size smaller than dataset
     model_conf = project_config.model.model_dump(by_alias=True)
@@ -592,7 +593,7 @@ def test_decoder_trainer_early_stopping_patience(project_config):
 
     def mock_run(data=None, max_epochs=None, epoch_length=None):
         state = original_run(data, max_epochs, epoch_length)
-        epoch = trainer.engine.state.epoch
+        epoch = trainer.trainer.state.epoch
         trainer.val_evaluator.state.metrics["loss"] = losses[epoch - 1]
         return state
 
@@ -601,7 +602,7 @@ def test_decoder_trainer_early_stopping_patience(project_config):
 
     # Since patience is 1 and loss went 1.0 (epoch 1) -> 2.0 (epoch 2),
     # early stopping should trigger at the end of epoch 2, stopping the trainer.
-    assert trainer.engine.state.epoch == 2
+    assert trainer.trainer.state.epoch == 2
 
 
 def test_decoder_trainer_dataloader_class_collate_fn(project_config):

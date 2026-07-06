@@ -66,7 +66,7 @@ class Trainer:
         self.logger: logging.Logger = setup_logger("trainer", level=logging.INFO)
         torch.manual_seed(config.seed)
         self.config: ProjectConfig = config
-        self.trainer_config: TrainerConfig = self.trainer_config
+        self.trainer_config: TrainerConfig = config.trainer
         self.device: str | torch.device = idist.device() if config.device is None else config.device
         self.tokenizer = instantiate(config.preprocessor)
         self.train_loader, self.val_loader, self.test_loader = build_dataloaders(
@@ -217,7 +217,8 @@ class Trainer:
 
     def _run_evaluations(self, engine: Engine) -> None:
         self.logger.info("Evaluating on training set...")
-        self.train_evaluator.run(self.train_loader)
+        eval_loader = itertools.islice(self.train_loader, len(self.val_loader))
+        self.train_evaluator.run(eval_loader)
         train_metrics = self.train_evaluator.state.metrics
         epoch = engine.state.epoch
 
@@ -412,8 +413,7 @@ class Trainer:
         config_data = self.config.model_dump(by_alias=True, polymorphic_serialization=True)
         self._log_text("config", str(config_data), 0)
 
-        # Run training loop, limiting the number of iterations to match the validation set size
-        self.trainer.run(itertools.islice(self.train_loader, len(self.val_loader)))
+        self.trainer.run(self.train_loader, max_epochs=self.epochs)
 
         if self.test_loader:
             self.test()
