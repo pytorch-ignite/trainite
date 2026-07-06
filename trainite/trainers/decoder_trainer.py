@@ -1,8 +1,8 @@
 import logging
 from typing import Any, Literal
 
-import torch
 import ignite.distributed as idist
+import torch
 from ignite.engine import Engine, Events
 from ignite.metrics import Accuracy, Loss, Metric, RunningAverage
 from ignite.utils import setup_logger
@@ -30,8 +30,8 @@ from trainite.shared.utils import (
     make_run_dir,
     setup_best_model_checkpoint,
     setup_console_logger,
-    setup_experiment_logger,
     setup_training_checkpointing,
+    setup_experiment_tracking,
     upload_model_to_wandb,
 )
 
@@ -135,7 +135,7 @@ class Trainer:
         }
 
         # Attach experiment logger (TensorBoard or Weights & Biases)
-        self.exp_logger = setup_experiment_logger(
+        self.exp_logger = setup_experiment_tracking(
             config.logger,
             self.engine,
             self.val_evaluator,
