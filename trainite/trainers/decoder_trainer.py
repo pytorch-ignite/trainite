@@ -423,9 +423,6 @@ class Trainer:
 
     def run(self) -> None:
         self.logger.info("starting run in %s", self.run_dir)
-        config_data = self.config.model_dump(by_alias=True, polymorphic_serialization=True)
-        self._log_text("config", str(config_data), 0)
-
         self.engine.run(self.train_loader, max_epochs=self.epochs)
 
         if self.test_loader:

@@ -1,6 +1,7 @@
 import importlib
 import inspect
 import logging
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal, TypeVar
@@ -306,8 +307,13 @@ def setup_experiment_tracking(
 ) -> TensorboardLogger | WandBLogger:
     if backend == "wandb":
         exp_logger = WandBLogger(project=run_name, dir=str(run_dir), name=str(run_dir).split("/")[-1])
+        if run_dir and (run_dir / "config.yaml").exists():
+            exp_logger.save(str(run_dir / "config.yaml"))
     else:
         log_dir = run_dir / "tensorboard" if run_dir else None
+        if log_dir and run_dir and (run_dir / "config.yaml").exists():
+            log_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(run_dir / "config.yaml", log_dir / "config.yaml")
         exp_logger = TensorboardLogger(log_dir=log_dir)
 
     # Log training iteration loss
