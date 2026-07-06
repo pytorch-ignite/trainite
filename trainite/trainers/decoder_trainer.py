@@ -1,8 +1,8 @@
 import logging
 from typing import Any, Literal
 
-import torch
 import ignite.distributed as idist
+import torch
 from ignite.engine import Engine, Events
 from ignite.metrics import Accuracy, Loss, Metric, RunningAverage
 from ignite.utils import setup_logger
@@ -105,6 +105,9 @@ class Trainer:
         self.test_evaluator = Engine(self._eval_step)
         self.metrics: dict = self._attach_metrics()
 
+        # Run evaluations at the end of each epoch to log training and validation metrics
+        self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
+
         # Create run directory for outputs
         self.run_dir = make_run_dir(config.output)
         dump_config(self.config, self.run_dir / "config.yaml")
@@ -139,9 +142,6 @@ class Trainer:
             bool(self.test_loader),
             config.output.run_name,
         )
-
-        # Run evaluations at the end of each epoch to log training and validation metrics
-        self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
 
         # Attach inference logger if inference logging is enabled
         if self.inference_every_epochs is not None:
