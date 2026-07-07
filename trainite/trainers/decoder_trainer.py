@@ -90,8 +90,7 @@ class Trainer:
             return -loss
 
         # Attach checkpointing
-        self.checkpointers = {}
-        self.checkpointers["checkpoint_best"] = setup_best_model_checkpoint(
+        self.best_checkpoint = setup_best_model_checkpoint(
             self.trainer,
             self.val_evaluator,
             {"model": self.model, "optimizer": self.optimizer},
@@ -99,7 +98,7 @@ class Trainer:
             score_function=score_function,
             score_name="val_loss",
         )
-        self.checkpointers["checkpoint_last"] = setup_training_checkpointing(
+        self.last_checkpoint = setup_training_checkpointing(
             self.trainer,
             {"model": self.model, "optimizer": self.optimizer},
             self.run_dir,
@@ -124,7 +123,8 @@ class Trainer:
             setup_wandb_checkpoint_uploads(
                 self.trainer,
                 self.val_evaluator,
-                self.checkpointers,
+                self.best_checkpoint,
+                self.last_checkpoint,
                 self.exp_logger,
                 config.output.run_name,
                 self.logger,
@@ -202,7 +202,7 @@ class Trainer:
             return
 
         # Load best model if available
-        checkpoint_handler = self.checkpointers.get("checkpoint_best", None)
+        checkpoint_handler = self.best_checkpoint
         if checkpoint_handler and checkpoint_handler.last_checkpoint:
             checkpoint_path = checkpoint_handler.last_checkpoint
 

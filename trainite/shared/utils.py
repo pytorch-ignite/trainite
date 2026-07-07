@@ -375,7 +375,8 @@ def setup_console_logger(
 def setup_wandb_checkpoint_uploads(
     trainer: Engine,
     val_evaluator: Engine,
-    checkpointers: dict[str, Any],
+    best_checkpoint: Checkpoint,
+    last_checkpoint: Checkpoint,
     exp_logger: Any,
     run_name: str,
     logger: logging.Logger,
@@ -385,14 +386,14 @@ def setup_wandb_checkpoint_uploads(
     trainer.register_events(*CheckpointEvents)
 
     def upload_best_model_artifact(engine):
-        checkpoint_path = checkpointers["checkpoint_best"].last_checkpoint
+        checkpoint_path = best_checkpoint.last_checkpoint
         logger.info(f"Uploading new best model artifact to W&B: {checkpoint_path}")
         artifact = exp_logger.Artifact(name=f"{run_name}-model".replace("/", "-"), type="model")
         artifact.add_file(str(checkpoint_path))
         exp_logger.log_artifact(artifact)
 
     def upload_last_checkpoint_artifact(engine):
-        checkpoint_path = checkpointers["checkpoint_last"].last_checkpoint
+        checkpoint_path = last_checkpoint.last_checkpoint
         logger.info(f"Uploading last checkpoint artifact to W&B: {checkpoint_path}")
         artifact = exp_logger.Artifact(name=f"{run_name}-checkpoint".replace("/", "-"), type="checkpoint")
         artifact.add_file(str(checkpoint_path))
