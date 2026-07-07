@@ -113,7 +113,8 @@ class Trainer:
         attach_lr_scheduler(self.trainer, self.optimizer, self.total_iters, config.optimizer.lr)
 
         # Attach early stopping
-        attach_early_stopping(self.val_evaluator, self.trainer, self.trainer_config.early_stopping_patience)
+        if self.trainer_config.early_stopping_patience is not None:
+            attach_early_stopping(self.val_evaluator, self.trainer, self.trainer_config.early_stopping_patience)
 
         # Define validation scoring function for best model
         def score_function(engine_val):
