@@ -92,7 +92,7 @@ class TrainerConfig(BaseModel):
 
 class ProjectConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
-    preprocessor: PreprocessorConfig | None = None
+    preprocessor: PreprocessorConfig
     model: ModelConfig
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
     data: DataConfigBase | DataWithAutoSplit
