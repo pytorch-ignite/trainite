@@ -1,7 +1,6 @@
 import importlib
 import inspect
 import logging
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Literal, TypeVar
@@ -304,7 +303,7 @@ def setup_experiment_tracking(
     else:
         log_dir = run_dir / "tensorboard"
         log_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(run_dir / "config.yaml", log_dir / "config.yaml")
+        (log_dir / "config.yaml").write_bytes((run_dir / "config.yaml").read_bytes())
         exp_logger = TensorboardLogger(log_dir=log_dir)
 
     # Log training iteration loss
