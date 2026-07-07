@@ -1,6 +1,5 @@
 import itertools
 import logging
-from typing import Any
 
 import ignite.distributed as idist
 import torch
@@ -15,9 +14,6 @@ from trainite.config.base import (
     TrainerConfig,
 )
 
-# __MODEL_IMPORT__
-# __DATASET_IMPORT__
-# __PREPROCESSOR_IMPORT__
 from trainite.shared.utils import (
     attach_early_stopping,
     attach_lr_scheduler,
