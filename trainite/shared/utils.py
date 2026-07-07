@@ -296,7 +296,7 @@ def setup_experiment_tracking(
     metric_names: list[str],
     has_test: bool,
     run_name: str,
-    config: BaseModel
+    config: BaseModel,
 ) -> TensorboardLogger | WandBLogger:
     if backend == "wandb":
         exp_logger = WandBLogger(project=run_name, dir=str(run_dir), name=str(run_dir).split("/")[-1])
