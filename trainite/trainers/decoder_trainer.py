@@ -39,6 +39,12 @@ from trainite.shared.utils import (
     setup_wandb_checkpoint_uploads,
 )
 
+def _flatten(output: dict[str, torch.Tensor], ignore_index: int = -100) -> tuple[torch.Tensor, torch.Tensor]:
+    logits = output["logits"].reshape(-1, output["logits"].size(-1))
+    targets = output["targets"].reshape(-1)
+    mask = targets != ignore_index
+    return logits[mask], targets[mask]
+
 
 class Trainer:
     def __init__(self, config: ProjectConfigBase) -> None:
@@ -70,6 +76,9 @@ class Trainer:
         self.test_evaluator = Engine(self._eval_step)
         self.metrics: dict = self._attach_metrics()
 
+        # Run evaluations at the end of each epoch to log training and validation metrics
+        self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
+
         # Create run directory for outputs
         self.run_dir = make_run_dir(config.output)
         dump_config(self.config, self.run_dir / "config.yaml")
@@ -83,7 +92,8 @@ class Trainer:
         attach_lr_scheduler(self.trainer, self.optimizer, self.total_iters, config.optimizer.lr)
 
         # Attach early stopping
-        attach_early_stopping(self.val_evaluator, self.trainer, self.trainer_config.early_stopping_patience)
+        if self.trainer_config.early_stopping_patience is not None:
+            attach_early_stopping(self.val_evaluator, self.trainer, self.trainer_config.early_stopping_patience)
 
         # Define validation scoring function for best model
         def score_function(engine_val):
@@ -118,6 +128,7 @@ class Trainer:
             ["loss", "token_accuracy"],
             bool(self.test_loader),
             config.output.run_name,
+            config,
         )
 
         # Real-time W&B uploads
@@ -130,19 +141,9 @@ class Trainer:
                 config.output.run_name,
                 self.logger,
             )
-
-        # Run evaluations at the end of each epoch to log training and validation metrics
-        self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
-
         # Attach inference logger if inference logging is enabled
         if self.inference_every_epochs is not None:
             self.attach_inference_logger()
-
-    def _flatten(self, output: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
-        logits = output["logits"].reshape(-1, output["logits"].size(-1))
-        targets = output["targets"].reshape(-1)
-        mask = targets != self.criterion.ignore_index
-        return logits[mask], targets[mask]
 
     def _train_step(self, engine: Engine, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         self.model.train()
@@ -178,8 +179,48 @@ class Trainer:
         logits = self.model(inputs, attention_mask=attention_mask)
         return {"logits": logits, "targets": targets}
 
+    def run(self) -> None:
+        self.logger.info("starting run in %s", self.run_dir)
+        self.trainer.run(self.train_loader, max_epochs=self.epochs)
+
+        if self.test_loader:
+            self.test()
+
+        self.exp_logger.close()
+
+    def test(self, test_loader: DataLoader | None = None) -> None:
+        loader = test_loader or self.test_loader
+        if loader is None:
+            self.logger.warning("No test loader provided. Skipping testing.")
+            return
+
+        # Load best model if available
+        checkpoint_handler = self.checkpointers.get("checkpoint_best", None)
+        if checkpoint_handler and checkpoint_handler.last_checkpoint:
+            checkpoint_path = checkpoint_handler.last_checkpoint
+
+            self.logger.info("Loading best model for testing from %s", checkpoint_path)
+            checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
+            self.model.load_state_dict(checkpoint["model"])
+        else:
+            self.logger.warning("No best model checkpoint found. Using current model for testing.")
+
+        self.logger.info("Running testing...")
+        self.test_evaluator.run(loader)
+        metrics = self.test_evaluator.state.metrics
+        self.logger.info(
+            "Test results: loss=%.4f token_acc=%.4f",
+            metrics["loss"],
+            metrics["token_accuracy"],
+        )
+
     def _attach_metrics(self) -> dict[str, Metric]:
         RunningAverage(output_transform=lambda output: output["loss"]).attach(self.trainer, "loss")
+
+        ignore_index = self.criterion.ignore_index
+
+        def transform_fn(output):
+            return _flatten(output, ignore_index=ignore_index)
 
         metrics = {}
         for prefix, evaluator in [
@@ -187,8 +228,8 @@ class Trainer:
             ("val", self.val_evaluator),
             ("test", self.test_evaluator),
         ]:
-            loss = Loss(self.criterion, output_transform=self._flatten)
-            token_acc = Accuracy(output_transform=self._flatten)
+            loss = Loss(self.criterion, output_transform=transform_fn)
+            token_acc = Accuracy(output_transform=transform_fn)
 
             loss.attach(evaluator, "loss")
             token_acc.attach(evaluator, "token_accuracy")
@@ -386,41 +427,3 @@ class Trainer:
                 break
 
         return generated
-
-    def test(self, test_loader: DataLoader | None = None) -> None:
-        loader = test_loader or self.test_loader
-        if loader is None:
-            self.logger.warning("No test loader provided. Skipping testing.")
-            return
-
-        # Load best model if available
-        checkpoint_handler = self.checkpointers.get("checkpoint_best", None)
-        if checkpoint_handler and checkpoint_handler.last_checkpoint:
-            checkpoint_path = checkpoint_handler.last_checkpoint
-
-            self.logger.info("Loading best model for testing from %s", checkpoint_path)
-            checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
-            self.model.load_state_dict(checkpoint["model"])
-        else:
-            self.logger.warning("No best model checkpoint found. Using current model for testing.")
-
-        self.logger.info("Running testing...")
-        self.test_evaluator.run(loader)
-        metrics = self.test_evaluator.state.metrics
-        self.logger.info(
-            "Test results: loss=%.4f token_acc=%.4f",
-            metrics["loss"],
-            metrics["token_accuracy"],
-        )
-
-    def run(self) -> None:
-        self.logger.info("starting run in %s", self.run_dir)
-        config_data = self.config.model_dump(by_alias=True, polymorphic_serialization=True)
-        self._log_text("config", str(config_data), 0)
-
-        self.trainer.run(self.train_loader, max_epochs=self.epochs)
-
-        if self.test_loader:
-            self.test()
-
-        self.exp_logger.close()
