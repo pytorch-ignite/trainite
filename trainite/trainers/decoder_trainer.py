@@ -149,6 +149,7 @@ class Trainer:
             ["loss", "token_accuracy"],
             bool(self.test_loader),
             config.output.run_name,
+            config,
         )
 
         # Real-time W&B uploads
