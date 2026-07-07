@@ -18,7 +18,7 @@ from trainite.config import (
     ProjectConfig,
 )
 from trainite.datasets.string_reverse import DatapointModel
-from trainite.trainers.decoder_trainer import Trainer, TrainerConfig, ProjectConfig, _flatten
+from trainite.trainers.decoder_trainer import Trainer, DecoderTrainerConfig, _flatten
 from ignite.engine import Events
 from ignite.handlers import EarlyStopping
 import ignite.distributed as idist
