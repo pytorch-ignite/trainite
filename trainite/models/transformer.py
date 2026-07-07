@@ -151,7 +151,6 @@ class TransformerModel(nn.Module):
         dropout: float = 0.1,
         max_seq_len: int = 128,
         pad_token_id: int | None = None,
-        **kwargs: Any,
     ) -> None:
         super().__init__()
         pad_token_id = pad_token_id if pad_token_id is not None else 0
