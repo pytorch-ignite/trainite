@@ -471,7 +471,6 @@ def test_decoder_trainer_test_without_val(project_config, temp_run_dir):
     trainer = create_trainer_from_config(project_config)
     trainer.run()
 
-    # checkpoint_best should not exist, it should use checkpoint_last
     assert trainer.best_checkpoint is not None
     assert trainer.last_checkpoint is not None
 
