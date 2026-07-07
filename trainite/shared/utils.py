@@ -231,25 +231,21 @@ def attach_lr_scheduler(
         warmup_duration=warmup_iters,
     )
     engine.add_event_handler(Events.ITERATION_COMPLETED, scheduler)
-    return scheduler
 
 
 def attach_early_stopping(
     val_evaluator: Engine,
     trainer_engine: Engine,
-    patience: int | None,
+    patience: int,
 ) -> EarlyStopping | None:
-    if patience is not None:
-        early_stopping = EarlyStopping(
-            patience=patience,
-            score_function=lambda engine: engine.state.metrics["loss"],
-            trainer=trainer_engine,
-            min_delta=0.0,
-            mode="min",
-        )
-        val_evaluator.add_event_handler(Events.COMPLETED, early_stopping)
-        return early_stopping
-    return None
+    early_stopping = EarlyStopping(
+        patience=patience,
+        score_function=lambda engine: engine.state.metrics["loss"],
+        trainer=trainer_engine,
+        min_delta=0.0,
+        mode="min",
+    )
+    val_evaluator.add_event_handler(Events.COMPLETED, early_stopping)
 
 
 def setup_training_checkpointing(
