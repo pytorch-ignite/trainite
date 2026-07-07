@@ -1,43 +1,30 @@
-from typing import Any, Self, Literal
+from typing import Self, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-class CoerceFromModel(BaseModel):
-    """Accepts any BaseModel instance as input by dumping it to a dict first."""
-
-    @model_validator(mode="before")
-    @classmethod
-    def validate_from_any_model(cls, data: Any) -> Any:
-        if isinstance(data, BaseModel):
-            return data.model_dump(by_alias=True)
-        return data
-
-
-class TargetedConfig(CoerceFromModel):
-    """Config for a component addressed by a ``_target_`` import path."""
-
+class ModelConfig(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: str = Field(alias="_target_")
 
 
-class ModelConfig(TargetedConfig):
-    pass
+class PreprocessorConfig(BaseModel):
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
+    target: str = Field(alias="_target_")
 
 
-class PreprocessorConfig(TargetedConfig):
-    pass
+class DatasetConfig(BaseModel):
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
+    target: str = Field(alias="_target_")
 
 
-class DatasetConfig(TargetedConfig):
-    pass
+class TransformConfig(BaseModel):
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
+    target: str = Field(alias="_target_")
 
 
-class TransformConfig(TargetedConfig):
-    pass
-
-
-class CollateFnConfig(TargetedConfig):
-    pass
+class CollateFnConfig(BaseModel):
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
+    target: str = Field(alias="_target_")
 
 
 class OutputConfig(BaseModel):
@@ -46,7 +33,8 @@ class OutputConfig(BaseModel):
     run_name: str
 
 
-class OptimizerConfig(TargetedConfig):
+class OptimizerConfig(BaseModel):
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: str = Field(alias="_target_", default="torch.optim.AdamW")
     lr: float = Field(default=1e-3, gt=0.0)
 
@@ -75,7 +63,6 @@ class DataConfigBase(BaseModel):
 
 class DataWithAutoSplit(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
-    # Option 2: Automatic splitting
     dataset: DatasetConfig
     transform: TransformConfig | None = None
     dataloader: DataLoaderConfig = Field(default_factory=DataLoaderConfig)
@@ -92,12 +79,11 @@ class DataWithAutoSplit(BaseModel):
         return self
 
 
-class TrainerConfig(CoerceFromModel):
+class TrainerConfig(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     epochs: int = Field(default=3, gt=0)
     log_every_steps: int = Field(default=10, gt=0)
     early_stopping_patience: int | None = Field(default=3, gt=0)
-    # Inference logging
     inference_every_epochs: int | None = Field(default=None, gt=0)
     inference_num_samples: int = Field(default=5, gt=0)
     max_inference_new_tokens: int = Field(default=16, gt=0)

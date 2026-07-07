@@ -1,16 +1,16 @@
 import pytest
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import ValidationError
 
 from trainite.config.base import (
     DataConfigBase,
     DataWithAutoSplit,
     SplitConfig,
+    DatasetConfig,
 )
 
 
-class MockComponent(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    target: str = Field(alias="_target_")
+class MockComponent(DatasetConfig):
+    pass
 
 
 def test_data_config_option_1():

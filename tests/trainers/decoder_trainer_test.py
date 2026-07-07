@@ -7,7 +7,7 @@ from unittest import mock
 import pytest
 import torch
 import torch.nn as nn
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import ValidationError
 from trainite.config import (
     DataConfigBase,
     DataLoaderConfig,
@@ -15,6 +15,11 @@ from trainite.config import (
     OptimizerConfig,
     OutputConfig,
     SplitConfig,
+    ModelConfig,
+    PreprocessorConfig,
+    DatasetConfig,
+    TransformConfig,
+    CollateFnConfig,
 )
 from trainite.datasets.string_reverse import DatapointModel
 from trainite.trainers.decoder_trainer import Trainer, _flatten
@@ -28,9 +33,8 @@ def create_trainer_from_config(config: ProjectConfig) -> Trainer:
     return Trainer(config)
 
 
-class MockComponent(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    target: str = Field(alias="_target_")
+class MockComponent(ModelConfig, PreprocessorConfig, DatasetConfig, TransformConfig, CollateFnConfig):
+    pass
 
 
 def cc(target: str | None = None, **kwargs: object) -> MockComponent:
