@@ -210,6 +210,32 @@ class Trainer:
 
         self.exp_logger.close()
 
+    def test(self, test_loader: DataLoader | None = None) -> None:
+        loader = test_loader or self.test_loader
+        if loader is None:
+            self.logger.warning("No test loader provided. Skipping testing.")
+            return
+
+        # Load best model if available
+        checkpoint_handler = self.checkpointers.get("checkpoint_best", None)
+        if checkpoint_handler and checkpoint_handler.last_checkpoint:
+            checkpoint_path = checkpoint_handler.last_checkpoint
+
+            self.logger.info("Loading best model for testing from %s", checkpoint_path)
+            checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
+            self.model.load_state_dict(checkpoint["model"])
+        else:
+            self.logger.warning("No best model checkpoint found. Using current model for testing.")
+
+        self.logger.info("Running testing...")
+        self.test_evaluator.run(loader)
+        metrics = self.test_evaluator.state.metrics
+        self.logger.info(
+            "Test results: loss=%.4f token_acc=%.4f",
+            metrics["loss"],
+            metrics["token_accuracy"],
+        )
+
     def _attach_metrics(self) -> dict[str, Metric]:
         RunningAverage(output_transform=lambda output: output["loss"]).attach(self.trainer, "loss")
 
@@ -423,29 +449,3 @@ class Trainer:
                 break
 
         return generated
-
-    def test(self, test_loader: DataLoader | None = None) -> None:
-        loader = test_loader or self.test_loader
-        if loader is None:
-            self.logger.warning("No test loader provided. Skipping testing.")
-            return
-
-        # Load best model if available
-        checkpoint_handler = self.checkpointers.get("checkpoint_best", None)
-        if checkpoint_handler and checkpoint_handler.last_checkpoint:
-            checkpoint_path = checkpoint_handler.last_checkpoint
-
-            self.logger.info("Loading best model for testing from %s", checkpoint_path)
-            checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
-            self.model.load_state_dict(checkpoint["model"])
-        else:
-            self.logger.warning("No best model checkpoint found. Using current model for testing.")
-
-        self.logger.info("Running testing...")
-        self.test_evaluator.run(loader)
-        metrics = self.test_evaluator.state.metrics
-        self.logger.info(
-            "Test results: loss=%.4f token_acc=%.4f",
-            metrics["loss"],
-            metrics["token_accuracy"],
-        )
