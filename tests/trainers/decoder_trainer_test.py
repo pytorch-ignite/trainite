@@ -386,13 +386,16 @@ def test_decoder_trainer_test_no_loader(project_config):
 
 
 @mock.patch("trainite.trainers.decoder_trainer.setup_experiment_tracking")
-def test_upload_model_to_wandb(mock_setup, project_config, temp_run_dir):
+@mock.patch("trainite.trainers.decoder_trainer.setup_best_model_checkpoint")
+def test_upload_model_to_wandb(mock_setup_best, mock_setup, project_config, temp_run_dir):
     project_config.logger = "wandb"
     mock_logger = mock.MagicMock()
     mock_setup.return_value = mock_logger
 
+    mock_best = mock.MagicMock(last_checkpoint="best_model_1.pt")
+    mock_setup_best.return_value = mock_best
+
     trainer = create_trainer_from_config(project_config)
-    trainer.best_checkpoint = mock.MagicMock(last_checkpoint="best_model_1.pt")
 
     from ignite.handlers.checkpoint import CheckpointEvents
 
@@ -403,13 +406,16 @@ def test_upload_model_to_wandb(mock_setup, project_config, temp_run_dir):
 
 
 @mock.patch("trainite.trainers.decoder_trainer.setup_experiment_tracking")
-def test_upload_last_checkpoint_to_wandb(mock_setup, project_config, temp_run_dir):
+@mock.patch("trainite.trainers.decoder_trainer.setup_training_checkpointing")
+def test_upload_last_checkpoint_to_wandb(mock_setup_last, mock_setup, project_config, temp_run_dir):
     project_config.logger = "wandb"
     mock_logger = mock.MagicMock()
     mock_setup.return_value = mock_logger
 
+    mock_last = mock.MagicMock(last_checkpoint="last_model_1.pt")
+    mock_setup_last.return_value = mock_last
+
     trainer = create_trainer_from_config(project_config)
-    trainer.last_checkpoint = mock.MagicMock(last_checkpoint="last_model_1.pt")
 
     from ignite.handlers.checkpoint import CheckpointEvents
 
