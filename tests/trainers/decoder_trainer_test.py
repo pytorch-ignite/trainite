@@ -336,7 +336,7 @@ def test_decoder_trainer_run_with_val(project_config, temp_run_dir):
 
     event_handlers = trainer.val_evaluator._event_handlers.get(Events.COMPLETED, [])
     assert any(isinstance(h[0], EarlyStopping) for h in event_handlers)
-    assert "checkpoint_best" in trainer.checkpointers
+    assert trainer.best_checkpoint is not None
 
 
 @pytest.mark.skip(reason="Skipping this test because validation is required.")
@@ -370,7 +370,7 @@ def test_decoder_trainer_run_without_val(project_config, temp_run_dir):
     # Early stopping and best checkpoint should NOT be in handlers / attached
     event_handlers = trainer.val_evaluator._event_handlers.get(Events.COMPLETED, [])
     assert not any(isinstance(h[0], EarlyStopping) for h in event_handlers)
-    assert "checkpoint_best" not in trainer.checkpointers
+    assert trainer.best_checkpoint is not None
 
 
 def test_decoder_trainer_test_no_loader(project_config):
@@ -392,8 +392,7 @@ def test_upload_model_to_wandb(mock_setup, project_config, temp_run_dir):
     mock_setup.return_value = mock_logger
 
     trainer = create_trainer_from_config(project_config)
-    trainer.checkpointers.clear()
-    trainer.checkpointers["checkpoint_best"] = mock.MagicMock(last_checkpoint="best_model_1.pt")
+    trainer.best_checkpoint = mock.MagicMock(last_checkpoint="best_model_1.pt")
 
     from ignite.handlers.checkpoint import CheckpointEvents
 
@@ -410,8 +409,7 @@ def test_upload_last_checkpoint_to_wandb(mock_setup, project_config, temp_run_di
     mock_setup.return_value = mock_logger
 
     trainer = create_trainer_from_config(project_config)
-    trainer.checkpointers.clear()
-    trainer.checkpointers["checkpoint_last"] = mock.MagicMock(last_checkpoint="last_model_1.pt")
+    trainer.last_checkpoint = mock.MagicMock(last_checkpoint="last_model_1.pt")
 
     from ignite.handlers.checkpoint import CheckpointEvents
 
@@ -468,14 +466,14 @@ def test_decoder_trainer_test_without_val(project_config, temp_run_dir):
     trainer.run()
 
     # checkpoint_best should not exist, it should use checkpoint_last
-    assert "checkpoint_best" not in trainer.checkpointers
-    assert "checkpoint_last" in trainer.checkpointers
+    assert trainer.best_checkpoint is not None
+    assert trainer.last_checkpoint is not None
 
     with mock.patch("torch.load", side_effect=torch.load) as mock_load:
         trainer.test()
 
     # Verify that it loaded the last checkpoint
-    last_checkpoint_path = trainer.checkpointers["checkpoint_last"].last_checkpoint
+    last_checkpoint_path = trainer.last_checkpoint.last_checkpoint
     mock_load.assert_any_call(last_checkpoint_path, map_location=trainer.device, weights_only=True)
 
 
