@@ -1,6 +1,6 @@
+import itertools
 import logging
 from typing import Literal
-import itertools
 
 import ignite.distributed as idist
 import torch
@@ -29,10 +29,11 @@ from trainite.shared.utils import (
     dump_config,
     instantiate,
     make_run_dir,
-    setup_checkpointing,
+    setup_best_model_checkpoint,
     setup_console_logger,
     setup_experiment_tracking,
-    upload_model_to_wandb,
+    setup_training_checkpointing,
+    setup_wandb_checkpoint_uploads,
 )
 
 
@@ -107,10 +108,23 @@ class Trainer:
         # Attach early stopping
         attach_early_stopping(self.val_evaluator, self.trainer, self.trainer_config.early_stopping_patience)
 
+        # Define validation scoring function for best model
+        def score_function(engine_val):
+            loss = engine_val.state.metrics["loss"]
+            return -loss
+
         # Attach checkpointing
-        self.checkpointers = setup_checkpointing(
+        self.checkpointers = {}
+        self.checkpointers["checkpoint_best"] = setup_best_model_checkpoint(
             self.trainer,
             self.val_evaluator,
+            {"model": self.model, "optimizer": self.optimizer},
+            self.run_dir,
+            score_function=score_function,
+            score_name="val_loss",
+        )
+        self.checkpointers["checkpoint_last"] = setup_training_checkpointing(
+            self.trainer,
             {"model": self.model, "optimizer": self.optimizer},
             self.run_dir,
         )
@@ -129,6 +143,16 @@ class Trainer:
             config.output.run_name,
         )
 
+        # Real-time W&B uploads
+        if config.logger == "wandb":
+            setup_wandb_checkpoint_uploads(
+                self.trainer,
+                self.val_evaluator,
+                self.checkpointers,
+                self.exp_logger,
+                config.output.run_name,
+                self.logger,
+            )
         # Attach inference logger if inference logging is enabled
         if self.inference_every_epochs is not None:
             self.attach_inference_logger()
@@ -176,14 +200,6 @@ class Trainer:
 
         if self.test_loader:
             self.test()
-
-        if self.config.logger == "wandb":
-            upload_model_to_wandb(
-                self.exp_logger,
-                self.checkpointers,
-                self.config.output.run_name,
-                self.logger,
-            )
 
         self.exp_logger.close()
 

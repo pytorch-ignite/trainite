@@ -18,7 +18,6 @@ from trainite.config import (
 )
 from trainite.datasets.string_reverse import DatapointModel
 from trainite.trainers.decoder_trainer import Trainer, TrainerConfig, ProjectConfig, _flatten
-from trainite.shared.utils import upload_model_to_wandb
 from ignite.engine import Events
 from ignite.handlers import EarlyStopping
 import ignite.distributed as idist
@@ -381,37 +380,40 @@ def test_decoder_trainer_test_no_loader(project_config):
     mock_warning.assert_called_with("No test loader provided. Skipping testing.")
 
 
-def test_upload_model_to_wandb(project_config, temp_run_dir):
+@mock.patch("trainite.trainers.decoder_trainer.setup_experiment_tracking")
+def test_upload_model_to_wandb(mock_setup, project_config, temp_run_dir):
+    project_config.logger = "wandb"
+    mock_logger = mock.MagicMock()
+    mock_setup.return_value = mock_logger
+
     trainer = create_trainer_from_config(project_config)
-    trainer.exp_logger = mock.MagicMock()
-    trainer.checkpointers = {"checkpoint_best": mock.MagicMock(last_checkpoint="best_model_1.pt")}
+    trainer.checkpointers.clear()
+    trainer.checkpointers["checkpoint_best"] = mock.MagicMock(last_checkpoint="best_model_1.pt")
 
-    upload_model_to_wandb(
-        trainer.exp_logger,
-        trainer.checkpointers,
-        trainer.config.output.run_name,
-        trainer.logger,
-    )
+    from ignite.handlers.checkpoint import CheckpointEvents
 
-    trainer.exp_logger.Artifact.return_value.add_file.assert_called_once_with("best_model_1.pt")
-    trainer.exp_logger.log_artifact.assert_called_once_with(trainer.exp_logger.Artifact.return_value)
+    trainer.val_evaluator.fire_event(CheckpointEvents.SAVED_CHECKPOINT)
+
+    mock_logger.Artifact.return_value.add_file.assert_called_once_with("best_model_1.pt")
+    mock_logger.log_artifact.assert_called_once_with(mock_logger.Artifact.return_value)
 
 
-def test_upload_model_to_wandb_no_checkpoint(project_config):
+@mock.patch("trainite.trainers.decoder_trainer.setup_experiment_tracking")
+def test_upload_last_checkpoint_to_wandb(mock_setup, project_config, temp_run_dir):
+    project_config.logger = "wandb"
+    mock_logger = mock.MagicMock()
+    mock_setup.return_value = mock_logger
+
     trainer = create_trainer_from_config(project_config)
-    trainer.exp_logger = mock.MagicMock()
-    trainer.checkpointers = {}  # nothing saved -> skip, don't crash
+    trainer.checkpointers.clear()
+    trainer.checkpointers["checkpoint_last"] = mock.MagicMock(last_checkpoint="last_model_1.pt")
 
-    with mock.patch.object(trainer.logger, "warning") as mock_warning:
-        upload_model_to_wandb(
-            trainer.exp_logger,
-            trainer.checkpointers,
-            trainer.config.output.run_name,
-            trainer.logger,
-        )
+    from ignite.handlers.checkpoint import CheckpointEvents
 
-    trainer.exp_logger.log_artifact.assert_not_called()
-    mock_warning.assert_called_once()
+    trainer.trainer.fire_event(CheckpointEvents.SAVED_CHECKPOINT)
+
+    mock_logger.Artifact.return_value.add_file.assert_called_once_with("last_model_1.pt")
+    mock_logger.log_artifact.assert_called_once_with(mock_logger.Artifact.return_value)
 
 
 def test_decoder_trainer_test_method(project_config, temp_run_dir):

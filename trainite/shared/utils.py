@@ -3,7 +3,7 @@ import inspect
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal, TypeVar
+from typing import Any, Callable, Literal, TypeVar
 
 import torch
 import yaml
@@ -14,6 +14,7 @@ from ignite.handlers import (
     EarlyStopping,
     create_lr_scheduler_with_warmup,
 )
+from ignite.handlers.checkpoint import CheckpointEvents
 from ignite.handlers.fbresearch_logger import FBResearchLogger
 from ignite.handlers.param_scheduler import ParamScheduler
 from ignite.handlers.tensorboard_logger import TensorboardLogger
@@ -251,30 +252,11 @@ def attach_early_stopping(
     return None
 
 
-def setup_checkpointing(
+def setup_training_checkpointing(
     engine: Engine,
-    val_evaluator: Engine,
     to_save: dict[str, Any],
     run_dir: Path,
-) -> dict[str, Checkpoint]:
-    checkpointers = {}
-
-    def score_function(engine_val):
-        loss = engine_val.state.metrics["loss"]
-        return -loss
-
-    checkpoint = Checkpoint(
-        to_save=to_save,
-        save_handler=DiskSaver(dirname=str(run_dir), require_empty=False),
-        filename_prefix="best",
-        score_function=score_function,
-        score_name="val_loss",
-        n_saved=1,
-        global_step_transform=lambda *_: engine.state.iteration,
-    )
-    val_evaluator.add_event_handler(Events.COMPLETED, checkpoint)
-    checkpointers["checkpoint_best"] = checkpoint
-
+) -> Checkpoint:
     last_checkpoint = Checkpoint(
         to_save=to_save,
         save_handler=DiskSaver(dirname=str(run_dir), require_empty=False),
@@ -283,9 +265,28 @@ def setup_checkpointing(
         global_step_transform=lambda *_: engine.state.iteration,
     )
     engine.add_event_handler(Events.EPOCH_COMPLETED, last_checkpoint)
+    return last_checkpoint
 
-    checkpointers["checkpoint_last"] = last_checkpoint
-    return checkpointers
+
+def setup_best_model_checkpoint(
+    engine: Engine,
+    val_evaluator: Engine,
+    to_save: dict[str, Any],
+    run_dir: Path,
+    score_function: Callable,
+    score_name: str,
+) -> Checkpoint:
+    checkpoint = Checkpoint(
+        to_save=to_save,
+        save_handler=DiskSaver(dirname=str(run_dir), require_empty=False),
+        filename_prefix="best",
+        score_function=score_function,
+        score_name=score_name,
+        n_saved=1,
+        global_step_transform=lambda *_: engine.state.iteration,
+    )
+    val_evaluator.add_event_handler(Events.COMPLETED, checkpoint)
+    return checkpoint
 
 
 def setup_experiment_tracking(
@@ -351,23 +352,6 @@ def setup_experiment_tracking(
     return exp_logger
 
 
-def upload_model_to_wandb(
-    exp_logger: Any,
-    checkpointers: dict[str, Checkpoint],
-    run_name: str,
-    logger: logging.Logger,
-) -> None:
-    checkpoint = checkpointers.get("checkpoint_best")
-    checkpoint_path = checkpoint.last_checkpoint if checkpoint else None
-    if not checkpoint_path:
-        logger.warning("No checkpoint found; skipping model upload to Weights & Biases.")
-        return
-    artifact = exp_logger.Artifact(name=f"{run_name}-model".replace("/", "-"), type="model")
-    artifact.add_file(str(checkpoint_path))
-    exp_logger.log_artifact(artifact)
-    logger.info("Uploaded model checkpoint to Weights & Biases: %s", checkpoint_path)
-
-
 def setup_console_logger(
     run_dir: Path,
     engine: Engine,
@@ -389,3 +373,33 @@ def setup_console_logger(
         output_transform=lambda output: {"loss": output["loss"].item()},
     )
     return logger
+
+
+def setup_wandb_checkpoint_uploads(
+    trainer: Engine,
+    val_evaluator: Engine,
+    checkpointers: dict[str, Any],
+    exp_logger: Any,
+    run_name: str,
+    logger: logging.Logger,
+) -> None:
+    """Register events and upload handlers to automatically log checkpoints to W&B in real-time."""
+    val_evaluator.register_events(*CheckpointEvents)
+    trainer.register_events(*CheckpointEvents)
+
+    def upload_best_model_artifact(engine):
+        checkpoint_path = checkpointers["checkpoint_best"].last_checkpoint
+        logger.info(f"Uploading new best model artifact to W&B: {checkpoint_path}")
+        artifact = exp_logger.Artifact(name=f"{run_name}-model".replace("/", "-"), type="model")
+        artifact.add_file(str(checkpoint_path))
+        exp_logger.log_artifact(artifact)
+
+    def upload_last_checkpoint_artifact(engine):
+        checkpoint_path = checkpointers["checkpoint_last"].last_checkpoint
+        logger.info(f"Uploading last checkpoint artifact to W&B: {checkpoint_path}")
+        artifact = exp_logger.Artifact(name=f"{run_name}-checkpoint".replace("/", "-"), type="checkpoint")
+        artifact.add_file(str(checkpoint_path))
+        exp_logger.log_artifact(artifact)
+
+    val_evaluator.add_event_handler(CheckpointEvents.SAVED_CHECKPOINT, upload_best_model_artifact)
+    trainer.add_event_handler(CheckpointEvents.SAVED_CHECKPOINT, upload_last_checkpoint_artifact)
