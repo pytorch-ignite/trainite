@@ -1,5 +1,6 @@
+import itertools
 import logging
-from typing import Any, Literal
+from typing import Literal
 
 import ignite.distributed as idist
 import torch
@@ -28,10 +29,11 @@ from trainite.shared.utils import (
     dump_config,
     instantiate,
     make_run_dir,
-    setup_checkpointing,
+    setup_best_model_checkpoint,
     setup_console_logger,
     setup_experiment_tracking,
-    upload_model_to_wandb,
+    setup_training_checkpointing,
+    setup_wandb_checkpoint_uploads,
 )
 
 
@@ -60,23 +62,11 @@ class ProjectConfig(BaseModel):
     device: str | None = None
 
 
-# Resolve the vocabulary size for the model based on the tokenizer and model configuration.
-def resolve_vocab_size(tokenizer: Any, model_config: Any) -> int:
-    if tokenizer is None or not hasattr(tokenizer, "vocab_size"):
-        raise ValueError("Tokenizer is missing or does not define a 'vocab_size' attribute.")
-    vocab_size = tokenizer.vocab_size
-    model_params = model_config.model_dump(by_alias=True)
-    configured_vocab_size: int | None = model_params.get("vocab_size")
-    if configured_vocab_size is not None:
-        if configured_vocab_size < vocab_size:
-            raise ValueError(
-                f"Configured model vocab_size ({configured_vocab_size}) is smaller than "
-                f"the tokenizer vocabulary size ({vocab_size}). "
-                f"Please increase model vocab_size or remove it from config.yaml "
-                f"to let it resolve automatically."
-            )
-        vocab_size = configured_vocab_size
-    return vocab_size
+def _flatten(output: dict[str, torch.Tensor], ignore_index: int = -100) -> tuple[torch.Tensor, torch.Tensor]:
+    logits = output["logits"].reshape(-1, output["logits"].size(-1))
+    targets = output["targets"].reshape(-1)
+    mask = targets != ignore_index
+    return logits[mask], targets[mask]
 
 
 class Trainer:
@@ -84,44 +74,64 @@ class Trainer:
         self.logger: logging.Logger = setup_logger("trainer", level=logging.INFO)
         torch.manual_seed(config.seed)
         self.config: ProjectConfig = config
+        self.trainer_config: TrainerConfig = config.trainer
         self.device: str | torch.device = idist.device() if config.device is None else config.device
         self.tokenizer = instantiate(config.preprocessor)
         self.train_loader, self.val_loader, self.test_loader = build_dataloaders(
             config.data, self.tokenizer, config.seed
         )
-        vocab_size = resolve_vocab_size(self.tokenizer, config.model)
-        self.model = build_model(config.model, self.tokenizer, vocab_size, self.device)
+        self.model = build_model(
+            config.model, self.device, vocab_size=self.tokenizer.vocab_size, pad_token_id=self.tokenizer.pad_token_id
+        )
         self.optimizer = instantiate(config.optimizer, params=self.model.parameters())
-        self.epochs: int = config.trainer.epochs
-        self.grad_clip_norm: float | None = getattr(config.trainer, "grad_clip_norm", None)
-        self.inference_every_epochs = config.trainer.inference_every_epochs
-        self.inference_num_samples = config.trainer.inference_num_samples
-        self.max_inference_new_tokens = config.trainer.max_inference_new_tokens
-        self.loss_fn: nn.CrossEntropyLoss = nn.CrossEntropyLoss()
+        self.epochs: int = self.trainer_config.epochs
+        self.grad_clip_norm: float | None = getattr(self.trainer_config, "grad_clip_norm", None)
+        self.inference_every_epochs = self.trainer_config.inference_every_epochs
+        self.inference_num_samples = self.trainer_config.inference_num_samples
+        self.max_inference_new_tokens = self.trainer_config.max_inference_new_tokens
+        self.criterion: nn.CrossEntropyLoss = nn.CrossEntropyLoss()
         self.total_iters: int = len(self.train_loader) * self.epochs
-        self.engine = Engine(self._train_step)
+        self.trainer = Engine(self._train_step)
         self.train_evaluator = Engine(self._eval_step)
         self.val_evaluator = Engine(self._eval_step)
         self.test_evaluator = Engine(self._eval_step)
         self.metrics: dict = self._attach_metrics()
+
+        # Run evaluations at the end of each epoch to log training and validation metrics
+        self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
 
         # Create run directory for outputs
         self.run_dir = make_run_dir(config.output)
         dump_config(self.config, self.run_dir / "config.yaml")
 
         # Attach loggers for console
-        self.logger = setup_console_logger(self.run_dir, self.engine, config.trainer.log_every_steps, self.optimizer)
+        self.logger = setup_console_logger(
+            self.run_dir, self.trainer, self.trainer_config.log_every_steps, self.optimizer
+        )
 
         # Attach learning rate scheduler
-        attach_lr_scheduler(self.engine, self.optimizer, self.total_iters, config.optimizer.lr)
+        attach_lr_scheduler(self.trainer, self.optimizer, self.total_iters, config.optimizer.lr)
 
         # Attach early stopping
-        attach_early_stopping(self.val_evaluator, self.engine, config.trainer.early_stopping_patience)
+        attach_early_stopping(self.val_evaluator, self.trainer, self.trainer_config.early_stopping_patience)
+
+        # Define validation scoring function for best model
+        def score_function(engine_val):
+            loss = engine_val.state.metrics["loss"]
+            return -loss
 
         # Attach checkpointing
-        self.checkpointers = setup_checkpointing(
-            self.engine,
+        self.checkpointers = {}
+        self.checkpointers["checkpoint_best"] = setup_best_model_checkpoint(
+            self.trainer,
             self.val_evaluator,
+            {"model": self.model, "optimizer": self.optimizer},
+            self.run_dir,
+            score_function=score_function,
+            score_name="val_loss",
+        )
+        self.checkpointers["checkpoint_last"] = setup_training_checkpointing(
+            self.trainer,
             {"model": self.model, "optimizer": self.optimizer},
             self.run_dir,
         )
@@ -129,7 +139,7 @@ class Trainer:
         # Attach experiment logger (TensorBoard or Weights & Biases)
         self.exp_logger = setup_experiment_tracking(
             config.logger,
-            self.engine,
+            self.trainer,
             self.val_evaluator,
             self.train_evaluator,
             self.test_evaluator,
@@ -140,18 +150,19 @@ class Trainer:
             config.output.run_name,
         )
 
-        # Run evaluations at the end of each epoch to log training and validation metrics
-        self.engine.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
-
+        # Real-time W&B uploads
+        if config.logger == "wandb":
+            setup_wandb_checkpoint_uploads(
+                self.trainer,
+                self.val_evaluator,
+                self.checkpointers,
+                self.exp_logger,
+                config.output.run_name,
+                self.logger,
+            )
         # Attach inference logger if inference logging is enabled
         if self.inference_every_epochs is not None:
             self.attach_inference_logger()
-
-    def _flatten(self, output: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
-        logits = output["logits"].reshape(-1, output["logits"].size(-1))
-        targets = output["targets"].reshape(-1)
-        mask = targets != self.loss_fn.ignore_index
-        return logits[mask], targets[mask]
 
     def _train_step(self, engine: Engine, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         self.model.train()
@@ -163,7 +174,7 @@ class Trainer:
 
         self.optimizer.zero_grad(set_to_none=True)
         logits = self.model(inputs, attention_mask=attention_mask)
-        loss = self.loss_fn(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
+        loss = self.criterion(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
         loss.backward()
 
         if self.grad_clip_norm is not None:
@@ -187,8 +198,48 @@ class Trainer:
         logits = self.model(inputs, attention_mask=attention_mask)
         return {"logits": logits, "targets": targets}
 
+    def run(self) -> None:
+        self.logger.info("starting run in %s", self.run_dir)
+        self.trainer.run(self.train_loader, max_epochs=self.epochs)
+
+        if self.test_loader:
+            self.test()
+
+        self.exp_logger.close()
+
+    def test(self, test_loader: DataLoader | None = None) -> None:
+        loader = test_loader or self.test_loader
+        if loader is None:
+            self.logger.warning("No test loader provided. Skipping testing.")
+            return
+
+        # Load best model if available
+        checkpoint_handler = self.checkpointers.get("checkpoint_best", None)
+        if checkpoint_handler and checkpoint_handler.last_checkpoint:
+            checkpoint_path = checkpoint_handler.last_checkpoint
+
+            self.logger.info("Loading best model for testing from %s", checkpoint_path)
+            checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
+            self.model.load_state_dict(checkpoint["model"])
+        else:
+            self.logger.warning("No best model checkpoint found. Using current model for testing.")
+
+        self.logger.info("Running testing...")
+        self.test_evaluator.run(loader)
+        metrics = self.test_evaluator.state.metrics
+        self.logger.info(
+            "Test results: loss=%.4f token_acc=%.4f",
+            metrics["loss"],
+            metrics["token_accuracy"],
+        )
+
     def _attach_metrics(self) -> dict[str, Metric]:
-        RunningAverage(output_transform=lambda output: output["loss"]).attach(self.engine, "loss")
+        RunningAverage(output_transform=lambda output: output["loss"]).attach(self.trainer, "loss")
+
+        ignore_index = self.criterion.ignore_index
+
+        def transform_fn(output):
+            return _flatten(output, ignore_index=ignore_index)
 
         metrics = {}
         for prefix, evaluator in [
@@ -196,8 +247,8 @@ class Trainer:
             ("val", self.val_evaluator),
             ("test", self.test_evaluator),
         ]:
-            loss = Loss(self.loss_fn, output_transform=self._flatten)
-            token_acc = Accuracy(output_transform=self._flatten)
+            loss = Loss(self.criterion, output_transform=transform_fn)
+            token_acc = Accuracy(output_transform=transform_fn)
 
             loss.attach(evaluator, "loss")
             token_acc.attach(evaluator, "token_accuracy")
@@ -208,14 +259,14 @@ class Trainer:
         return metrics
 
     def attach_inference_logger(self) -> None:
-        self.engine.add_event_handler(
+        self.trainer.add_event_handler(
             Events.EPOCH_COMPLETED(every=self.inference_every_epochs),
             self._log_inference,
             self.train_loader,
             "Train",
         )
 
-        self.engine.add_event_handler(
+        self.trainer.add_event_handler(
             Events.EPOCH_COMPLETED(every=self.inference_every_epochs),
             self._log_inference,
             self.val_loader,
@@ -231,7 +282,8 @@ class Trainer:
 
     def _run_evaluations(self, engine: Engine) -> None:
         self.logger.info("Evaluating on training set...")
-        self.train_evaluator.run(self.train_loader)
+        eval_loader = itertools.islice(self.train_loader, len(self.val_loader))
+        self.train_evaluator.run(eval_loader)
         train_metrics = self.train_evaluator.state.metrics
         epoch = engine.state.epoch
 
@@ -394,46 +446,3 @@ class Trainer:
                 break
 
         return generated
-
-    def test(self, test_loader: DataLoader | None = None) -> None:
-        loader = test_loader or self.test_loader
-        if loader is None:
-            self.logger.warning("No test loader provided. Skipping testing.")
-            return
-
-        # Load best model if available
-        checkpoint_handler = self.checkpointers.get("checkpoint_best", None)
-        if checkpoint_handler and checkpoint_handler.last_checkpoint:
-            checkpoint_path = checkpoint_handler.last_checkpoint
-
-            self.logger.info("Loading best model for testing from %s", checkpoint_path)
-            checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
-            self.model.load_state_dict(checkpoint["model"])
-        else:
-            self.logger.warning("No best model checkpoint found. Using current model for testing.")
-
-        self.logger.info("Running testing...")
-        self.test_evaluator.run(loader)
-        metrics = self.test_evaluator.state.metrics
-        self.logger.info(
-            "Test results: loss=%.4f token_acc=%.4f",
-            metrics["loss"],
-            metrics["token_accuracy"],
-        )
-
-    def run(self) -> None:
-        self.logger.info("starting run in %s", self.run_dir)
-        self.engine.run(self.train_loader, max_epochs=self.epochs)
-
-        if self.test_loader:
-            self.test()
-
-        if self.config.logger == "wandb":
-            upload_model_to_wandb(
-                self.exp_logger,
-                self.checkpointers,
-                self.config.output.run_name,
-                self.logger,
-            )
-
-        self.exp_logger.close()

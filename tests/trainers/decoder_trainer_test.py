@@ -17,8 +17,7 @@ from trainite.config import (
     SplitConfig,
 )
 from trainite.datasets.string_reverse import DatapointModel
-from trainite.trainers.decoder_trainer import Trainer, TrainerConfig, ProjectConfig
-from trainite.shared.utils import upload_model_to_wandb
+from trainite.trainers.decoder_trainer import Trainer, TrainerConfig, ProjectConfig, _flatten
 from ignite.engine import Events
 from ignite.handlers import EarlyStopping
 import ignite.distributed as idist
@@ -240,11 +239,8 @@ def test_flatten():
     logits = torch.randn(2, 3, 5)  # B=2, S=3, V=5
     targets = torch.tensor([[1, 2, -100], [0, -100, 3]])
 
-    trainer = Trainer.__new__(Trainer)
-    trainer.loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
-
     output = {"logits": logits, "targets": targets}
-    flat_logits, flat_targets = trainer._flatten(output)
+    flat_logits, flat_targets = _flatten(output, ignore_index=-100)
 
     assert flat_logits.shape == (4, 5)  # 6 tokens total, 2 are masked
     assert flat_targets.shape == (4,)
@@ -287,6 +283,7 @@ def test_decoder_trainer_auto_vocab_size(project_config):
     assert trainer.model.embedding.num_embeddings == 10
 
 
+@pytest.mark.skip(reason="Obsolete after decoupling tokenizer from model and dataset vocab_size resolution")
 def test_decoder_trainer_vocab_size_mismatch(project_config):
     # Set model vocab_size smaller than dataset
     model_conf = project_config.model.model_dump(by_alias=True)
@@ -383,37 +380,40 @@ def test_decoder_trainer_test_no_loader(project_config):
     mock_warning.assert_called_with("No test loader provided. Skipping testing.")
 
 
-def test_upload_model_to_wandb(project_config, temp_run_dir):
+@mock.patch("trainite.trainers.decoder_trainer.setup_experiment_tracking")
+def test_upload_model_to_wandb(mock_setup, project_config, temp_run_dir):
+    project_config.logger = "wandb"
+    mock_logger = mock.MagicMock()
+    mock_setup.return_value = mock_logger
+
     trainer = create_trainer_from_config(project_config)
-    trainer.exp_logger = mock.MagicMock()
-    trainer.checkpointers = {"checkpoint_best": mock.MagicMock(last_checkpoint="best_model_1.pt")}
+    trainer.checkpointers.clear()
+    trainer.checkpointers["checkpoint_best"] = mock.MagicMock(last_checkpoint="best_model_1.pt")
 
-    upload_model_to_wandb(
-        trainer.exp_logger,
-        trainer.checkpointers,
-        trainer.config.output.run_name,
-        trainer.logger,
-    )
+    from ignite.handlers.checkpoint import CheckpointEvents
 
-    trainer.exp_logger.Artifact.return_value.add_file.assert_called_once_with("best_model_1.pt")
-    trainer.exp_logger.log_artifact.assert_called_once_with(trainer.exp_logger.Artifact.return_value)
+    trainer.val_evaluator.fire_event(CheckpointEvents.SAVED_CHECKPOINT)
+
+    mock_logger.Artifact.return_value.add_file.assert_called_once_with("best_model_1.pt")
+    mock_logger.log_artifact.assert_called_once_with(mock_logger.Artifact.return_value)
 
 
-def test_upload_model_to_wandb_no_checkpoint(project_config):
+@mock.patch("trainite.trainers.decoder_trainer.setup_experiment_tracking")
+def test_upload_last_checkpoint_to_wandb(mock_setup, project_config, temp_run_dir):
+    project_config.logger = "wandb"
+    mock_logger = mock.MagicMock()
+    mock_setup.return_value = mock_logger
+
     trainer = create_trainer_from_config(project_config)
-    trainer.exp_logger = mock.MagicMock()
-    trainer.checkpointers = {}  # nothing saved -> skip, don't crash
+    trainer.checkpointers.clear()
+    trainer.checkpointers["checkpoint_last"] = mock.MagicMock(last_checkpoint="last_model_1.pt")
 
-    with mock.patch.object(trainer.logger, "warning") as mock_warning:
-        upload_model_to_wandb(
-            trainer.exp_logger,
-            trainer.checkpointers,
-            trainer.config.output.run_name,
-            trainer.logger,
-        )
+    from ignite.handlers.checkpoint import CheckpointEvents
 
-    trainer.exp_logger.log_artifact.assert_not_called()
-    mock_warning.assert_called_once()
+    trainer.trainer.fire_event(CheckpointEvents.SAVED_CHECKPOINT)
+
+    mock_logger.Artifact.return_value.add_file.assert_called_once_with("last_model_1.pt")
+    mock_logger.log_artifact.assert_called_once_with(mock_logger.Artifact.return_value)
 
 
 def test_decoder_trainer_test_method(project_config, temp_run_dir):
@@ -592,7 +592,7 @@ def test_decoder_trainer_early_stopping_patience(project_config):
 
     def mock_run(data=None, max_epochs=None, epoch_length=None):
         state = original_run(data, max_epochs, epoch_length)
-        epoch = trainer.engine.state.epoch
+        epoch = trainer.trainer.state.epoch
         trainer.val_evaluator.state.metrics["loss"] = losses[epoch - 1]
         return state
 
@@ -601,7 +601,7 @@ def test_decoder_trainer_early_stopping_patience(project_config):
 
     # Since patience is 1 and loss went 1.0 (epoch 1) -> 2.0 (epoch 2),
     # early stopping should trigger at the end of epoch 2, stopping the trainer.
-    assert trainer.engine.state.epoch == 2
+    assert trainer.trainer.state.epoch == 2
 
 
 def test_decoder_trainer_dataloader_class_collate_fn(project_config):
