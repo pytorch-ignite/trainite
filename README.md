@@ -166,11 +166,17 @@ outputs/
 |---|---|---|
 | `transformer` | Decoder-only Transformer | Causal LM with rotary position embeddings (RoPE) and multi-head attention. |
 
+### Preprocessors
+
+| Name | Description |
+|---|---|
+| `char` | Character-level tokenizer mapping printable ASCII characters to integer IDs. |
+
 ### Datasets
 
 | Name | Task | Description |
 |---|---|---|
-| `string-reverse` | Reverse a random string | Synthetic, CPU-generatable. No downloads required. Ships with a character-level tokenizer. |
+| `string-reverse` | Reverse a random string | Synthetic, CPU-generatable. No downloads required. |
 
 ### Trainers
 
@@ -182,7 +188,7 @@ outputs/
 
 ## Configuration
 
-All configuration lives in `config.yaml`. Every key maps to a validated Pydantic model in `config.py`, giving you type checking, clear error messages, and IDE autocomplete.
+All configuration lives in `config.yaml`. The top-level blocks map to base validation schemas in `config.py` (e.g. `ModelConfig`, `DatasetConfig`). This ensures that your configuration has the correct overall structure and valid keys, while allowing you to pass custom hyperparameters to your local components.
 
 ### Swapping Components with `_target_`
 
@@ -213,7 +219,7 @@ Since the generated code is yours, you can override at any layer without touchin
 | Train step | Override `_train_step()` in `trainer.py` |
 | Eval step | Override `_eval_step()` in `trainer.py` |
 | Metrics | Add Ignite metrics in `_attach_metrics()` in `trainer.py` |
-| Handlers | Attach Ignite event handlers to `self.engine` in `trainer.py` |
+| Handlers | Attach Ignite event handlers to `self.trainer` in `trainer.py` |
 | Config fields | Add fields to the Pydantic models in `config.py` and corresponding keys in `config.yaml` |
 
 ---

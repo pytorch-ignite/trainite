@@ -4,10 +4,8 @@ import warnings
 from typing import Any
 
 import torch
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict
 from torch.utils.data import Dataset
-
-from config import ComponentConfig, DataLoaderConfig, DataWithAutoSplit
 
 # Hardcoded universal vocabulary: all printable ASCII characters
 UNIVERSAL_VOCAB = string.ascii_letters + string.digits + string.punctuation + " "
@@ -15,8 +13,13 @@ UNIVERSAL_VOCAB = string.ascii_letters + string.digits + string.punctuation + " 
 CHARSET_PRESETS = {
     "@universal": UNIVERSAL_VOCAB,
     "@alpha": string.ascii_letters,
+    "@alpha_lowercase": string.ascii_lowercase,
+    "@alpha_uppercase": string.ascii_uppercase,
     "@digits": string.digits,
     "@alphanumeric": string.ascii_letters + string.digits,
+    "@punctuation": string.punctuation,
+    "@alphanumeric_lowercase": string.ascii_lowercase + string.digits,
+    "@alphanumeric_uppercase": string.ascii_uppercase + string.digits,
 }
 
 
@@ -123,6 +126,23 @@ class StringReverseDataset(Dataset):
         }
 
 
+class DatapointModel(BaseModel):
+    """Contract for a causal-LM transformed item: training tensors + the eval prompt.
+
+    Convention: every causal-LM dataset transform returns this shape. The collate
+    fn batches the `train_*`/`attention_mask` fields; the trainer's inference loop
+    reads `eval_input_ids`/`source`/`target` directly.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    source: str
+    target: str
+    train_input_ids: torch.Tensor
+    train_label_ids: torch.Tensor
+    attention_mask: torch.Tensor
+    eval_input_ids: torch.Tensor
+
+
 class PromptCompletionTransform:
     def __init__(self, tokenizer: Any, ignore_index: int = -100) -> None:
         self.tokenizer = tokenizer
@@ -135,7 +155,7 @@ class PromptCompletionTransform:
         source_tokens = self.tokenizer(sample["source"], add_special_tokens=False)["input_ids"]
         return [bos] + source_tokens + [sep]
 
-    def __call__(self, sample: dict[str, str]) -> dict[str, torch.Tensor]:
+    def __call__(self, sample: dict[str, str]) -> DatapointModel:
         source = sample["source"]
         target = sample["target"]
 
@@ -155,61 +175,11 @@ class PromptCompletionTransform:
 
         attention_mask = torch.ones(len(input_ids), dtype=torch.long)
 
-        return {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "labels": labels,
-            "source": source,
-            "target": target,
-        }
-
-
-class PromptCompletionTransformConfig(ComponentConfig):
-    model_config = ConfigDict(validate_assignment=True)
-    target: str = Field(
-        default="datasets.string_reverse.PromptCompletionTransform",
-        alias="_target_",
-    )
-    ignore_index: int = -100
-
-
-class StringReverseDatasetConfig(ComponentConfig):
-    model_config = ConfigDict(validate_assignment=True)
-    target: str = Field(
-        default="datasets.string_reverse.StringReverseDataset",
-        alias="_target_",
-    )
-    per_seq_size: int = Field(default=256, gt=0)
-    charset: str | None = "@alpha"
-    min_seq_len: int | None = Field(default=1, gt=0)
-    max_seq_len: int | None = Field(default=16, gt=0)
-    seq_len: int | None = Field(default=None, gt=0)
-    seed: int = 42
-
-    @model_validator(mode="after")
-    def validate_lengths(self) -> "StringReverseDatasetConfig":
-        if self.seq_len is not None and (self.min_seq_len is not None or self.max_seq_len is not None):
-            raise ValueError("Cannot specify both seq_len and min_seq_len/max_seq_len.")
-
-        if self.seq_len is None:
-            if self.min_seq_len is None or self.max_seq_len is None:
-                raise ValueError("Must specify either seq_len or both min_seq_len and max_seq_len.")
-            if self.min_seq_len > self.max_seq_len:
-                raise ValueError("min_seq_len must be less than or equal to max_seq_len.")
-        return self
-
-
-class StringReverseDataConfig(DataWithAutoSplit):
-    dataset: StringReverseDatasetConfig | None = Field(  # type: ignore[assignment]
-        default_factory=StringReverseDatasetConfig
-    )
-    transform: PromptCompletionTransformConfig | None = Field(default_factory=PromptCompletionTransformConfig)
-    test_ratio: float = 0.1
-    val_ratio: float = 0.1
-    dataloader: DataLoaderConfig = Field(
-        default_factory=lambda: DataLoaderConfig(
-            batch_size=32,
-            shuffle=True,
-            collate_fn=None,
+        return DatapointModel(
+            source=source,
+            target=target,
+            train_input_ids=input_ids,
+            train_label_ids=labels,
+            attention_mask=attention_mask,
+            eval_input_ids=torch.tensor(prompt_ids, dtype=torch.long),
         )
-    )

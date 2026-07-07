@@ -2,11 +2,8 @@ import math
 from typing import Any
 
 import torch
-from pydantic import Field
 from torch import nn
 from torch.nn.utils.rnn import pad_sequence
-
-from config import ComponentConfig
 
 
 class RotaryEmbedding(nn.Module):
@@ -154,7 +151,6 @@ class TransformerModel(nn.Module):
         dropout: float = 0.1,
         max_seq_len: int = 128,
         pad_token_id: int | None = None,
-        **kwargs: Any,
     ) -> None:
         super().__init__()
         pad_token_id = pad_token_id if pad_token_id is not None else 0
@@ -203,17 +199,14 @@ class CausalLMCollateFn:
         self.pad_token_id = pad_token_id if pad_token_id is not None else tokenizer.pad_token_id
         self.ignore_index = ignore_index
 
-    def __call__(self, batch: list[dict[str, torch.tensor]]) -> dict[str, torch.Tensor]:
+    def __call__(self, batch: list[Any]) -> dict[str, torch.Tensor]:
         input_ids_list = []
         attention_mask_list = []
         labels_list = []
         for item in batch:
-            input_ids = item.get("input_ids")
-            labels = item.get("labels")
-
-            if input_ids is None or labels is None:
-                raise KeyError(f"Dataset item must contain 'input_ids' and 'labels' keys. Got: {list(item.keys())}")
-            attention_mask = item.get("attention_mask", torch.tensor([1] * len(input_ids)))
+            input_ids = item.train_input_ids
+            labels = item.train_label_ids
+            attention_mask = item.attention_mask
 
             # We flip the sequences to have padding on the left, which allows us to use causal masking without modification
             input_ids_list.append(input_ids.flip(0))
@@ -233,13 +226,3 @@ class CausalLMCollateFn:
             "attention_mask": padded_attention_mask,
             "labels": padded_labels,
         }
-
-
-class TransformerModelConfig(ComponentConfig):
-    target: str = Field(default="models.transformer.TransformerModel", alias="_target_")
-    hidden_size: int = Field(default=64, gt=0)
-    num_layers: int = Field(default=2, gt=0)
-    num_heads: int = Field(default=2, gt=0)
-    feedforward_dim: int = Field(default=128, gt=0)
-    dropout: float = Field(default=0.1, ge=0.0, lt=1.0)
-    max_seq_len: int = Field(default=128, gt=0)

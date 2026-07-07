@@ -11,7 +11,7 @@ Trainite is a toolbox for training language models with PyTorch-Ignite. This pro
 - `models/`: Contains the model architecture definition.
 - `datasets/`: Handles data loading and preprocessing.
 - `trainer.py`: Defines the training and evaluation logic. You can override `_train_step` or `_eval_step` here.
-- `config.py`: Contains Pydantic models for configuration validation. If you add new parameters to `config.yaml`, update the models here.
+- `config.py`: Contains base Pydantic models for configuration structure validation.
 - `utils.py`: Shared utilities for configuration and logging.
 
 ## Getting Started
@@ -131,7 +131,7 @@ data:
 
 ### Adding Configuration Parameters
 1. Add the parameter to `config.yaml`.
-2. Update the corresponding Pydantic model in `config.py` to include the new field.
+2. (Optional) Update the corresponding Pydantic model in `config.py` if you want strict validation and IDE autocomplete for custom fields.
 
 ## Design Philosophy
-Trainite follows a "Cookiecutter, not framework" approach. The code generated here is yours. There are no hidden abstractions or magic imports. Feel free to refactor or rewrite any part of it to suit your research needs.
+The code generated here is yours. There are no hidden abstractions or magic imports. Feel free to refactor or rewrite any part of it to suit your research needs.

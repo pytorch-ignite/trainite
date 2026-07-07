@@ -11,7 +11,7 @@ Trainite is a toolbox for training language models with PyTorch-Ignite. This pro
 - `models/`: Contains the model architecture definition.
 - `datasets/`: Handles data loading and preprocessing.
 - `trainer.py`: Defines the training and evaluation logic. You can override `_train_step` or `_eval_step` here.
-- `config.py`: Contains Pydantic models for configuration validation. If you add new parameters to `config.yaml`, update the models here.
+- `config.py`: Contains base Pydantic models for configuration structure validation.
 - `utils.py`: Shared utilities for configuration and logging.
 
 ## Getting Started
@@ -204,15 +204,7 @@ Each dataset item is a dictionary of raw strings:
 
 ## Tokenizer
 
-The dataset uses a character-level tokenizer (`CharTokenizer`) with a universal vocabulary and these special tokens:
-
-- `0` = `<PAD>`
-- `1` = `<BOS>`
-- `2` = `<SEP>`
-- `3` = `<EOS>`
-- `4` = `<UNK>`
-
-It supports printable ASCII characters by default.
+This dataset yields raw text strings (`source` and `target`). These strings are processed by the project's preprocessor before being passed to the model.
 
 ## Config knobs
 
@@ -274,9 +266,9 @@ If you only want to test the pipeline, keep the defaults and just change:
 
 
 ### Trainer: decoder_trainer
-# DecoderTrainer
+# Trainer
 
-`DecoderTrainer` is the default training loop for this project.
+`Trainer` (registered as `decoder-trainer`) is the default training loop for this project.
 
 It is built on PyTorch-Ignite and already handles the things you usually want on day one:
 
@@ -289,7 +281,7 @@ It is built on PyTorch-Ignite and already handles the things you usually want on
 
 ## What it expects
 
-`DecoderTrainer` works with a model that returns logits shaped like:
+`Trainer` works with a model that returns logits shaped like:
 
 ```python
 (batch, seq_len, vocab_size)
@@ -327,7 +319,7 @@ At the end of the training run, it runs a final evaluation on the test data, if 
 
 ## Logging and checkpoints
 
-`DecoderTrainer` saves a run directory like this:
+`Trainer` saves a run directory like this:
 
 ```text
 outputs/<run_name>/<timestamp>/
@@ -392,7 +384,6 @@ The main places to look are:
 - `_train_step`
 - `_eval_step`
 - `_attach_metrics`
-- `_attach_handlers`
 
 ## Minimal config example
 
@@ -480,7 +471,7 @@ data:
 
 ### Adding Configuration Parameters
 1. Add the parameter to `config.yaml`.
-2. Update the corresponding Pydantic model in `config.py` to include the new field.
+2. (Optional) Update the corresponding Pydantic model in `config.py` if you want strict validation and IDE autocomplete for custom fields.
 
 ## Design Philosophy
-Trainite follows a "Cookiecutter, not framework" approach. The code generated here is yours. There are no hidden abstractions or magic imports. Feel free to refactor or rewrite any part of it to suit your research needs.
+The code generated here is yours. There are no hidden abstractions or magic imports. Feel free to refactor or rewrite any part of it to suit your research needs.

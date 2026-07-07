@@ -29,6 +29,8 @@ data:
     num_workers: 2
     collate_fn:
       _target_: models.transformer.CausalLMCollateFn
+      ignore_index: -100
+      pad_token_id: null
   test_ratio: 0.1
   val_ratio: 0.1
 trainer:
@@ -42,5 +44,6 @@ trainer:
 output:
   root: outputs
   run_name: transformer__string-reverse
+logger: tensorboard
 seed: 42
-device: auto
+device: null

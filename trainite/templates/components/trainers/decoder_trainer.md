@@ -1,6 +1,6 @@
-# DecoderTrainer
+# Trainer
 
-`DecoderTrainer` is the default training loop for this project.
+`Trainer` (registered as `decoder-trainer`) is the default training loop for this project.
 
 It is built on PyTorch-Ignite and already handles the things you usually want on day one:
 
@@ -13,7 +13,7 @@ It is built on PyTorch-Ignite and already handles the things you usually want on
 
 ## What it expects
 
-`DecoderTrainer` works with a model that returns logits shaped like:
+`Trainer` works with a model that returns logits shaped like:
 
 ```python
 (batch, seq_len, vocab_size)
@@ -51,7 +51,7 @@ At the end of the training run, it runs a final evaluation on the test data, if 
 
 ## Logging and checkpoints
 
-`DecoderTrainer` saves a run directory like this:
+`Trainer` saves a run directory like this:
 
 ```text
 outputs/<run_name>/<timestamp>/
@@ -116,7 +116,6 @@ The main places to look are:
 - `_train_step`
 - `_eval_step`
 - `_attach_metrics`
-- `_attach_handlers`
 
 ## Minimal config example
 

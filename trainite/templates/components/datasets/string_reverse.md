@@ -17,15 +17,7 @@ Each dataset item is a dictionary of raw strings:
 
 ## Tokenizer
 
-The dataset uses a character-level tokenizer (`CharTokenizer`) with a universal vocabulary and these special tokens:
-
-- `0` = `<PAD>`
-- `1` = `<BOS>`
-- `2` = `<SEP>`
-- `3` = `<EOS>`
-- `4` = `<UNK>`
-
-It supports printable ASCII characters by default.
+This dataset yields raw text strings (`source` and `target`). These strings are processed by the project's preprocessor before being passed to the model.
 
 ## Config knobs
 

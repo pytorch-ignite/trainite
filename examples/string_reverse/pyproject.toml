@@ -9,5 +9,6 @@ dependencies = [
     "pytorch-ignite",
     "tensorboard",
     "torch",
+    "wandb",
 ]
 requires-python = ">=3.10"

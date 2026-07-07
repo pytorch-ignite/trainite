@@ -1,22 +1,36 @@
-from typing import Self
+from typing import Self, Literal
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    model_validator,
-)
+
+class ModelConfig(BaseModel):
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
+    target: str = Field(alias="_target_")
+
+
+class PreprocessorConfig(BaseModel):
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
+    target: str = Field(alias="_target_")
+
+
+class DatasetConfig(BaseModel):
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
+    target: str = Field(alias="_target_")
+
+
+class TransformConfig(BaseModel):
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
+    target: str = Field(alias="_target_")
+
+
+class CollateFnConfig(BaseModel):
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
+    target: str = Field(alias="_target_")
 
 
 class OutputConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
     root: str
     run_name: str
-
-
-class ComponentConfig(BaseModel):
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
-    target: str = Field(alias="_target_")
 
 
 class OptimizerConfig(BaseModel):
@@ -30,13 +44,13 @@ class DataLoaderConfig(BaseModel):
     batch_size: int = Field(default=32, gt=0)
     shuffle: bool = False
     num_workers: int = Field(default=2, ge=0)
-    collate_fn: ComponentConfig | None = None
+    collate_fn: CollateFnConfig | None = None
 
 
 class SplitConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
-    dataset: ComponentConfig
-    transform: ComponentConfig | None = None
+    dataset: DatasetConfig
+    transform: TransformConfig | None = None
     dataloader: DataLoaderConfig = Field(default_factory=DataLoaderConfig)
 
 
@@ -49,9 +63,8 @@ class DataConfigBase(BaseModel):
 
 class DataWithAutoSplit(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
-    # Option 2: Automatic splitting
-    dataset: ComponentConfig
-    transform: ComponentConfig | None = None
+    dataset: DatasetConfig
+    transform: TransformConfig | None = None
     dataloader: DataLoaderConfig = Field(default_factory=DataLoaderConfig)
     test_ratio: float = Field(default=0.2, ge=0.0, lt=0.5)
     val_ratio: float = Field(default=0.1, gt=0.0, lt=0.3)
@@ -64,3 +77,27 @@ class DataWithAutoSplit(BaseModel):
         if train_ratio > 0.9:
             raise ValueError("train ratio (1.0 - test_ratio - val_ratio) must be less than or equal to 0.9")
         return self
+
+
+class TrainerConfig(BaseModel):
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
+    epochs: int = Field(default=3, gt=0)
+    log_every_steps: int = Field(default=10, gt=0)
+    early_stopping_patience: int | None = Field(default=3, gt=0)
+    inference_every_epochs: int | None = Field(default=None, gt=0)
+    inference_num_samples: int = Field(default=5, gt=0)
+    max_inference_new_tokens: int = Field(default=16, gt=0)
+    grad_clip_norm: float | None = Field(default=None, gt=0.0)
+
+
+class ProjectConfig(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
+    preprocessor: PreprocessorConfig
+    model: ModelConfig
+    optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
+    data: DataConfigBase | DataWithAutoSplit
+    trainer: TrainerConfig = Field(default_factory=TrainerConfig)
+    output: OutputConfig
+    logger: Literal["tensorboard", "wandb"] = "tensorboard"
+    seed: int = 42
+    device: str | None = None
