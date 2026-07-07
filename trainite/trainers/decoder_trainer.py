@@ -39,6 +39,7 @@ from trainite.shared.utils import (
     setup_wandb_checkpoint_uploads,
 )
 
+
 def _flatten(output: dict[str, torch.Tensor], ignore_index: int = -100) -> tuple[torch.Tensor, torch.Tensor]:
     logits = output["logits"].reshape(-1, output["logits"].size(-1))
     targets = output["targets"].reshape(-1)
