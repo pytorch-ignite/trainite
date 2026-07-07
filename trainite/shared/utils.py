@@ -296,15 +296,12 @@ def setup_experiment_tracking(
     metric_names: list[str],
     has_test: bool,
     run_name: str,
-    config: BaseModel,
 ) -> TensorboardLogger | WandBLogger:
     if backend == "wandb":
         exp_logger = WandBLogger(project=run_name, dir=str(run_dir), name=str(run_dir).split("/")[-1])
         exp_logger.save(str(run_dir / "config.yaml"))
     else:
         log_dir = run_dir / "tensorboard"
-        config_path = run_dir / "config.yaml"
-        dump_config(config, config_path)
         exp_logger = TensorboardLogger(log_dir=log_dir)
 
     # Log training iteration loss

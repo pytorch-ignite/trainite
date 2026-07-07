@@ -149,7 +149,6 @@ class Trainer:
             ["loss", "token_accuracy"],
             bool(self.test_loader),
             config.output.run_name,
-            config,
         )
 
         # Real-time W&B uploads
@@ -199,6 +198,25 @@ class Trainer:
             attention_mask = attention_mask.to(self.device)
         logits = self.model(inputs, attention_mask=attention_mask)
         return {"logits": logits, "targets": targets}
+
+    def _run_evaluations(self, engine: Engine) -> None:
+        self.logger.info("Evaluating on training set...")
+        eval_loader = itertools.islice(self.train_loader, len(self.val_loader))
+        self.train_evaluator.run(eval_loader)
+        train_metrics = self.train_evaluator.state.metrics
+        epoch = engine.state.epoch
+
+        self.logger.info("Evaluating on validation set...")
+        self.val_evaluator.run(self.val_loader)
+        val_metrics = self.val_evaluator.state.metrics
+        self.logger.info(
+            "epoch=%s train_loss=%.4f train_token_acc=%.4f val_loss=%.4f val_token_acc=%.4f",
+            epoch,
+            train_metrics["loss"],
+            train_metrics["token_accuracy"],
+            val_metrics["loss"],
+            val_metrics["token_accuracy"],
+        )
 
     def run(self) -> None:
         self.logger.info("starting run in %s", self.run_dir)
@@ -281,25 +299,6 @@ class Trainer:
             self.exp_logger.log({tag: self.exp_logger.Html(f"<pre>{text}</pre>")}, step=step)
         else:
             self.exp_logger.writer.add_text(tag, text, global_step=step)
-
-    def _run_evaluations(self, engine: Engine) -> None:
-        self.logger.info("Evaluating on training set...")
-        eval_loader = itertools.islice(self.train_loader, len(self.val_loader))
-        self.train_evaluator.run(eval_loader)
-        train_metrics = self.train_evaluator.state.metrics
-        epoch = engine.state.epoch
-
-        self.logger.info("Evaluating on validation set...")
-        self.val_evaluator.run(self.val_loader)
-        val_metrics = self.val_evaluator.state.metrics
-        self.logger.info(
-            "epoch=%s train_loss=%.4f train_token_acc=%.4f val_loss=%.4f val_token_acc=%.4f",
-            epoch,
-            train_metrics["loss"],
-            train_metrics["token_accuracy"],
-            val_metrics["loss"],
-            val_metrics["token_accuracy"],
-        )
 
     def _log_inference(self, engine: Engine, loader: DataLoader, name: str) -> None:
         self.logger.info(f"Epoch {engine.state.epoch}: Running inference on {name} samples...")
