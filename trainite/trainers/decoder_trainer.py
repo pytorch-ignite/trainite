@@ -62,6 +62,13 @@ class ProjectConfig(BaseModel):
     device: str | None = None
 
 
+def _flatten(output: dict[str, torch.Tensor], ignore_index: int = -100) -> tuple[torch.Tensor, torch.Tensor]:
+    logits = output["logits"].reshape(-1, output["logits"].size(-1))
+    targets = output["targets"].reshape(-1)
+    mask = targets != ignore_index
+    return logits[mask], targets[mask]
+
+
 class Trainer:
     def __init__(self, config: ProjectConfig) -> None:
         self.logger: logging.Logger = setup_logger("trainer", level=logging.INFO)
@@ -442,10 +449,3 @@ class Trainer:
             metrics["loss"],
             metrics["token_accuracy"],
         )
-
-
-def _flatten(output: dict[str, torch.Tensor], ignore_index: int = -100) -> tuple[torch.Tensor, torch.Tensor]:
-    logits = output["logits"].reshape(-1, output["logits"].size(-1))
-    targets = output["targets"].reshape(-1)
-    mask = targets != ignore_index
-    return logits[mask], targets[mask]
