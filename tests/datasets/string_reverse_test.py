@@ -10,6 +10,8 @@ from trainite.datasets.string_reverse import (
 from trainite.datasets.transformed import TransformedDataset
 from trainite.preprocessors.char_tokenizer import CharTokenizer
 from trainite.shared.utils import build_dataset, get_target
+from trainite.config.registry import get_model_spec
+from trainite.config.datasets import StringReverseDatasetConfig, StringReverseDataConfig
 
 
 def test_string_reverse_dataset():
@@ -104,8 +106,6 @@ def test_config_build_string_reverse_dataset():
     dataset = build_dataset(dataset_conf.dataset, dataset_conf.transform, tokenizer)
     assert isinstance(dataset, TransformedDataset)
 
-    from trainite.config.registry import get_model_spec
-
     model_spec = get_model_spec("transformer")
     collate_fn_obj = get_target(model_spec.collate_fn_target)(tokenizer=tokenizer)
 
@@ -149,7 +149,6 @@ def test_charset_empty_raises():
 
 def test_dataset_config_min_seq_len_gt_max():
     """Config validation: min_seq_len > max_seq_len should raise."""
-    from trainite.config.datasets import StringReverseDatasetConfig
 
     with pytest.raises(ValueError, match="min_seq_len must be less than or equal to max_seq_len"):
         StringReverseDatasetConfig(min_seq_len=10, max_seq_len=5)
@@ -157,7 +156,6 @@ def test_dataset_config_min_seq_len_gt_max():
 
 def test_data_config_defaults():
     """Verify StringReverseDataConfig default values."""
-    from trainite.config.datasets import StringReverseDataConfig
 
     config = StringReverseDataConfig()
     assert config.test_ratio == 0.1
