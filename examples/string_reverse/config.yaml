@@ -24,7 +24,7 @@ data:
     _target_: datasets.string_reverse.PromptCompletionTransform
     ignore_index: -100
   dataloader:
-    batch_size: 32
+    batch_size: 128
     shuffle: true
     num_workers: 2
     collate_fn:
