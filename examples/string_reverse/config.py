@@ -79,6 +79,15 @@ class DataWithAutoSplit(BaseModel):
         return self
 
 
+class ReduceOnPlateauConfig(BaseModel):
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
+    metric_name: str = Field(default="exact_accuracy")
+    factor: float = Field(default=0.5, gt=0.0, lt=1.0)
+    patience: int = Field(default=2, gt=0)
+    min_lr: float = Field(default=1e-6, ge=0.0)
+    mode: Literal["min", "max"] = "max"
+
+
 class TrainerConfig(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     epochs: int = Field(default=3, gt=0)
@@ -99,5 +108,6 @@ class ProjectConfig(BaseModel):
     trainer: TrainerConfig = Field(default_factory=TrainerConfig)
     output: OutputConfig
     logger: Literal["tensorboard", "wandb"] = "tensorboard"
+    scheduler: ReduceOnPlateauConfig = Field(default_factory=ReduceOnPlateauConfig)
     seed: int = 42
     device: str | None = None

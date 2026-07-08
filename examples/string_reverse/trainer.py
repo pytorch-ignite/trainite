@@ -37,6 +37,24 @@ def _flatten(output: dict[str, torch.Tensor], ignore_index: int = -100) -> tuple
     return logits[mask], targets[mask]
 
 
+def _exact_accuracy_transform(
+    output: dict[str, torch.Tensor], ignore_index: int = -100
+) -> tuple[torch.Tensor, torch.Tensor]:
+    logits = output["logits"]
+    targets = output["targets"]
+
+    preds = torch.argmax(logits, dim=-1)
+    mask = targets != ignore_index
+
+    correct = (preds == targets) | ~mask
+    seq_correct = correct.all(dim=-1)
+
+    y_pred = seq_correct.long()
+    y = torch.ones_like(seq_correct)
+
+    return y_pred, y
+
+
 class Trainer:
     def __init__(self, config: ProjectConfig) -> None:
         self.logger: logging.Logger = setup_logger("trainer", level=logging.INFO)
@@ -78,7 +96,15 @@ class Trainer:
         )
 
         # Attach learning rate scheduler
-        attach_lr_scheduler(self.trainer, self.optimizer, self.total_iters, config.optimizer.lr)
+        attach_lr_scheduler(
+            self.val_evaluator,
+            self.optimizer,
+            config.scheduler.metric_name,
+            config.scheduler.mode,
+            config.scheduler.patience,
+            config.scheduler.factor,
+            config.scheduler.min_lr,
+        )
 
         # Attach early stopping
         if self.trainer_config.early_stopping_patience is not None:
@@ -90,8 +116,7 @@ class Trainer:
             return -loss
 
         # Attach checkpointing
-        self.checkpointers = {}
-        self.checkpointers["checkpoint_best"] = setup_best_model_checkpoint(
+        self.best_checkpoint = setup_best_model_checkpoint(
             self.trainer,
             self.val_evaluator,
             {"model": self.model, "optimizer": self.optimizer},
@@ -99,7 +124,7 @@ class Trainer:
             score_function=score_function,
             score_name="val_loss",
         )
-        self.checkpointers["checkpoint_last"] = setup_training_checkpointing(
+        self.last_checkpoint = setup_training_checkpointing(
             self.trainer,
             {"model": self.model, "optimizer": self.optimizer},
             self.run_dir,
@@ -124,7 +149,8 @@ class Trainer:
             setup_wandb_checkpoint_uploads(
                 self.trainer,
                 self.val_evaluator,
-                self.checkpointers,
+                self.best_checkpoint,
+                self.last_checkpoint,
                 self.exp_logger,
                 config.output.run_name,
                 self.logger,
@@ -202,7 +228,7 @@ class Trainer:
             return
 
         # Load best model if available
-        checkpoint_handler = self.checkpointers.get("checkpoint_best", None)
+        checkpoint_handler = self.best_checkpoint
         if checkpoint_handler and checkpoint_handler.last_checkpoint:
             checkpoint_path = checkpoint_handler.last_checkpoint
 
@@ -229,6 +255,9 @@ class Trainer:
         def transform_fn(output):
             return _flatten(output, ignore_index=ignore_index)
 
+        def exact_transform_fn(output):
+            return _exact_accuracy_transform(output, ignore_index=ignore_index)
+
         metrics = {}
         for prefix, evaluator in [
             ("train", self.train_evaluator),
@@ -237,9 +266,11 @@ class Trainer:
         ]:
             loss = Loss(self.criterion, output_transform=transform_fn)
             token_acc = Accuracy(output_transform=transform_fn)
+            exact_acc = Accuracy(output_transform=exact_transform_fn)
 
             loss.attach(evaluator, "loss")
             token_acc.attach(evaluator, "token_accuracy")
+            exact_acc.attach(evaluator, "exact_accuracy")
 
             metrics[f"{prefix}_loss"] = loss
             metrics[f"{prefix}_token_accuracy"] = token_acc

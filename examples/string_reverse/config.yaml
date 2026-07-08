@@ -15,7 +15,7 @@ data:
   dataset:
     _target_: datasets.string_reverse.StringReverseDataset
     per_seq_size: 256
-    charset: '@alpha'
+    charset: "@alpha"
     min_seq_len: 1
     max_seq_len: 16
     seq_len: null
@@ -36,7 +36,7 @@ data:
 trainer:
   epochs: 3
   log_every_steps: 10
-  early_stopping_patience: 3
+  early_stopping_patience: None
   inference_every_epochs: null
   inference_num_samples: 5
   max_inference_new_tokens: 16
@@ -45,5 +45,11 @@ output:
   root: outputs
   run_name: transformer__string-reverse
 logger: tensorboard
+scheduler:
+  metric_name: exact_accuracy
+  factor: 0.5
+  patience: 2
+  min_lr: 1e-6
+  mode: max
 seed: 42
 device: null

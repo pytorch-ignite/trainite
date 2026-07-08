@@ -12,18 +12,16 @@ from ignite.handlers import (
     Checkpoint,
     DiskSaver,
     EarlyStopping,
-    create_lr_scheduler_with_warmup,
 )
 from ignite.handlers.checkpoint import CheckpointEvents
 from ignite.handlers.fbresearch_logger import FBResearchLogger
-from ignite.handlers.param_scheduler import ParamScheduler
+from ignite.handlers.param_scheduler import ReduceLROnPlateauScheduler
 from ignite.handlers.tensorboard_logger import TensorboardLogger
 from ignite.handlers.wandb_logger import WandBLogger
 from ignite.utils import setup_logger
 from omegaconf import OmegaConf
 from pydantic import BaseModel
 from torch import nn
-from torch.optim.lr_scheduler import LinearLR
 from torch.utils.data import DataLoader, Dataset, random_split
 
 from config import (
@@ -214,30 +212,29 @@ def make_run_dir(output_config: Any) -> Path:
 def attach_lr_scheduler(
     engine: Engine,
     optimizer: Any,
-    total_iters: int,
-    peak_lr: float,
-) -> ParamScheduler:
-    warmup_iters = max(2, int(0.1 * total_iters))
-    linear_decay = LinearLR(
+    metric_name: str,
+    mode,
+    patience: int,
+    factor: float,
+    min_lr: float,
+) -> None:
+    scheduler: ReduceLROnPlateauScheduler = ReduceLROnPlateauScheduler(
         optimizer,
-        start_factor=1.0,
-        end_factor=0.0,
-        total_iters=total_iters - warmup_iters,
+        metric_name=metric_name,
+        mode=mode,
+        patience=patience,
+        factor=factor,
+        min_lr=min_lr,
+        save_history=True,
     )
-    scheduler: ParamScheduler = create_lr_scheduler_with_warmup(
-        linear_decay,
-        warmup_start_value=0.0,
-        warmup_end_value=peak_lr,
-        warmup_duration=warmup_iters,
-    )
-    engine.add_event_handler(Events.ITERATION_COMPLETED, scheduler)
+    engine.add_event_handler(Events.COMPLETED, scheduler)
 
 
 def attach_early_stopping(
     val_evaluator: Engine,
     trainer_engine: Engine,
     patience: int,
-) -> EarlyStopping | None:
+) -> None:
     early_stopping = EarlyStopping(
         patience=patience,
         score_function=lambda engine: engine.state.metrics["loss"],
@@ -375,7 +372,8 @@ def setup_console_logger(
 def setup_wandb_checkpoint_uploads(
     trainer: Engine,
     val_evaluator: Engine,
-    checkpointers: dict[str, Any],
+    best_checkpoint: Checkpoint,
+    last_checkpoint: Checkpoint,
     exp_logger: Any,
     run_name: str,
     logger: logging.Logger,
@@ -385,14 +383,14 @@ def setup_wandb_checkpoint_uploads(
     trainer.register_events(*CheckpointEvents)
 
     def upload_best_model_artifact(engine):
-        checkpoint_path = checkpointers["checkpoint_best"].last_checkpoint
+        checkpoint_path = best_checkpoint.last_checkpoint
         logger.info(f"Uploading new best model artifact to W&B: {checkpoint_path}")
         artifact = exp_logger.Artifact(name=f"{run_name}-model".replace("/", "-"), type="model")
         artifact.add_file(str(checkpoint_path))
         exp_logger.log_artifact(artifact)
 
     def upload_last_checkpoint_artifact(engine):
-        checkpoint_path = checkpointers["checkpoint_last"].last_checkpoint
+        checkpoint_path = last_checkpoint.last_checkpoint
         logger.info(f"Uploading last checkpoint artifact to W&B: {checkpoint_path}")
         artifact = exp_logger.Artifact(name=f"{run_name}-checkpoint".replace("/", "-"), type="checkpoint")
         artifact.add_file(str(checkpoint_path))
