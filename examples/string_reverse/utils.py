@@ -245,6 +245,28 @@ def attach_early_stopping(
     val_evaluator.add_event_handler(Events.COMPLETED, early_stopping)
 
 
+def attach_perfect_accuracy_stopping(val_evaluator: Engine, trainer_engine: Engine) -> None:
+    """Terminate training the moment val token_accuracy hits 1.0."""
+
+    def _check(engine: Engine) -> None:
+        if engine.state.metrics.get("token_accuracy", 0.0) >= 1.0:
+            trainer_engine.logger.info("Perfect token accuracy reached — terminating early.")
+            trainer_engine.terminate()
+
+    val_evaluator.add_event_handler(Events.COMPLETED, _check)
+
+
+def attach_lr_floor_stopping(val_evaluator: Engine, trainer_engine: Engine, optimizer: Any, min_lr: float) -> None:
+    """Terminate training when the optimizer LR has fallen to min_lr."""
+
+    def _check(engine: Engine) -> None:
+        if optimizer.param_groups[0]["lr"] <= min_lr:
+            trainer_engine.logger.info("LR reached floor (%.2e) — terminating early.", min_lr)
+            trainer_engine.terminate()
+
+    val_evaluator.add_event_handler(Events.COMPLETED, _check)
+
+
 def setup_training_checkpointing(
     engine: Engine,
     to_save: dict[str, Any],
@@ -297,7 +319,7 @@ def setup_experiment_tracking(
 ) -> TensorboardLogger | WandBLogger:
     if backend == "wandb":
         exp_logger = WandBLogger(
-            project=project,
+            project=project or run_name,
             dir=str(run_dir),
             name=run_name,  # display name inside the project
         )

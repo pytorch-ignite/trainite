@@ -31,7 +31,7 @@ class OutputConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
     root: str
     run_name: str
-    project: str
+    project: str | None = None
 
 
 class OptimizerConfig(BaseModel):
@@ -94,6 +94,8 @@ class TrainerConfig(BaseModel):
     epochs: int = Field(default=3, gt=0)
     log_every_steps: int = Field(default=10, gt=0)
     early_stopping_patience: int | None = Field(default=3, gt=0)
+    stop_on_perfect_acc: bool = False  # terminate when val token_accuracy == 1.0
+    stop_on_lr_floor: bool = False  # terminate when LR falls to scheduler min_lr
     inference_every_epochs: int | None = Field(default=None, gt=0)
     inference_num_samples: int = Field(default=5, gt=0)
     max_inference_new_tokens: int = Field(default=16, gt=0)

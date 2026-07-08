@@ -13,6 +13,7 @@ Run name encodes the key hyperparams so TB/W&B graphs are self-labelled.
 import argparse
 import copy
 import sys
+import time
 from pathlib import Path
 
 # ── Grid defaults (edit here or override via CLI) ──────────────────────────
@@ -53,6 +54,7 @@ def make_config(base, seq_len: int, seed: int, layers: int, hidden: int, logger:
     cfg.logger = logger
 
     cfg.trainer.max_inference_new_tokens = seq_len * 3
+    cfg.trainer.epochs = 9999  # run until early stopping or time budget
 
     return cfg
 
@@ -65,6 +67,9 @@ def parse_args():
     p.add_argument("--seeds", nargs="+", type=int, default=DEFAULT_SEEDS)
     p.add_argument("--num-layers", nargs="+", type=int, default=DEFAULT_NUM_LAYERS)
     p.add_argument("--hidden", nargs="+", type=int, default=DEFAULT_HIDDEN)
+    p.add_argument(
+        "--time-budget", type=int, default=7200, metavar="SECONDS", help="max wall-clock seconds per run (default: 2h)"
+    )
     p.add_argument("--dry-run", action="store_true", help="print combos, don't train")
     return p.parse_args()
 
@@ -73,6 +78,7 @@ def main() -> None:
     args = parse_args()
 
     # Import here so --dry-run works without a full training env
+    from ignite.engine import Events
     from utils import load_config
     from trainer import Trainer, ProjectConfig  # noqa: F401 (ProjectConfig used by load_config)
 
@@ -98,7 +104,19 @@ def main() -> None:
 
         cfg = make_config(base, sl, seed, layers, hidden, args.logger)
         try:
-            Trainer(cfg).run()
+            trainer = Trainer(cfg)
+            if args.time_budget:
+                _start = time.monotonic()
+
+                def _time_guard(engine, budget=args.time_budget, start=_start):
+                    elapsed = time.monotonic() - start
+                    if elapsed >= budget:
+                        print(f"  time budget {budget}s reached ({elapsed:.0f}s elapsed) — stopping")
+                        engine.terminate()
+
+                trainer.trainer.add_event_handler(Events.EPOCH_COMPLETED, _time_guard)
+            trainer.run()
+            trainer.test()
         except Exception as e:  # noqa: BLE001 — log and continue sweep
             print(f"  FAILED: {e}", file=sys.stderr)
         else:

@@ -14,8 +14,8 @@ optimizer:
 data:
   dataset:
     _target_: datasets.string_reverse.StringReverseDataset
-    per_seq_size: 256
-    charset: "@alpha"
+    per_seq_size: 100
+    charset: "@alphanumeric"
     min_seq_len: 1
     max_seq_len: 16
     seq_len: null
@@ -37,12 +37,15 @@ trainer:
   epochs: 3
   log_every_steps: 10
   early_stopping_patience: null
-  inference_every_epochs: 1
+  inference_every_epochs: 3
   inference_num_samples: 5
   max_inference_new_tokens: 16
   grad_clip_norm: null
+  stop_on_perfect_acc: true
+  stop_on_lr_floor: true
 output:
   root: outputs
+  project: string_reverse
   run_name: transformer__string-reverse
 logger: tensorboard
 scheduler:

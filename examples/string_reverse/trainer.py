@@ -17,6 +17,8 @@ from config import (
 
 from utils import (
     attach_early_stopping,
+    attach_lr_floor_stopping,
+    attach_perfect_accuracy_stopping,
     attach_lr_scheduler,
     build_dataloaders,
     build_model,
@@ -110,6 +112,10 @@ class Trainer:
         # Attach early stopping
         if self.trainer_config.early_stopping_patience is not None:
             attach_early_stopping(self.val_evaluator, self.trainer, self.trainer_config.early_stopping_patience)
+        if self.trainer_config.stop_on_perfect_acc:
+            attach_perfect_accuracy_stopping(self.val_evaluator, self.trainer)
+        if self.trainer_config.stop_on_lr_floor:
+            attach_lr_floor_stopping(self.val_evaluator, self.trainer, self.optimizer, config.scheduler.min_lr)
 
         # Define validation scoring function for best model
         def score_function(engine_val):
