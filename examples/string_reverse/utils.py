@@ -293,9 +293,14 @@ def setup_experiment_tracking(
     metric_names: list[str],
     has_test: bool,
     run_name: str,
+    project: str | None = None,  # W&B project; falls back to run_name
 ) -> TensorboardLogger | WandBLogger:
     if backend == "wandb":
-        exp_logger = WandBLogger(project=run_name, dir=str(run_dir), name=str(run_dir).split("/")[-1])
+        exp_logger = WandBLogger(
+            project=project,
+            dir=str(run_dir),
+            name=run_name,  # display name inside the project
+        )
         exp_logger.save(str(run_dir / "config.yaml"))
     else:
         log_dir = run_dir / "tensorboard"

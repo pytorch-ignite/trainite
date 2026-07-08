@@ -31,6 +31,7 @@ class OutputConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
     root: str
     run_name: str
+    project: str
 
 
 class OptimizerConfig(BaseModel):
