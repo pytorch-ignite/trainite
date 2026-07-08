@@ -26,15 +26,15 @@ DEFAULT_SEEDS = [42, 123, 456]
 
 
 DEPTH_LAYERS = [4, 6, 8]
-DEPTH_FIXED_HIDDEN = 32
-DEPTH_FIXED_HEADS = 2
+DEPTH_FIXED_HIDDEN = [32]  # single-element list — consistent with DEPTH_LAYERS
+DEPTH_FIXED_HEADS = [2]  # head_dim = 16
 
 DIM_HIDDEN_HEADS = [
     (16, 1),
     (32, 2),
     (64, 4),
 ]
-DIM_FIXED_LAYERS = 4
+DIM_FIXED_LAYERS = [4]  # single-element list — consistent with pairs
 
 PROJECT_NAME = "string-reverse-sweep"
 
@@ -74,37 +74,35 @@ def make_config(base, seq_len: int, seed: int, layers: int, hidden: int, heads: 
 
 
 def build_combos(mode: str, args) -> tuple[list[tuple], str]:
-    """Return list of (seq_len, seed, layers, hidden, heads)."""
     seq_lens = args.seq_lens
     seeds = args.seeds
 
     if mode == "depth":
-        layers_grid = args.layers or DEPTH_LAYERS
-        fixed_hidden = args.fixed_hidden or DEPTH_FIXED_HIDDEN
-        fixed_heads = args.fixed_heads or DEPTH_FIXED_HEADS
-        return [
-            (sl, seed, layers, fixed_hidden, fixed_heads) for sl in seq_lens for seed in seeds for layers in layers_grid
-        ], PROJECT_NAME + "-depth"
-
-    if mode == "dim":
+        layers_grid = DEPTH_LAYERS if args.layers is None else args.layers
         pairs = list(
-            zip(args.hidden or [h for h, _ in DIM_HIDDEN_HEADS], args.heads or [nh for _, nh in DIM_HIDDEN_HEADS])
+            zip(
+                DEPTH_FIXED_HIDDEN if args.fixed_hidden is None else args.fixed_hidden,
+                DEPTH_FIXED_HEADS if args.fixed_heads is None else args.fixed_heads,
+            )
         )
-        fixed_layers = args.fixed_layers or DIM_FIXED_LAYERS
-        return [
-            (sl, seed, fixed_layers, hidden, heads) for sl in seq_lens for seed in seeds for hidden, heads in pairs
-        ], PROJECT_NAME + "-dim"
+    elif mode == "dim":
+        layers_grid = DIM_FIXED_LAYERS if args.fixed_layers is None else args.fixed_layers
+        hidden_vals = [h for h, _ in DIM_HIDDEN_HEADS] if args.hidden is None else args.hidden
+        heads_vals = [nh for _, nh in DIM_HIDDEN_HEADS] if args.heads is None else args.heads
+        pairs = list(zip(hidden_vals, heads_vals))
+    else:  # full
+        layers_grid = DEPTH_LAYERS if args.layers is None else args.layers
+        hidden_vals = [h for h, _ in DIM_HIDDEN_HEADS] if args.hidden is None else args.hidden
+        heads_vals = [nh for _, nh in DIM_HIDDEN_HEADS] if args.heads is None else args.heads
+        pairs = list(zip(hidden_vals, heads_vals))
 
-    # full: cross-product — layers × (hidden, heads)
-    layers_grid = args.layers or DEPTH_LAYERS
-    pairs = list(zip(args.hidden or [h for h, _ in DIM_HIDDEN_HEADS], args.heads or [nh for _, nh in DIM_HIDDEN_HEADS]))
     return [
         (sl, seed, layers, hidden, heads)
         for sl in seq_lens
         for seed in seeds
         for layers in layers_grid
         for hidden, heads in pairs
-    ], PROJECT_NAME + "-full"
+    ], PROJECT_NAME + f"-{mode}"
 
 
 def parse_args():
@@ -129,15 +127,24 @@ def parse_args():
     )
     p.add_argument(
         "--fixed-hidden",
+        nargs="+",
         type=int,
         default=None,
         help=f"hidden_size fixed for depth sweep (default: {DEPTH_FIXED_HIDDEN})",
     )
     p.add_argument(
-        "--fixed-heads", type=int, default=None, help=f"num_heads fixed for depth sweep (default: {DEPTH_FIXED_HEADS})"
+        "--fixed-heads",
+        nargs="+",
+        type=int,
+        default=None,
+        help=f"num_heads fixed for depth sweep (default: {DEPTH_FIXED_HEADS})",
     )
     p.add_argument(
-        "--fixed-layers", type=int, default=None, help=f"num_layers fixed for dim sweep (default: {DIM_FIXED_LAYERS})"
+        "--fixed-layers",
+        nargs="+",
+        type=int,
+        default=None,
+        help=f"num_layers fixed for dim sweep (default: {DIM_FIXED_LAYERS})",
     )
 
     # dim-mode axes — hidden and heads must be the same length (they're paired)
