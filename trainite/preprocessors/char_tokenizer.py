@@ -1,5 +1,4 @@
 import string
-from typing import Any
 
 import torch
 
@@ -87,7 +86,6 @@ class CharTokenizer:
         max_length: int | None = None,
         return_tensors: str | None = None,
         add_special_tokens: bool = True,
-        **kwargs: Any,
     ) -> dict[str, torch.Tensor | list[list[int]]]:
         if isinstance(text, str):
             is_batched = False
