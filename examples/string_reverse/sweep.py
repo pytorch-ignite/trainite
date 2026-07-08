@@ -1,19 +1,3 @@
-"""Hyperparameter sweep for string-reverse experiments.
-
-Three modes — only one axis varies at a time for clean interpretation:
-
-  depth   Fix dim/heads, vary num_layers
-  dim     Fix layers, vary (hidden_size, num_heads) pairs  [heads tied to hidden]
-  full    Cross-product of both (expensive)
-
-Usage:
-    python sweep.py --mode depth              # tensorboard, default grid
-    python sweep.py --mode dim --logger wandb
-    python sweep.py --mode full --seq-lens 4 8 --seeds 42
-    python sweep.py --mode depth --dry-run    # print combos, don't train
-    python sweep.py --mode depth --time-budget 600  # 10 min per run
-"""
-
 import argparse
 import copy
 import sys
@@ -26,15 +10,15 @@ DEFAULT_SEEDS = [42, 123, 456]
 
 
 DEPTH_LAYERS = [4, 6, 8]
-DEPTH_FIXED_HIDDEN = [32]  # single-element list — consistent with DEPTH_LAYERS
-DEPTH_FIXED_HEADS = [2]  # head_dim = 16
+DEPTH_FIXED_HIDDEN = [32]
+DEPTH_FIXED_HEADS = [2]
 
-DIM_HIDDEN_HEADS = [
+WIDTH_HIDDEN_HEADS = [
     (16, 1),
     (32, 2),
     (64, 4),
 ]
-DIM_FIXED_LAYERS = [4]  # single-element list — consistent with pairs
+WIDTH_FIXED_LAYERS = [4]
 
 PROJECT_NAME = "string-reverse-sweep"
 
@@ -73,33 +57,21 @@ def make_config(base, seq_len: int, seed: int, layers: int, hidden: int, heads: 
     return cfg
 
 
-def build_combos(mode: str, args) -> tuple[list[tuple], str]:
-    seq_lens = args.seq_lens
-    seeds = args.seeds
-
+def build_combos(mode: str) -> tuple[list[tuple], str]:
     if mode == "depth":
-        layers_grid = DEPTH_LAYERS if args.layers is None else args.layers
-        pairs = list(
-            zip(
-                DEPTH_FIXED_HIDDEN if args.fixed_hidden is None else args.fixed_hidden,
-                DEPTH_FIXED_HEADS if args.fixed_heads is None else args.fixed_heads,
-            )
-        )
-    elif mode == "dim":
-        layers_grid = DIM_FIXED_LAYERS if args.fixed_layers is None else args.fixed_layers
-        hidden_vals = [h for h, _ in DIM_HIDDEN_HEADS] if args.hidden is None else args.hidden
-        heads_vals = [nh for _, nh in DIM_HIDDEN_HEADS] if args.heads is None else args.heads
-        pairs = list(zip(hidden_vals, heads_vals))
+        layers_grid = DEPTH_LAYERS
+        pairs = list(zip(DEPTH_FIXED_HIDDEN, DEPTH_FIXED_HEADS))
+    elif mode == "width":
+        layers_grid = WIDTH_FIXED_LAYERS
+        pairs = WIDTH_HIDDEN_HEADS
     else:  # full
-        layers_grid = DEPTH_LAYERS if args.layers is None else args.layers
-        hidden_vals = [h for h, _ in DIM_HIDDEN_HEADS] if args.hidden is None else args.hidden
-        heads_vals = [nh for _, nh in DIM_HIDDEN_HEADS] if args.heads is None else args.heads
-        pairs = list(zip(hidden_vals, heads_vals))
+        layers_grid = DEPTH_LAYERS
+        pairs = WIDTH_HIDDEN_HEADS
 
     return [
         (sl, seed, layers, hidden, heads)
-        for sl in seq_lens
-        for seed in seeds
+        for sl in DEFAULT_SEQ_LENS
+        for seed in DEFAULT_SEEDS
         for layers in layers_grid
         for hidden, heads in pairs
     ], PROJECT_NAME + f"-{mode}"
@@ -108,53 +80,17 @@ def build_combos(mode: str, args) -> tuple[list[tuple], str]:
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument(
-        "--mode", default="depth", choices=["depth", "dim", "full"], help="which axis to sweep (default: depth)"
+        "mode",
+        choices=["depth", "width", "full"],
+        help="which axis to sweep: depth (vary layers), width (vary hidden/heads), or full (cross-product)",
     )
-    p.add_argument("--config", default="config.yaml")
-    p.add_argument("--logger", default="tensorboard", choices=["tensorboard", "wandb"])
+    p.add_argument("--config", default="config.yaml", help="path to config.yaml (default: config.yaml)")
     p.add_argument(
-        "--seq-lens", nargs="+", type=int, default=None, help=f"sequence lengths (default: {DEFAULT_SEQ_LENS})"
+        "--logger",
+        default="tensorboard",
+        choices=["tensorboard", "wandb"],
+        help="logger backend (default: tensorboard)",
     )
-    p.add_argument("--seeds", nargs="+", type=int, default=None, help=f"seeds (default: {DEFAULT_SEEDS})")
-
-    # depth-mode axes
-    p.add_argument(
-        "--layers",
-        nargs="+",
-        type=int,
-        default=None,
-        help=f"num_layers to sweep in depth mode (default: {DEPTH_LAYERS})",
-    )
-    p.add_argument(
-        "--fixed-hidden",
-        nargs="+",
-        type=int,
-        default=None,
-        help=f"hidden_size fixed for depth sweep (default: {DEPTH_FIXED_HIDDEN})",
-    )
-    p.add_argument(
-        "--fixed-heads",
-        nargs="+",
-        type=int,
-        default=None,
-        help=f"num_heads fixed for depth sweep (default: {DEPTH_FIXED_HEADS})",
-    )
-    p.add_argument(
-        "--fixed-layers",
-        nargs="+",
-        type=int,
-        default=None,
-        help=f"num_layers fixed for dim sweep (default: {DIM_FIXED_LAYERS})",
-    )
-
-    # dim-mode axes — hidden and heads must be the same length (they're paired)
-    p.add_argument(
-        "--hidden", nargs="+", type=int, default=None, help="hidden_size values for dim sweep (paired with --heads)"
-    )
-    p.add_argument(
-        "--heads", nargs="+", type=int, default=None, help="num_heads values for dim sweep (paired with --hidden)"
-    )
-
     p.add_argument(
         "--time-budget",
         type=int,
@@ -168,15 +104,8 @@ def parse_args():
 
 def main() -> None:
     args = parse_args()
-    args.seq_lens = args.seq_lens or DEFAULT_SEQ_LENS
-    args.seeds = args.seeds or DEFAULT_SEEDS
 
-    # Validate paired args for dim mode
-    if args.hidden and args.heads and len(args.hidden) != len(args.heads):
-        print("ERROR: --hidden and --heads must have the same number of values (they are paired).", file=sys.stderr)
-        sys.exit(1)
-
-    combos, project_name = build_combos(args.mode, args)
+    combos, project_name = build_combos(args.mode)
     total = len(combos)
     print(f"Sweep [{args.mode}]: {total} runs  |  logger={args.logger}  |  project={PROJECT_NAME}\n")
 
@@ -214,6 +143,17 @@ def main() -> None:
             print(f"  FAILED: {e}", file=sys.stderr)
         else:
             print("  done")
+        finally:
+            if "trainer" in locals():
+                del trainer
+            import gc
+            import torch
+
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            elif hasattr(torch, "mps") and torch.mps.is_available():
+                torch.mps.empty_cache()
 
 
 if __name__ == "__main__":
