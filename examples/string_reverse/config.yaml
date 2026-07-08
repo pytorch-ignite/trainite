@@ -36,8 +36,8 @@ data:
 trainer:
   epochs: 3
   log_every_steps: 10
-  early_stopping_patience: None
-  inference_every_epochs: null
+  early_stopping_patience: null
+  inference_every_epochs: 1
   inference_num_samples: 5
   max_inference_new_tokens: 16
   grad_clip_norm: null

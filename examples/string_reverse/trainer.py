@@ -1,4 +1,5 @@
 import itertools
+from itertools import zip_longest
 import logging
 
 import ignite.distributed as idist
@@ -221,6 +222,95 @@ class Trainer:
 
         self.exp_logger.close()
 
+    def evaluate_autoregressive(
+        self,
+        loader: DataLoader,
+        name: str,
+        step: int,
+        num_log_samples: int = 8,
+    ) -> dict[str, float]:
+        pad_token_id = self.tokenizer.pad_token_id
+        batch_size = loader.batch_size
+        dataset = loader.dataset
+        total = len(dataset)  # type: ignore[arg-type]
+
+        items = [dataset[i] for i in range(total)]
+        prompt_ids = [it.eval_input_ids for it in items]
+        sources = [it.source for it in items]
+        targets = [it.target for it in items]
+
+        self.logger.info("AR eval [%s]: decoding %d samples...", name, total)
+
+        decoded_strs: list[str] = []
+        for start in range(0, total, batch_size):
+            chunk = prompt_ids[start : start + batch_size]
+            # Left-pad so all prompts in the batch end at the same column.
+            batch_input_ids = (
+                torch.nn.utils.rnn.pad_sequence(
+                    [t.flip(0) for t in chunk], batch_first=True, padding_value=pad_token_id
+                )
+                .flip(1)
+                .to(self.device)
+            )
+            batch_attention_mask = (batch_input_ids != pad_token_id).long()
+            sequences = self.generate(
+                input_ids=batch_input_ids,
+                max_new_tokens=self.max_inference_new_tokens,
+                attention_mask=batch_attention_mask,
+            )
+            new_tokens = sequences[:, batch_input_ids.shape[1] :]
+            decoded_strs.extend(
+                self.tokenizer.decode(tokens.tolist(), skip_special_tokens=True) for tokens in new_tokens
+            )
+
+        ar_exact_match_acc = sum(p == t for p, t in zip(decoded_strs, targets)) / total if total else 0.0
+
+        # Compute token-level accuracy by comparing each character in the decoded string to the target string.
+        correct_chars = total_chars = 0
+        for p, t in zip(decoded_strs, targets):
+            # Use zip_longest to handle cases where the predicted and target strings have different lengths.
+            pairs = list(zip_longest(p, t))
+            correct_chars += sum(a == b for a, b in pairs)
+            total_chars += len(pairs)
+        ar_token_acc = correct_chars / total_chars if total_chars else 0.0
+
+        self.logger.info(
+            "AR eval [%s] step=%d  exact_match=%.4f  token_acc=%.4f",
+            name,
+            step,
+            ar_exact_match_acc,
+            ar_token_acc,
+        )
+
+        split_tag = {"Train": "training", "Val": "validation"}.get(name, name.lower())
+        payload = {
+            f"ar_eval/{split_tag}/exact_match_acc": ar_exact_match_acc,
+            f"ar_eval/{split_tag}/token_acc": ar_token_acc,
+        }
+        if self.config.logger == "wandb":
+            self.exp_logger.log(payload, step=step)
+        else:
+            for tag, value in payload.items():
+                self.exp_logger.writer.add_scalar(tag, value, global_step=step)
+
+        if num_log_samples > 0:
+
+            def _esc(s: str) -> str:
+                return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+            lines: list[str] = []
+            for idx in range(min(num_log_samples, total)):
+                lines += [
+                    f"Sample {idx + 1}",
+                    f"  Prompt:     {_esc(sources[idx].strip() or '(empty)')}",
+                    f"  Target:     {_esc(targets[idx].strip() or '(empty)')}",
+                    f"  Prediction: {_esc(decoded_strs[idx].strip() or '(empty)')}",
+                    "",
+                ]
+            self._log_text(f"ar_eval/{split_tag}/samples", "\n".join(lines), step)
+
+        return {"ar_exact_match_acc": ar_exact_match_acc, "ar_token_acc": ar_token_acc}
+
     def test(self, test_loader: DataLoader | None = None) -> None:
         loader = test_loader or self.test_loader
         if loader is None:
@@ -246,6 +336,10 @@ class Trainer:
             metrics["loss"],
             metrics["token_accuracy"],
         )
+
+        # Autoregressive evaluation — logged directly into the experiment tracker
+        step = self.trainer.state.iteration if self.trainer.state else 0
+        self.evaluate_autoregressive(loader, "Test", step=step)
 
     def _attach_metrics(self) -> dict[str, Metric]:
         RunningAverage(output_transform=lambda output: output["loss"]).attach(self.trainer, "loss")
