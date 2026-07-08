@@ -21,19 +21,20 @@ import time
 from pathlib import Path
 
 
-DEFAULT_SEQ_LENS = [4, 8, 16]
-DEFAULT_SEEDS = [42, 123]
+DEFAULT_SEQ_LENS = [8, 16, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320]
+DEFAULT_SEEDS = [42, 123, 456]
 
 
-DEPTH_LAYERS = [1, 2, 4, 6, 8]
-DEPTH_FIXED_HIDDEN = 128
-DEPTH_FIXED_HEADS = 4  # must divide DEPTH_FIXED_HIDDEN
+DEPTH_LAYERS = [4, 6, 8]
+DEPTH_FIXED_HIDDEN = 32
+DEPTH_FIXED_HEADS = 2
 
-
-# heads are PAIRED with hidden — num_heads must divide hidden_size.
-# Convention here: head_dim = hidden // heads = 32 (standard).
-DIM_HIDDEN_HEADS = [(32, 1), (64, 2), (128, 4)]
-DIM_FIXED_LAYERS = 2
+DIM_HIDDEN_HEADS = [
+    (16, 1),
+    (32, 2),
+    (64, 4),
+]
+DIM_FIXED_LAYERS = 4
 
 PROJECT_NAME = "string-reverse-sweep"
 
