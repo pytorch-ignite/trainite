@@ -14,10 +14,10 @@ optimizer:
 data:
   dataset:
     _target_: datasets.string_reverse.StringReverseDataset
-    per_seq_size: 100
+    per_seq_size: 10000
     charset: "@alphanumeric"
-    min_seq_len: 1
-    max_seq_len: 16
+    min_seq_len: null
+    max_seq_len: null
     seq_len: null
     seed: 42
   transform:
