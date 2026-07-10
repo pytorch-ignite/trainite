@@ -69,8 +69,8 @@ def main() -> None:
                         if acc > best_val_acc:
                             best_val_acc = acc
 
-                    # Execute training run
-                    trainer.run()
+                    # Execute training run without closing the logger early
+                    trainer.run(close_logger=False)
 
                     # OOD generalization evaluation on the paper's length bins
                     test_results = {}
@@ -93,6 +93,19 @@ def main() -> None:
                         trainer.test(test_loader)
                         key = f"test_{bin_min}_{bin_max}"
                         test_results[key] = trainer.test_evaluator.state.metrics.get("sequence_accuracy", 0.0)
+
+                    # Log summary metrics to W&B if active
+                    if config.logger == "wandb":
+                        import wandb
+
+                        if wandb.run is not None:
+                            wandb.run.summary["best_val_sequence_acc"] = best_val_acc
+                            wandb.run.summary["test_251_300"] = test_results.get("test_251_300", 0.0)
+                            wandb.run.summary["test_301_350"] = test_results.get("test_301_350", 0.0)
+                            wandb.run.summary["test_351_400"] = test_results.get("test_351_400", 0.0)
+
+                    # Close logger cleanly after logging OOD metrics
+                    trainer.exp_logger.close()
 
                     # Record results to CSV file
                     row = {

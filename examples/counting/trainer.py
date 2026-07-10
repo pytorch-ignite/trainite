@@ -195,14 +195,15 @@ class Trainer:
             val_metrics["sequence_accuracy"],
         )
 
-    def run(self) -> None:
+    def run(self, close_logger: bool = True) -> None:
         self.logger.info("starting run in %s", self.run_dir)
         self.trainer.run(self.train_loader, max_epochs=self.epochs)
 
         if self.test_loader:
             self.test()
 
-        self.exp_logger.close()
+        if close_logger:
+            self.exp_logger.close()
 
     def test(self, test_loader: DataLoader | None = None) -> None:
         loader = test_loader or self.test_loader
