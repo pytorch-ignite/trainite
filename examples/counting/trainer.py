@@ -116,6 +116,7 @@ class Trainer:
             ["loss", "sequence_accuracy"],
             bool(self.test_loader),
             config.output.run_name,
+            getattr(config.output, "wandb_project", None),
         )
 
         # Real-time W&B uploads

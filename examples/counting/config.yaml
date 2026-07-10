@@ -45,6 +45,7 @@ trainer:
 output:
   root: outputs
   run_name: transformer__counting_l3
+  wandb_project: transformer__counting
 logger: tensorboard
 seed: 42
 device: null

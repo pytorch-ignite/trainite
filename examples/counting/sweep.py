@@ -13,16 +13,14 @@ from utils import load_config, create_dataloader
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Grid search / hyperparameter sweep for counting example")
-    parser.add_argument("--k-values", type=str, default="3,4,5,6,7,8,9,10,11,12", help="Comma-separated k values")
+    parser = argparse.ArgumentParser(description="Targeted depth capability sweep for counting example")
     parser.add_argument("--depths", type=str, default="1,2,3,4,5,6,7,8,9,10", help="Comma-separated layer depths")
-    parser.add_argument("--dims", type=str, default="256,512", help="Comma-separated model dims")
-    parser.add_argument("--lrs", type=str, default="0.0001,0.00001", help="Comma-separated learning rates")
+    parser.add_argument("--dims", type=str, default="256", help="Comma-separated model dims")
+    parser.add_argument("--lrs", type=str, default="0.0001", help="Comma-separated learning rates")
     parser.add_argument("--epochs", type=int, default=25, help="Number of training epochs")
     parser.add_argument("--output-csv", type=str, default="sweep_results.csv", help="Path to output CSV")
     args = parser.parse_args()
 
-    k_values = [int(x) for x in args.k_values.split(",")]
     depths = [int(x) for x in args.depths.split(",")]
     dims = [int(x) for x in args.dims.split(",")]
     lrs = [float(x) for x in args.lrs.split(",")]
@@ -34,8 +32,9 @@ def main() -> None:
         if not file_exists:
             writer.writeheader()
 
-    for k in k_values:
-        for depth in depths:
+    for depth in depths:
+        k_values = [depth + 2, depth + 3, depth + 4]
+        for k in k_values:
             for dim in dims:
                 for lr in lrs:
                     print(

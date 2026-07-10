@@ -31,6 +31,7 @@ class OutputConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
     root: str
     run_name: str
+    wandb_project: str | None = None
 
 
 class OptimizerConfig(BaseModel):
