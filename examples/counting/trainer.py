@@ -113,7 +113,7 @@ class Trainer:
             self.test_evaluator,
             self.optimizer,
             self.run_dir,
-            ["loss", "token_accuracy"],
+            ["loss", "sequence_accuracy"],
             bool(self.test_loader),
             config.output.run_name,
         )
@@ -132,6 +132,14 @@ class Trainer:
         # Attach inference logger if inference logging is enabled
         if self.inference_every_epochs is not None:
             self.attach_inference_logger()
+
+        # Terminate early if sequence accuracy reaches 100%
+        @self.val_evaluator.on(Events.COMPLETED)
+        def terminate_on_perfect_accuracy(engine):
+            acc = engine.state.metrics.get("sequence_accuracy", 0.0)
+            if acc >= 1.0:
+                self.logger.info("Validation accuracy reached 100%. Terminating training early.")
+                self.trainer.terminate()
 
     def _train_step(self, engine: Engine, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         self.model.train()
@@ -178,12 +186,12 @@ class Trainer:
         self.val_evaluator.run(self.val_loader)
         val_metrics = self.val_evaluator.state.metrics
         self.logger.info(
-            "epoch=%s train_loss=%.4f train_token_acc=%.4f val_loss=%.4f val_token_acc=%.4f",
+            "epoch=%s train_loss=%.4f train_sequence_acc=%.4f val_loss=%.4f val_sequence_acc=%.4f",
             epoch,
             train_metrics["loss"],
-            train_metrics["token_accuracy"],
+            train_metrics["sequence_accuracy"],
             val_metrics["loss"],
-            val_metrics["token_accuracy"],
+            val_metrics["sequence_accuracy"],
         )
 
     def run(self) -> None:
@@ -216,9 +224,9 @@ class Trainer:
         self.test_evaluator.run(loader)
         metrics = self.test_evaluator.state.metrics
         self.logger.info(
-            "Test results: loss=%.4f token_acc=%.4f",
+            "Test results: loss=%.4f sequence_acc=%.4f",
             metrics["loss"],
-            metrics["token_accuracy"],
+            metrics["sequence_accuracy"],
         )
 
     def _attach_metrics(self) -> dict[str, Metric]:
@@ -255,10 +263,10 @@ class Trainer:
             token_acc = Accuracy(output_transform=sequence_accuracy_transform)
 
             loss.attach(evaluator, "loss")
-            token_acc.attach(evaluator, "token_accuracy")
+            token_acc.attach(evaluator, "sequence_accuracy")
 
             metrics[f"{prefix}_loss"] = loss
-            metrics[f"{prefix}_token_accuracy"] = token_acc
+            metrics[f"{prefix}_sequence_accuracy"] = token_acc
 
         return metrics
 

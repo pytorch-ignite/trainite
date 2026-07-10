@@ -27,7 +27,7 @@ def main() -> None:
     dims = [int(x) for x in args.dims.split(",")]
     lrs = [float(x) for x in args.lrs.split(",")]
 
-    fieldnames = ["k", "depth", "dim", "lr", "best_val_acc", "test_251_300", "test_301_350", "test_351_400"]
+    fieldnames = ["k", "depth", "dim", "lr", "best_val_sequence_acc", "test_251_300", "test_301_350", "test_351_400"]
     file_exists = os.path.exists(args.output_csv)
     with open(args.output_csv, "a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -66,7 +66,7 @@ def main() -> None:
                     @trainer.val_evaluator.on(Events.COMPLETED)
                     def track_best_accuracy(engine):
                         nonlocal best_val_acc
-                        acc = engine.state.metrics.get("token_accuracy", 0.0)
+                        acc = engine.state.metrics.get("sequence_accuracy", 0.0)
                         if acc > best_val_acc:
                             best_val_acc = acc
 
@@ -93,7 +93,7 @@ def main() -> None:
                         )
                         trainer.test(test_loader)
                         key = f"test_{bin_min}_{bin_max}"
-                        test_results[key] = trainer.test_evaluator.state.metrics.get("token_accuracy", 0.0)
+                        test_results[key] = trainer.test_evaluator.state.metrics.get("sequence_accuracy", 0.0)
 
                     # Record results to CSV file
                     row = {
@@ -101,7 +101,7 @@ def main() -> None:
                         "depth": depth,
                         "dim": dim,
                         "lr": lr,
-                        "best_val_acc": best_val_acc,
+                        "best_val_sequence_acc": best_val_acc,
                         "test_251_300": test_results.get("test_251_300", 0.0),
                         "test_301_350": test_results.get("test_301_350", 0.0),
                         "test_351_400": test_results.get("test_351_400", 0.0),

@@ -11,7 +11,7 @@ model:
   use_rotary_emb: false
   num_classes: 2
 optimizer:
-  _target_: torch.optim.AdamW
+  _target_: torch.optim.Adam
   lr: 0.001
 data:
   dataset:
