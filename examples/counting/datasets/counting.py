@@ -17,7 +17,7 @@ class CountingDataset(Dataset):
 
     def __init__(
         self,
-        per_seq_size: int,
+        total_size: int,
         k: int,
         min_seq_len: int | None = None,
         max_seq_len: int | None = None,
@@ -30,15 +30,18 @@ class CountingDataset(Dataset):
             raise ValueError("Cannot specify both seq_len and min_seq_len/max_seq_len.")
 
         if seq_len is not None:
-            lengths = [seq_len]
+            min_len = seq_len
+            max_len = seq_len
         elif min_seq_len is None or max_seq_len is None:
             raise ValueError("Must specify either seq_len or both min_seq_len and max_seq_len.")
         else:
-            lengths = list(range(min_seq_len, max_seq_len + 1))
+            min_len = min_seq_len
+            max_len = max_seq_len
 
         self.source_texts, self.target_texts = self.generate_unique_sequences(
-            lengths=lengths,
-            per_seq_size=per_seq_size,
+            total_size=total_size,
+            min_len=min_len,
+            max_len=max_len,
             k=k,
             seed=seed,
         )
@@ -76,48 +79,48 @@ class CountingDataset(Dataset):
         return string_src, string_tgt
 
     def generate_unique_sequences(
-        self, lengths: list[int], per_seq_size: int, k: int, seed: int = 42
+        self, total_size: int, min_len: int, max_len: int, k: int, seed: int = 42
     ) -> tuple[list[str], list[str]]:
         source_texts = []
         target_texts = []
         rng = random.Random(seed)
 
-        for length in lengths:
-            # We can't have length shorter than k (since we need k alternating blocks)
+        # We can't generate if max length is less than k
+        if max_len < k:
+            return [], []
+
+        unique_sequences: set[str] = set()
+        seq_map: dict[str, str] = {}
+
+        # Pre-calculate possible combinations to avoid infinite loops on small ranges
+        import math
+
+        total_possible = sum(math.comb(seq_len - 1, k - 1) for seq_len in range(min_len, max_len + 1) if seq_len >= k)
+        target_size = min(total_size, total_possible)
+
+        attempts = 0
+        max_attempts = target_size * 50
+
+        while len(unique_sequences) < target_size and attempts < max_attempts:
+            length = rng.randint(min_len, max_len)
             if length < k:
-                continue
-
-            unique_sequences: set[str] = set()
-
-            # The number of possible configurations is comb(length-1, k-1)
-            import math
-
-            max_possible_combinations = math.comb(length - 1, k - 1)
-            target = min(per_seq_size, max_possible_combinations)
-
-            attempts = 0
-            max_attempts = target * 20
-
-            # Store mapping from source to target
-            seq_map: dict[str, str] = {}
-
-            while len(unique_sequences) < target and attempts < max_attempts:
-                src, tgt = self.generate_ab(length, k, rng)
-                if src not in unique_sequences:
-                    unique_sequences.add(src)
-                    seq_map[src] = tgt
                 attempts += 1
+                continue
+            src, tgt = self.generate_ab(length, k, rng)
+            if src not in unique_sequences:
+                unique_sequences.add(src)
+                seq_map[src] = tgt
+            attempts += 1
 
-            if len(unique_sequences) < per_seq_size and max_possible_combinations > per_seq_size:
-                warnings.warn(
-                    f"Requested {per_seq_size} unique sequences for seq_len={length} "
-                    f"but only {len(unique_sequences)} could be generated.",
-                    stacklevel=2,
-                )
+        if len(unique_sequences) < target_size:
+            warnings.warn(
+                f"Requested {target_size} unique sequences but only {len(unique_sequences)} could be generated.",
+                stacklevel=2,
+            )
 
-            for seq in unique_sequences:
-                source_texts.append(seq)
-                target_texts.append(seq_map[seq])
+        for seq in unique_sequences:
+            source_texts.append(seq)
+            target_texts.append(seq_map[seq])
 
         return source_texts, target_texts
 

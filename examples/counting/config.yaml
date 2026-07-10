@@ -4,7 +4,7 @@ model:
   _target_: models.transformer.TransformerModel
   hidden_size: 64
   num_layers: 2
-  num_heads: 2
+  num_heads: 1
   feedforward_dim: 128
   dropout: 0.1
   max_seq_len: 256
@@ -16,9 +16,9 @@ optimizer:
 data:
   dataset:
     _target_: datasets.counting.CountingDataset
-    per_seq_size: 512
-    min_seq_len: 50
-    max_seq_len: 100
+    total_size: 1000
+    min_seq_len: 201
+    max_seq_len: 250
     k: 3
     seed: 42
   transform:
@@ -32,8 +32,8 @@ data:
       _target_: models.transformer.CausalLMCollateFn
       ignore_index: -100
       pad_token_id: null
-  test_ratio: 0.2
-  val_ratio: 0.1
+  test_ratio: 0.0
+  val_ratio: 0.2
 trainer:
   epochs: 10
   log_every_steps: 10
