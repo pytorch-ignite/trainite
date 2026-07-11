@@ -385,44 +385,38 @@ def test_decoder_trainer_test_no_loader(project_config):
     mock_warning.assert_called_with("No test loader provided. Skipping testing.")
 
 
+@mock.patch("trainite.trainers.decoder_trainer.ClearMLSaver")
 @mock.patch("trainite.trainers.decoder_trainer.setup_experiment_tracking")
 @mock.patch("trainite.trainers.decoder_trainer.setup_best_model_checkpoint")
-def test_upload_model_to_wandb(mock_setup_best, mock_setup, project_config, temp_run_dir):
-    project_config.logger = "wandb"
-    mock_logger = mock.MagicMock()
-    mock_setup.return_value = mock_logger
-
-    mock_best = mock.MagicMock(last_checkpoint="best_model_1.pt")
-    mock_setup_best.return_value = mock_best
-
-    trainer = create_trainer_from_config(project_config)
-
-    from ignite.handlers.checkpoint import CheckpointEvents
-
-    trainer.val_evaluator.fire_event(CheckpointEvents.SAVED_CHECKPOINT)
-
-    mock_logger.Artifact.return_value.add_file.assert_called_once_with("best_model_1.pt")
-    mock_logger.log_artifact.assert_called_once_with(mock_logger.Artifact.return_value)
-
-
-@mock.patch("trainite.trainers.decoder_trainer.setup_experiment_tracking")
 @mock.patch("trainite.trainers.decoder_trainer.setup_training_checkpointing")
-def test_upload_last_checkpoint_to_wandb(mock_setup_last, mock_setup, project_config, temp_run_dir):
-    project_config.logger = "wandb"
+def test_clearml_saver_is_used(
+    mock_setup_training, mock_setup_best, mock_setup_tracking, mock_clearml_saver, project_config, temp_run_dir
+):
+    project_config.logger = "clearml"
     mock_logger = mock.MagicMock()
-    mock_setup.return_value = mock_logger
-
-    mock_last = mock.MagicMock(last_checkpoint="last_model_1.pt")
-    mock_setup_last.return_value = mock_last
+    mock_setup_tracking.return_value = mock_logger
 
     trainer = create_trainer_from_config(project_config)
 
-    from ignite.handlers.checkpoint import CheckpointEvents
+    # Assert ClearMLSaver was initialized with the exp_logger
+    mock_clearml_saver.assert_called_once_with(logger=mock_logger, dirname=str(trainer.run_dir), require_empty=False)
 
-    trainer.trainer.fire_event(CheckpointEvents.SAVED_CHECKPOINT)
+    # Assert setup_best_model_checkpoint was called with the clearml saver
+    mock_setup_best.assert_called_once_with(
+        trainer.trainer,
+        trainer.val_evaluator,
+        {"model": trainer.model, "optimizer": trainer.optimizer},
+        mock_clearml_saver.return_value,
+        score_function=mock.ANY,
+        score_name="val_loss",
+    )
 
-    mock_logger.Artifact.return_value.add_file.assert_called_once_with("last_model_1.pt")
-    mock_logger.log_artifact.assert_called_once_with(mock_logger.Artifact.return_value)
+    # Assert setup_training_checkpointing was called with the clearml saver
+    mock_setup_training.assert_called_once_with(
+        trainer.trainer,
+        {"model": trainer.model, "optimizer": trainer.optimizer},
+        mock_clearml_saver.return_value,
+    )
 
 
 def test_decoder_trainer_test_method(project_config, temp_run_dir):
