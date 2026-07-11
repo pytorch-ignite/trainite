@@ -1,4 +1,3 @@
-import itertools
 import logging
 
 import ignite.distributed as idist
@@ -164,8 +163,7 @@ class Trainer:
 
     def _run_evaluations(self, engine: Engine) -> None:
         self.logger.info("Evaluating on training set...")
-        eval_loader = itertools.islice(self.train_loader, len(self.val_loader))
-        self.train_evaluator.run(eval_loader)
+        self.train_evaluator.run(self.train_loader, epoch_length=min(len(self.train_loader), len(self.val_loader)))
         train_metrics = self.train_evaluator.state.metrics
         epoch = engine.state.epoch
 
