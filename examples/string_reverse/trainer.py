@@ -386,6 +386,7 @@ class Trainer:
 
             metrics[f"{prefix}_loss"] = loss
             metrics[f"{prefix}_token_accuracy"] = token_acc
+            metrics[f"{prefix}_exact_accuracy"] = exact_acc
 
         return metrics
 
