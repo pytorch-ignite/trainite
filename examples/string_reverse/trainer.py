@@ -132,7 +132,7 @@ class Trainer:
             self.test_evaluator,
             self.optimizer,
             self.run_dir,
-            ["loss", "token_accuracy"],
+            ["loss", "token_accuracy", "exact_accuracy"],
             bool(self.test_loader),
             config.output.run_name,
             project=config.output.project,
@@ -349,9 +349,10 @@ class Trainer:
         self.test_evaluator.run(loader)
         metrics = self.test_evaluator.state.metrics
         self.logger.info(
-            "Test results: loss=%.4f token_acc=%.4f",
+            "Test results: loss=%.4f token_acc=%.4f exact_acc=%.4f",
             metrics["loss"],
             metrics["token_accuracy"],
+            metrics["exact_accuracy"],
         )
 
         # Autoregressive evaluation — logged directly into the experiment tracker
