@@ -4,7 +4,7 @@ from typing import Sequence
 import tyro
 
 from trainite.cli.init import Init, init_project, run_interactive_mode
-from trainite.cli.mocker import mock_dependencies
+from trainite.shared.mocker import mock_dependencies
 
 
 def main(argv: Sequence[str] | None = None) -> None:
