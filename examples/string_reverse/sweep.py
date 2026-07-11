@@ -146,6 +146,12 @@ def main() -> None:
         finally:
             if "trainer" in locals():
                 del trainer
+            if args.logger == "clearml":
+                from clearml import Task
+
+                task = Task.current_task()
+                if task:
+                    task.close()
             import gc
             import torch
 

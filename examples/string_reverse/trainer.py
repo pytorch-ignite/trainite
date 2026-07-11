@@ -207,12 +207,14 @@ class Trainer:
         self.val_evaluator.run(self.val_loader)
         val_metrics = self.val_evaluator.state.metrics
         self.logger.info(
-            "epoch=%s train_loss=%.4f train_token_acc=%.4f val_loss=%.4f val_token_acc=%.4f",
+            "epoch=%s train_loss=%.4f train_token_acc=%.4f train_exact_acc=%.4f val_loss=%.4f val_token_acc=%.4f val_exact_acc=%.4f",
             epoch,
             train_metrics["loss"],
             train_metrics["token_accuracy"],
+            train_metrics["exact_accuracy"],
             val_metrics["loss"],
             val_metrics["token_accuracy"],
+            val_metrics["exact_accuracy"],
         )
 
     def run(self) -> None:
@@ -224,6 +226,10 @@ class Trainer:
                 self.test()
         finally:
             self.exp_logger.close()
+            if self.config.logger == "clearml":
+                task = self.exp_logger.get_task()
+                if task:
+                    task.close()
 
     def evaluate_autoregressive(
         self,

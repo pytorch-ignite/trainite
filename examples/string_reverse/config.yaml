@@ -10,7 +10,7 @@ model:
   max_seq_len: 128
 optimizer:
   _target_: torch.optim.AdamW
-  lr: 0.001
+  lr: 0.0003
 data:
   dataset:
     _target_: datasets.string_reverse.StringReverseDataset
@@ -49,7 +49,7 @@ output:
   run_name: transformer__string-reverse
 logger: tensorboard
 scheduler:
-  metric_name: exact_accuracy
+  metric_name: loss
   factor: 0.5
   patience: 2
   min_lr: 1e-6
