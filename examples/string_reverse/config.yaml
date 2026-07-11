@@ -53,6 +53,6 @@ scheduler:
   factor: 0.5
   patience: 2
   min_lr: 1e-6
-  mode: max
+  mode: min
 seed: 42
 device: null
