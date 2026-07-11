@@ -98,6 +98,6 @@ class ProjectConfig(BaseModel):
     data: DataConfigBase | DataWithAutoSplit
     trainer: TrainerConfig = Field(default_factory=TrainerConfig)
     output: OutputConfig
-    logger: Literal["tensorboard", "wandb"] = "tensorboard"
+    logger: Literal["tensorboard", "clearml"] = "tensorboard"
     seed: int = 42
     device: str | None = None

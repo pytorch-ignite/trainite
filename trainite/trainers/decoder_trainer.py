@@ -8,6 +8,8 @@ from ignite.metrics import Accuracy, Loss, Metric, RunningAverage
 from ignite.utils import setup_logger
 from torch import nn
 from torch.utils.data import DataLoader
+from ignite.handlers import DiskSaver
+from ignite.handlers.clearml_logger import ClearMLSaver
 
 from trainite.config.base import (
     ProjectConfig,
@@ -26,7 +28,6 @@ from trainite.shared.utils import (
     setup_console_logger,
     setup_experiment_tracking,
     setup_training_checkpointing,
-    setup_wandb_checkpoint_uploads,
 )
 
 
@@ -89,22 +90,7 @@ class Trainer:
             loss = engine_val.state.metrics["loss"]
             return -loss
 
-        # Attach checkpointing
-        self.best_checkpoint = setup_best_model_checkpoint(
-            self.trainer,
-            self.val_evaluator,
-            {"model": self.model, "optimizer": self.optimizer},
-            self.run_dir,
-            score_function=score_function,
-            score_name="val_loss",
-        )
-        self.last_checkpoint = setup_training_checkpointing(
-            self.trainer,
-            {"model": self.model, "optimizer": self.optimizer},
-            self.run_dir,
-        )
-
-        # Attach experiment logger (TensorBoard or Weights & Biases)
+        # Attach experiment logger (TensorBoard or ClearML)
         self.exp_logger = setup_experiment_tracking(
             config.logger,
             self.trainer,
@@ -118,17 +104,26 @@ class Trainer:
             config.output.run_name,
         )
 
-        # Real-time W&B uploads
-        if config.logger == "wandb":
-            setup_wandb_checkpoint_uploads(
-                self.trainer,
-                self.val_evaluator,
-                self.best_checkpoint,
-                self.last_checkpoint,
-                self.exp_logger,
-                config.output.run_name,
-                self.logger,
-            )
+        # Setup save handler
+        if config.logger == "clearml":
+            save_handler = ClearMLSaver(logger=self.exp_logger, dirname=str(self.run_dir), require_empty=False)
+        else:
+            save_handler = DiskSaver(dirname=str(self.run_dir), require_empty=False)
+
+        # Attach checkpointing
+        self.best_checkpoint = setup_best_model_checkpoint(
+            self.trainer,
+            self.val_evaluator,
+            {"model": self.model, "optimizer": self.optimizer},
+            save_handler,
+            score_function=score_function,
+            score_name="val_loss",
+        )
+        self.last_checkpoint = setup_training_checkpointing(
+            self.trainer,
+            {"model": self.model, "optimizer": self.optimizer},
+            save_handler,
+        )
         # Attach inference logger if inference logging is enabled
         if self.inference_every_epochs is not None:
             self.attach_inference_logger()
@@ -262,9 +257,9 @@ class Trainer:
         )
 
     def _log_text(self, tag: str, text: str, step: int) -> None:
-        # Both backends escape HTML in the caller; wandb renders it, TB uses markdown.
-        if self.config.logger == "wandb":
-            self.exp_logger.log({tag: self.exp_logger.Html(f"<pre>{text}</pre>")}, step=step)
+        # Both backends escape HTML/text in the caller; clearml uses report_text, TB uses markdown.
+        if self.config.logger == "clearml":
+            self.exp_logger.report_text(f"[{tag}] Step {step}:\n{text}")
         else:
             self.exp_logger.writer.add_text(tag, text, global_step=step)
 
@@ -350,7 +345,7 @@ class Trainer:
             target = targets[idx].strip() or "(empty)"
             pred = decoded_strs[idx].strip() or "(empty)"
             for key, val in [("Prompt", prompt), ("Target", target), ("Prediction", pred)]:
-                # Escape markup so TB markdown / wandb HTML don't swallow <, >, & in outputs.
+                # Escape markup so TB markdown / clearml console don't swallow <, >, & in outputs.
                 val = val.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 lines.append(f"  {key}:     {val}")
             lines.append("")
