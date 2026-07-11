@@ -277,6 +277,7 @@ def setup_training_checkpointing(
         filename_prefix="last",
         n_saved=1,
         global_step_transform=lambda *_: engine.state.iteration,
+        filename_pattern="{filename_prefix}.{ext}",
     )
     engine.add_event_handler(Events.EPOCH_COMPLETED, last_checkpoint)
     return last_checkpoint
@@ -298,6 +299,7 @@ def setup_best_model_checkpoint(
         score_name=score_name,
         n_saved=1,
         global_step_transform=lambda *_: engine.state.iteration,
+        filename_pattern="{filename_prefix}.{ext}",
     )
     val_evaluator.add_event_handler(Events.COMPLETED, checkpoint)
     return checkpoint
