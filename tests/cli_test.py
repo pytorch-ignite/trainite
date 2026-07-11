@@ -161,3 +161,29 @@ def test_cli_main_routing():
             ]
         )
         mock_init_project.assert_called_once()
+
+
+def test_import_without_dependencies() -> None:
+    """
+    Test that the trainite package and CLI main entrypoint can be imported
+    successfully.
+    """
+    code = (
+        "import importlib, sys\n"
+        "orig_import = importlib.import_module\n"
+        "def my_import(name, package=None):\n"
+        "    if name in ('torch', 'ignite') or (package and package.startswith(('torch', 'ignite'))):\n"
+        "        raise ImportError(f'Mocked ImportError for {name}')\n"
+        "    return orig_import(name, package)\n"
+        "importlib.import_module = my_import\n"
+        "import trainite\n"
+        "import trainite.cli.main\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        timeout=10,
+        capture_output=True,
+        text=True,
+    )
+    assert "is not a Python type" not in result.stderr
