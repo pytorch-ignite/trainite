@@ -13,11 +13,10 @@ from ignite.handlers import (
     DiskSaver,
     EarlyStopping,
 )
-from ignite.handlers.checkpoint import CheckpointEvents
 from ignite.handlers.fbresearch_logger import FBResearchLogger
 from ignite.handlers.param_scheduler import ReduceLROnPlateauScheduler
 from ignite.handlers.tensorboard_logger import TensorboardLogger
-from ignite.handlers.wandb_logger import WandBLogger
+from ignite.handlers.clearml_logger import ClearMLLogger, ClearMLSaver
 from ignite.utils import setup_logger
 from omegaconf import OmegaConf
 from pydantic import BaseModel
@@ -270,11 +269,11 @@ def attach_lr_floor_stopping(val_evaluator: Engine, trainer_engine: Engine, opti
 def setup_training_checkpointing(
     engine: Engine,
     to_save: dict[str, Any],
-    run_dir: Path,
+    save_handler: DiskSaver | ClearMLSaver,
 ) -> Checkpoint:
     last_checkpoint = Checkpoint(
         to_save=to_save,
-        save_handler=DiskSaver(dirname=str(run_dir), require_empty=False),
+        save_handler=save_handler,
         filename_prefix="last",
         n_saved=1,
         global_step_transform=lambda *_: engine.state.iteration,
@@ -287,13 +286,13 @@ def setup_best_model_checkpoint(
     engine: Engine,
     val_evaluator: Engine,
     to_save: dict[str, Any],
-    run_dir: Path,
+    save_handler: DiskSaver | ClearMLSaver,
     score_function: Callable,
     score_name: str,
 ) -> Checkpoint:
     checkpoint = Checkpoint(
         to_save=to_save,
-        save_handler=DiskSaver(dirname=str(run_dir), require_empty=False),
+        save_handler=save_handler,
         filename_prefix="best",
         score_function=score_function,
         score_name=score_name,
@@ -305,7 +304,7 @@ def setup_best_model_checkpoint(
 
 
 def setup_experiment_tracking(
-    backend: Literal["tensorboard", "wandb"],
+    backend: Literal["tensorboard", "clearml"],
     engine: Engine,
     val_evaluator: Engine,
     train_evaluator: Engine,
@@ -315,15 +314,15 @@ def setup_experiment_tracking(
     metric_names: list[str],
     has_test: bool,
     run_name: str,
-    project: str | None = None,  # W&B project; falls back to run_name
-) -> TensorboardLogger | WandBLogger:
-    if backend == "wandb":
-        exp_logger = WandBLogger(
-            project=project or run_name,
-            dir=str(run_dir),
-            name=run_name,  # display name inside the project
+    project: str | None = None,
+) -> TensorboardLogger | ClearMLLogger:
+    if backend == "clearml":
+        exp_logger = ClearMLLogger(
+            project_name=project or run_name,
+            task_name=run_name,
         )
-        exp_logger.save(str(run_dir / "config.yaml"))
+        task = exp_logger.get_task()
+        task.upload_artifact(name="config.yaml", artifact_object=str(run_dir / "config.yaml"))
     else:
         log_dir = run_dir / "tensorboard"
         exp_logger = TensorboardLogger(log_dir=log_dir)
@@ -394,34 +393,3 @@ def setup_console_logger(
         output_transform=lambda output: {"loss": output["loss"].item()},
     )
     return logger
-
-
-def setup_wandb_checkpoint_uploads(
-    trainer: Engine,
-    val_evaluator: Engine,
-    best_checkpoint: Checkpoint,
-    last_checkpoint: Checkpoint,
-    exp_logger: Any,
-    run_name: str,
-    logger: logging.Logger,
-) -> None:
-    """Register events and upload handlers to automatically log checkpoints to W&B in real-time."""
-    val_evaluator.register_events(*CheckpointEvents)
-    trainer.register_events(*CheckpointEvents)
-
-    def upload_best_model_artifact(engine):
-        checkpoint_path = best_checkpoint.last_checkpoint
-        logger.info(f"Uploading new best model artifact to W&B: {checkpoint_path}")
-        artifact = exp_logger.Artifact(name=f"{run_name}-model".replace("/", "-"), type="model")
-        artifact.add_file(str(checkpoint_path))
-        exp_logger.log_artifact(artifact)
-
-    def upload_last_checkpoint_artifact(engine):
-        checkpoint_path = last_checkpoint.last_checkpoint
-        logger.info(f"Uploading last checkpoint artifact to W&B: {checkpoint_path}")
-        artifact = exp_logger.Artifact(name=f"{run_name}-checkpoint".replace("/", "-"), type="checkpoint")
-        artifact.add_file(str(checkpoint_path))
-        exp_logger.log_artifact(artifact)
-
-    val_evaluator.add_event_handler(CheckpointEvents.SAVED_CHECKPOINT, upload_best_model_artifact)
-    trainer.add_event_handler(CheckpointEvents.SAVED_CHECKPOINT, upload_last_checkpoint_artifact)

@@ -88,7 +88,7 @@ def parse_args():
     p.add_argument(
         "--logger",
         default="tensorboard",
-        choices=["tensorboard", "wandb"],
+        choices=["tensorboard", "clearml"],
         help="logger backend (default: tensorboard)",
     )
     p.add_argument(
