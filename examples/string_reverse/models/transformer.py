@@ -157,18 +157,22 @@ class Attention(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, d_model: int, num_heads: int, feedforward_dim: int, dropout: float = 0.1) -> None:
+    def __init__(
+        self, d_model: int, num_heads: int, feedforward_dim: int, dropout: float = 0.1, use_mlp: bool = True
+    ) -> None:
         super().__init__()
         self.norm1 = nn.LayerNorm(d_model)
         self.attention = Attention(d_model, num_heads, dropout=dropout)
-        self.norm2 = nn.LayerNorm(d_model)
-        self.feedforward = nn.Sequential(
-            nn.Linear(d_model, feedforward_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(feedforward_dim, d_model),
-            nn.Dropout(dropout),
-        )
+        self.use_mlp = use_mlp
+        if self.use_mlp:
+            self.norm2 = nn.LayerNorm(d_model)
+            self.feedforward = nn.Sequential(
+                nn.Linear(d_model, feedforward_dim),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(feedforward_dim, d_model),
+                nn.Dropout(dropout),
+            )
 
     def forward(
         self,
@@ -184,8 +188,9 @@ class TransformerBlock(nn.Module):
         )
         x = x + attn_output
 
-        normed = self.norm2(x)
-        x = x + self.feedforward(normed)
+        if self.use_mlp:
+            normed = self.norm2(x)
+            x = x + self.feedforward(normed)
         return x, attn_weights
 
 
@@ -200,6 +205,7 @@ class TransformerModel(nn.Module):
         dropout: float = 0.1,
         max_seq_len: int = 128,
         pad_token_id: int | None = None,
+        use_mlp: bool = True,
     ) -> None:
         super().__init__()
         pad_token_id = pad_token_id if pad_token_id is not None else 0
@@ -212,6 +218,7 @@ class TransformerModel(nn.Module):
                     num_heads,
                     feedforward_dim,
                     dropout,
+                    use_mlp=use_mlp,
                 )
                 for _ in range(num_layers)
             ]
