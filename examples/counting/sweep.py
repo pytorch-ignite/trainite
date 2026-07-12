@@ -112,6 +112,11 @@ def main() -> None:
 
                     # Close logger cleanly after logging OOD metrics
                     trainer.exp_logger.close()
+                    if config.logger == "clearml":
+                        task = trainer.exp_logger.get_task()
+                        if task is not None:
+                            task.mark_completed()
+                            task.close()
 
                     # Record results to CSV file
                     row = {
