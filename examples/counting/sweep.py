@@ -17,7 +17,7 @@ def main() -> None:
     parser.add_argument("--depths", type=str, default="1,2,3,4,5,6,7,8,9,10", help="Comma-separated layer depths")
     parser.add_argument("--dims", type=str, default="512", help="Comma-separated model dims")
     parser.add_argument("--lrs", type=str, default="0.00001", help="Comma-separated learning rates")
-    parser.add_argument("--epochs", type=int, default=25, help="Number of training epochs")
+    parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
     parser.add_argument("--output-csv", type=str, default="sweep_results_d512_lr1e5.csv", help="Path to output CSV")
     args = parser.parse_args()
 
