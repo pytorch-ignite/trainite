@@ -181,12 +181,13 @@ class Trainer:
 
     def run(self) -> None:
         self.logger.info("starting run in %s", self.run_dir)
-        self.trainer.run(self.train_loader, max_epochs=self.epochs)
+        try:
+            self.trainer.run(self.train_loader, max_epochs=self.epochs)
 
-        if self.test_loader:
-            self.test()
-
-        self.exp_logger.close()
+            if self.test_loader:
+                self.test()
+        finally:
+            self.exp_logger.close()
 
     def test(self, test_loader: DataLoader | None = None) -> None:
         loader = test_loader or self.test_loader
