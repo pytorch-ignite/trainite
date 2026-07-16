@@ -89,6 +89,7 @@ class TrainerConfig(BaseModel):
     inference_num_samples: int = Field(default=5, gt=0)
     max_inference_new_tokens: int = Field(default=16, gt=0)
     grad_clip_norm: float | None = Field(default=None, gt=0.0)
+    use_lr_scheduler: bool = True
 
 
 class ProjectConfig(BaseModel):

@@ -80,7 +80,8 @@ class Trainer:
         )
 
         # Attach learning rate scheduler
-        attach_lr_scheduler(self.trainer, self.optimizer, self.total_iters, config.optimizer.lr)
+        if self.trainer_config.use_lr_scheduler:
+            attach_lr_scheduler(self.trainer, self.optimizer, self.total_iters, config.optimizer.lr)
 
         # Attach early stopping
         if self.trainer_config.early_stopping_patience is not None:
