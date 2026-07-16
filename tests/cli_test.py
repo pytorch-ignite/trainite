@@ -1,3 +1,4 @@
+import logging
 import py_compile
 import subprocess
 import sys
@@ -133,6 +134,9 @@ def test_generated_string_reversal_project_is_runnable() -> None:
             pytest.fail(f"Generated project failed to run:\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}")
         except subprocess.TimeoutExpired:
             pytest.fail("Generated project timed out")
+
+        finally:
+            logging.shutdown()
 
 
 def test_cli_main_routing():

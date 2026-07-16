@@ -1,3 +1,4 @@
+import logging
 import shutil
 import tempfile
 from pathlib import Path
@@ -194,6 +195,7 @@ def dummy_collate_fn(batch):
 def temp_run_dir():
     temp_dir = tempfile.mkdtemp()
     yield Path(temp_dir)
+    logging.shutdown()
     shutil.rmtree(temp_dir)
 
 
