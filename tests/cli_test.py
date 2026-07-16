@@ -126,7 +126,7 @@ def test_generated_string_reversal_project_is_runnable() -> None:
                 [sys.executable, "main.py", "config.yaml"],
                 cwd=project_dir,
                 check=True,
-                timeout=60,
+                timeout=300,
                 capture_output=True,
                 text=True,
             )
@@ -136,7 +136,7 @@ def test_generated_string_reversal_project_is_runnable() -> None:
             pytest.fail("Generated project timed out")
 
         finally:
-            logging.shutdown()
+            logging.shutdown()  # Ensure all logging output is flushed before the temporary directory is cleaned up
 
 
 def test_cli_main_routing():

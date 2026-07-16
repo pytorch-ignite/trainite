@@ -395,6 +395,6 @@ def init_project(config: Init) -> None:
     for filename, content in templates.items():
         _write_file(resolved_project_dir / filename, content, force)
 
-    print("\n✔ Generated config.yaml")
+    print("\n Generated config.yaml")
     for filename in templates:
-        print(f"✔ Generated {filename}")
+        print(f" Generated {filename}")
