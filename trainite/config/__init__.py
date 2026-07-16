@@ -9,7 +9,6 @@ from trainite.config.base import (
     PreprocessorConfig,
     DatasetConfig,
     TransformConfig,
-    CollateFnConfig,
     TrainerConfig,
     ProjectConfig,
 )
@@ -25,7 +24,6 @@ __all__ = [
     "PreprocessorConfig",
     "DatasetConfig",
     "TransformConfig",
-    "CollateFnConfig",
     "TrainerConfig",
     "ProjectConfig",
 ]

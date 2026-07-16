@@ -74,6 +74,14 @@ def instantiate(config: BaseModel, **kwargs) -> Any:
 
     final_kwargs = {**params, **kwargs}
 
+    # Filter kwargs to only pass parameters accepted by the target_symbol
+    try:
+        sig = inspect.signature(target_symbol)
+        if not any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+            final_kwargs = {k: v for k, v in final_kwargs.items() if k in sig.parameters}
+    except Exception:
+        pass
+
     return target_symbol(**final_kwargs)
 
 
@@ -141,33 +149,38 @@ def create_dataloader(
     dl_config: Any,
     tokenizer: Any,
     shuffle: bool | None = None,
+    collate_fn_target: str | None = None,
 ) -> DataLoader:
-    dl_kwargs = dl_config.model_dump(exclude={"collate_fn", "shuffle"})
+    dl_kwargs = dl_config.model_dump(exclude={"shuffle"})
     if shuffle is None:
         shuffle = getattr(dl_config, "shuffle", False)
     collate_fn = None
-    collate_config = dl_config.collate_fn
-    if collate_config:
-        target_symbol = get_target(collate_config.target)
+    if collate_fn_target:
+        target_symbol = get_target(collate_fn_target)
         if isinstance(target_symbol, type):
-            collate_fn = instantiate(collate_config, tokenizer=tokenizer)
+            collate_fn = target_symbol(tokenizer=tokenizer)
         else:
             collate_fn = target_symbol
     return DataLoader(dataset, shuffle=shuffle, collate_fn=collate_fn, **dl_kwargs)
 
 
 def _loaders_from_splits(
-    data_config: DataConfigBase, tokenizer: Any
+    data_config: DataConfigBase,
+    tokenizer: Any,
+    collate_fn_target: str | None = None,
 ) -> tuple[DataLoader, DataLoader, DataLoader | None]:
     def _make(split_config: Any) -> DataLoader:
         ds = build_dataset(split_config.dataset, split_config.transform, tokenizer)
-        return create_dataloader(ds, split_config.dataloader, tokenizer)
+        return create_dataloader(ds, split_config.dataloader, tokenizer, collate_fn_target=collate_fn_target)
 
     return _make(data_config.train), _make(data_config.val), _make(data_config.test) if data_config.test else None
 
 
 def _loaders_from_ratios(
-    data_config: DataWithAutoSplit, tokenizer: Any, seed: int
+    data_config: DataWithAutoSplit,
+    tokenizer: Any,
+    seed: int,
+    collate_fn_target: str | None = None,
 ) -> tuple[DataLoader, DataLoader, DataLoader | None]:
     dataset = build_dataset(data_config.dataset, data_config.transform, tokenizer)
     total_len = len(dataset)  # type: ignore
@@ -185,16 +198,23 @@ def _loaders_from_ratios(
     )
     dl = data_config.dataloader
     return (
-        create_dataloader(train_ds, dl, tokenizer, shuffle=True),
-        create_dataloader(val_ds, dl, tokenizer, shuffle=False),
-        create_dataloader(test_ds, dl, tokenizer, shuffle=False) if test_len > 0 else None,
+        create_dataloader(train_ds, dl, tokenizer, shuffle=True, collate_fn_target=collate_fn_target),
+        create_dataloader(val_ds, dl, tokenizer, shuffle=False, collate_fn_target=collate_fn_target),
+        create_dataloader(test_ds, dl, tokenizer, shuffle=False, collate_fn_target=collate_fn_target)
+        if test_len > 0
+        else None,
     )
 
 
-def build_dataloaders(data_config: Any, tokenizer: Any, seed: int) -> tuple[DataLoader, DataLoader, DataLoader | None]:
+def build_dataloaders(
+    data_config: Any,
+    tokenizer: Any,
+    seed: int,
+    collate_fn_target: str | None = None,
+) -> tuple[DataLoader, DataLoader, DataLoader | None]:
     if isinstance(data_config, DataWithAutoSplit):
-        return _loaders_from_ratios(data_config, tokenizer, seed)
-    return _loaders_from_splits(data_config, tokenizer)
+        return _loaders_from_ratios(data_config, tokenizer, seed, collate_fn_target)
+    return _loaders_from_splits(data_config, tokenizer, collate_fn_target)
 
 
 # ==========================================

@@ -1,7 +1,7 @@
 import pytest
 import torch
 from torch.utils.data import DataLoader
-from trainite.config.registry import get_dataset_spec
+from trainite.config.registry import DATASET_SPECS, MODEL_SPECS
 from trainite.datasets.string_reverse import (
     CHARSET_PRESETS,
     PromptCompletionTransform,
@@ -10,7 +10,6 @@ from trainite.datasets.string_reverse import (
 from trainite.datasets.transformed import TransformedDataset
 from trainite.preprocessors.char_tokenizer import CharTokenizer
 from trainite.shared.utils import build_dataset, get_target
-from trainite.config.registry import get_model_spec
 from trainite.config.datasets import StringReverseDatasetConfig, StringReverseDataConfig
 
 
@@ -100,13 +99,13 @@ def test_build_string_reverse_dataset():
 
 
 def test_config_build_string_reverse_dataset():
-    spec = get_dataset_spec("string-reverse")
+    spec = DATASET_SPECS["string-reverse"]
     dataset_conf = spec.config_cls()
     tokenizer = CharTokenizer()
     dataset = build_dataset(dataset_conf.dataset, dataset_conf.transform, tokenizer)
     assert isinstance(dataset, TransformedDataset)
 
-    model_spec = get_model_spec("transformer")
+    model_spec = MODEL_SPECS["transformer"]
     collate_fn_obj = get_target(model_spec.collate_fn_target)(tokenizer=tokenizer)
 
     dataloader_conf = dataset_conf.dataloader
@@ -164,7 +163,7 @@ def test_data_config_defaults():
     assert config.dataset.per_seq_size == 256
     assert config.dataset.charset == "@alpha"
     assert config.dataloader.batch_size == 32
-    assert config.dataloader.collate_fn is None
+    assert not hasattr(config.dataloader, "collate_fn")
 
 
 def test_prompt_completion_transform():

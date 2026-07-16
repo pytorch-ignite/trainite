@@ -1,6 +1,6 @@
 import pytest
 import torch
-from trainite.config.registry import get_model_spec
+from trainite.config.registry import MODEL_SPECS
 from trainite.models.transformer import (
     Attention,
     CausalLMCollateFn,
@@ -139,7 +139,7 @@ def test_build_transformer_model():
 
 
 def test_build_transformer_model_from_spec():
-    spec = get_model_spec("transformer")
+    spec = MODEL_SPECS["transformer"]
     model_conf = spec.config_cls()
     model = instantiate(model_conf)
     assert isinstance(model, TransformerModel)

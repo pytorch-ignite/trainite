@@ -46,7 +46,10 @@ class Trainer:
         self.device: str | torch.device = idist.device() if config.device is None else config.device
         self.tokenizer = instantiate(config.preprocessor)
         self.train_loader, self.val_loader, self.test_loader = build_dataloaders(
-            config.data, self.tokenizer, config.seed
+            config.data,
+            self.tokenizer,
+            config.seed,
+            collate_fn_target=config.model.collate_fn_target,
         )
         self.model = build_model(
             config.model, self.device, vocab_size=self.tokenizer.vocab_size, pad_token_id=self.tokenizer.pad_token_id

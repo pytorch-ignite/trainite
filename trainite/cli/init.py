@@ -12,17 +12,15 @@ from trainite.config import (
     OutputConfig,
     ProjectConfig,
 )
-from trainite.config.base import CollateFnConfig
 from trainite.config.registry import (
     REGISTRY,
+    ComponentSpec,
     DatasetSpec,
     ModelSpec,
-    PreProcessorSpec,
-    TrainerSpec,
-    get_dataset_spec,
-    get_model_spec,
-    get_preprocessor_spec,
-    get_trainer_spec,
+    MODEL_SPECS,
+    DATASET_SPECS,
+    TRAINER_SPECS,
+    PREPROCESSOR_SPECS,
 )
 from trainite.shared.utils import dump_config
 
@@ -185,8 +183,8 @@ def _module_rewrites(sources: dict[str, Path]) -> list[tuple[str, str]]:
 def _build_templates(
     model_spec: ModelSpec,
     dataset_spec: DatasetSpec,
-    trainer_spec: TrainerSpec,
-    preprocessor_spec: PreProcessorSpec | None,
+    trainer_spec: ComponentSpec,
+    preprocessor_spec: ComponentSpec | None,
     project_name: str,
 ) -> tuple[dict[str, str], list[tuple[str, str]]]:
     specs = [model_spec, dataset_spec, trainer_spec, preprocessor_spec]
@@ -343,11 +341,11 @@ def init_project(config: Init) -> None:
 
     output_config = OutputConfig(root=output_root, run_name=resolved_run_name)
 
-    model_spec = get_model_spec(model)
-    dataset_spec = get_dataset_spec(dataset)
-    trainer_spec = get_trainer_spec(trainer)
+    model_spec = MODEL_SPECS[model]
+    dataset_spec = DATASET_SPECS[dataset]
+    trainer_spec = TRAINER_SPECS[trainer]
     preprocessor_spec = (
-        get_preprocessor_spec(dataset_spec.preprocessor_spec_name) if dataset_spec.preprocessor_spec_name else None
+        PREPROCESSOR_SPECS[dataset_spec.preprocessor_spec_name] if dataset_spec.preprocessor_spec_name else None
     )
 
     # Build templates for the starter project
@@ -356,29 +354,11 @@ def init_project(config: Init) -> None:
     )
 
     # Instantiate configs from specs
-    model_component = model_spec.config_cls()
+    model_component = model_spec.config_cls(collate_fn_target=model_spec.collate_fn_target)
     data_config = dataset_spec.config_cls()
     trainer_component = trainer_spec.config_cls()
 
     preprocessor_component = preprocessor_spec.config_cls() if preprocessor_spec else None
-
-    # Inject model collator into data config dataloaders
-    if model_spec.collate_fn_target:
-        if model_spec.collate_fn_config_cls:
-            collate_fn_val = CollateFnConfig.model_validate(model_spec.collate_fn_config_cls())
-        else:
-            collate_fn_val = CollateFnConfig(_target_=model_spec.collate_fn_target)
-
-        def _inject_collate(config: Any):
-            dataloader = getattr(config, "dataloader", None)
-            if dataloader is not None:
-                dataloader.collate_fn = collate_fn_val
-            for split in ["train", "val", "test"]:
-                split_config = getattr(config, split, None)
-                if split_config is not None:
-                    _inject_collate(split_config)
-
-        _inject_collate(data_config)
 
     starter_config = ProjectConfig(
         preprocessor=preprocessor_component,

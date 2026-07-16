@@ -19,7 +19,6 @@ from trainite.config import (
     PreprocessorConfig,
     DatasetConfig,
     TransformConfig,
-    CollateFnConfig,
 )
 from trainite.datasets.string_reverse import DatapointModel
 from trainite.trainers.decoder_trainer import Trainer, _flatten
@@ -33,7 +32,7 @@ def create_trainer_from_config(config: ProjectConfig) -> Trainer:
     return Trainer(config)
 
 
-class MockComponent(ModelConfig, PreprocessorConfig, DatasetConfig, TransformConfig, CollateFnConfig):
+class MockComponent(ModelConfig, PreprocessorConfig, DatasetConfig, TransformConfig):
     pass
 
 
@@ -477,7 +476,7 @@ def test_decoder_trainer_test_without_val(project_config, temp_run_dir):
 
 
 def test_decoder_trainer_dataloader_collate_fn(project_config):
-    project_config.data.train.dataloader.collate_fn = cc("tests.trainers.decoder_trainer_test.dummy_collate_fn")
+    project_config.model.collate_fn_target = "tests.trainers.decoder_trainer_test.dummy_collate_fn"
     trainer = create_trainer_from_config(project_config)
     assert trainer.train_loader is not None
     assert trainer.train_loader.collate_fn is dummy_collate_fn
@@ -611,8 +610,8 @@ def test_decoder_trainer_dataloader_class_collate_fn(project_config):
         "tests.trainers.decoder_trainer_test.SimpleModel",
         vocab_size=10,
         hidden_size=8,
+        collate_fn_target="tests.trainers.decoder_trainer_test.DummyClassCollateFn",
     )
-    project_config.data.train.dataloader.collate_fn = cc("tests.trainers.decoder_trainer_test.DummyClassCollateFn")
     trainer = create_trainer_from_config(project_config)
     assert trainer.train_loader is not None
     assert isinstance(trainer.train_loader.collate_fn, DummyClassCollateFn)
@@ -646,9 +645,9 @@ def test_setup_inference_and_log_success(project_config, temp_run_dir):
         "tests.trainers.decoder_trainer_test.GenerativeModel",
         vocab_size=10,
         hidden_size=8,
+        collate_fn_target="trainite.models.transformer.CausalLMCollateFn",
     )
     transform = cc("tests.trainers.decoder_trainer_test.DummyTransform")
-    collate = cc("trainite.models.transformer.CausalLMCollateFn")
     project_config.data.train.dataset = cc(
         "tests.trainers.decoder_trainer_test.GenerativeDataset",
         size=16,
@@ -656,7 +655,6 @@ def test_setup_inference_and_log_success(project_config, temp_run_dir):
         vocab_size=10,
     )
     project_config.data.train.transform = transform
-    project_config.data.train.dataloader.collate_fn = collate
     project_config.data.val.dataset = cc(
         "tests.trainers.decoder_trainer_test.GenerativeDataset",
         size=8,
@@ -664,7 +662,6 @@ def test_setup_inference_and_log_success(project_config, temp_run_dir):
         vocab_size=10,
     )
     project_config.data.val.transform = transform
-    project_config.data.val.dataloader.collate_fn = collate
     trainer = create_trainer_from_config(project_config)
     assert trainer.max_inference_new_tokens == 32
     trainer.run()

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from trainite.config.registry import get_dataset_spec, get_model_spec, get_preprocessor_spec, get_trainer_spec
+from trainite.config.registry import MODEL_SPECS, DATASET_SPECS, PREPROCESSOR_SPECS, TRAINER_SPECS
 
 
 @pytest.mark.parametrize(
@@ -34,11 +34,11 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
         ]
         subprocess.run(cmd, check=True, timeout=60)
 
-        dataset_spec = get_dataset_spec(dataset)
-        model_spec = get_model_spec(model)
-        trainer_spec = get_trainer_spec(trainer)
+        dataset_spec = DATASET_SPECS[dataset]
+        model_spec = MODEL_SPECS[model]
+        trainer_spec = TRAINER_SPECS[trainer]
         preprocessor_spec = (
-            get_preprocessor_spec(dataset_spec.preprocessor_spec_name) if dataset_spec.preprocessor_spec_name else None
+            PREPROCESSOR_SPECS[dataset_spec.preprocessor_spec_name] if dataset_spec.preprocessor_spec_name else None
         )
         preprocessor_file = f"preprocessors/{preprocessor_spec.name}.py" if preprocessor_spec else None
 

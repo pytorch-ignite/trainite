@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class ModelConfig(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: str = Field(alias="_target_")
+    collate_fn_target: str | None = None
 
 
 class PreprocessorConfig(BaseModel):
@@ -18,11 +19,6 @@ class DatasetConfig(BaseModel):
 
 
 class TransformConfig(BaseModel):
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
-    target: str = Field(alias="_target_")
-
-
-class CollateFnConfig(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: str = Field(alias="_target_")
 
@@ -44,7 +40,6 @@ class DataLoaderConfig(BaseModel):
     batch_size: int = Field(default=32, gt=0)
     shuffle: bool = False
     num_workers: int = Field(default=2, ge=0)
-    collate_fn: CollateFnConfig | None = None
 
 
 class SplitConfig(BaseModel):
