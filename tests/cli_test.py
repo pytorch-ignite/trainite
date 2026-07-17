@@ -3,6 +3,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+import yaml
 
 import pytest
 
@@ -59,6 +60,12 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
             if filename is not None:
                 assert (project_dir / filename).exists(), f"{filename} missing"
 
+        # Check that targets inside config.yaml are rewritten correctly
+        with open(project_dir / "config.yaml", "r") as f:
+            generated_config = yaml.safe_load(f)
+        assert generated_config["model"]["_target_"].startswith("models.")
+        assert generated_config["model"]["collate_fn_target"].startswith("models.")
+
         # Check if python files are parseable
         python_files = [
             "config.py",
@@ -102,7 +109,6 @@ def test_generated_string_reversal_project_is_runnable() -> None:
 
         # 2. Modify config.yaml to run for only 1 step/epoch to keep test fast
         config_path = project_dir / "config.yaml"
-        import yaml
 
         with open(config_path, "r") as f:
             config = yaml.safe_load(f)

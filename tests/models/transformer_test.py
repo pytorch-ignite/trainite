@@ -147,7 +147,7 @@ def test_build_transformer_model_from_spec():
 
 def test_causal_lm_collate_fn():
     tokenizer = CharTokenizer()
-    collate = CausalLMCollateFn(tokenizer=tokenizer, pad_token_id=0, ignore_index=-100)
+    collate = CausalLMCollateFn(tokenizer=tokenizer)
 
     # Create pre-tokenized items as the dataset now produces
     src1 = "abc"

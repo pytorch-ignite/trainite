@@ -53,6 +53,19 @@ def get_target(target_path: str) -> Any:
     return target_symbol
 
 
+def _inject_if_accepted(target_symbol: Any, **candidates: Any) -> dict[str, Any]:
+    """Inspects the target symbol's signature and filters the candidates to
+    only include those that are accepted by the target symbol.
+    """
+    try:
+        sig = inspect.signature(target_symbol)
+        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+            return candidates
+        return {k: v for k, v in candidates.items() if k in sig.parameters}
+    except Exception:
+        return candidates
+
+
 def instantiate(config: BaseModel, **kwargs) -> Any:
     """
     Instantiates a class or calls a function defined by a `_target_` key
@@ -73,14 +86,7 @@ def instantiate(config: BaseModel, **kwargs) -> Any:
     target_symbol = get_target(target_path)
 
     final_kwargs = {**params, **kwargs}
-
-    # Filter kwargs to only pass parameters accepted by the target_symbol
-    try:
-        sig = inspect.signature(target_symbol)
-        if not any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-            final_kwargs = {k: v for k, v in final_kwargs.items() if k in sig.parameters}
-    except Exception:
-        pass
+    final_kwargs = _inject_if_accepted(target_symbol, **final_kwargs)
 
     return target_symbol(**final_kwargs)
 
@@ -110,16 +116,6 @@ def load_config(path: str | Path, config_cls: type[T]) -> T:
 # ==========================================
 # Builders (Dataset, Dataloader, Model Setup)
 # ==========================================
-
-
-# Inspects the target symbol's signature and filters the candidates to
-# only include those that are accepted by the target symbol.
-def _inject_if_accepted(target_symbol: Any, **candidates: Any) -> dict[str, Any]:
-    try:
-        sig = inspect.signature(target_symbol)
-        return {k: v for k, v in candidates.items() if k in sig.parameters}
-    except Exception:
-        return {}
 
 
 # Builds the model based on the provided configuration, tokenizer, and device.

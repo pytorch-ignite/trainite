@@ -282,15 +282,15 @@ def run_interactive_mode() -> None:
 
 
 def _update_targets(config: Any, rewrites: Sequence[tuple[str, str]]) -> None:
-    """Rewrite ``_target_`` import paths to point at the generated project's modules."""
-    if isinstance(config, BaseModel) and hasattr(config, "target"):
-        target = getattr(config, "target")
-        if isinstance(target, str):
-            for old_module, new_module in rewrites:
-                if target.startswith(old_module + "."):
-                    setattr(config, "target", new_module + target[len(old_module) :])
-                    break
-    elif isinstance(config, BaseModel):
+    """Rewrite ``_target_`` and ``collate_fn_target`` import paths to point at the generated project's modules."""
+    if isinstance(config, BaseModel):
+        for attr in ("target", "collate_fn_target"):
+            val = getattr(config, attr, None)
+            if isinstance(val, str):
+                for old_module, new_module in rewrites:
+                    if val.startswith(old_module + "."):
+                        setattr(config, attr, new_module + val[len(old_module) :])
+                        break
         for field in config.model_fields:
             if (val := getattr(config, field)) is not None:
                 _update_targets(val, rewrites)
