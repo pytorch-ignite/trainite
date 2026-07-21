@@ -108,7 +108,13 @@ class Trainer:
 
         # Setup save handler
         if config.logger == "clearml":
-            save_handler = ClearMLSaver(logger=self.exp_logger, dirname=str(self.run_dir), require_empty=False)
+            # Keep local checkpoints in run_dir; ClearML uses its configured output_uri for optional uploads.
+            save_handler = ClearMLSaver(
+                logger=self.exp_logger,
+                dirname=str(self.run_dir),
+                output_uri=True,
+                require_empty=False,
+            )
         else:
             save_handler = DiskSaver(dirname=str(self.run_dir), require_empty=False)
 

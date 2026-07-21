@@ -79,6 +79,25 @@ If you prefer standard Python tools, you can create a virtual environment and us
    tensorboard --logdir outputs
    ```
 
+## Experiment Logging and Checkpoints
+
+The default `logger: tensorboard` stores metrics and checkpoints locally. To use ClearML instead:
+
+1. Run `clearml-init` to configure your ClearML server and credentials.
+2. Set `logger: clearml` in `config.yaml`.
+
+ClearML runs still keep checkpoints in the local output directory. By default, `ClearMLSaver` also uploads them to
+ClearML's file server with `output_uri=True`.
+
+To change checkpoint storage, edit the `ClearMLSaver` call in `trainer.py`:
+
+- Use a storage URI such as `s3://bucket/path` to upload somewhere else.
+- Use `None` to leave the destination to `CLEARML_DEFAULT_OUTPUT_URI` or
+  `sdk.development.default_output_uri` in `clearml.conf`.
+
+To disable checkpoint uploads while retaining ClearML metric logging, pass `output_uri=False` to `ClearMLLogger` in
+`utils.py` and use `output_uri=None` for `ClearMLSaver` in `trainer.py`.
+
 ## Components
 
 ### Model: {{model_name}}

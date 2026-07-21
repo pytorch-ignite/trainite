@@ -400,7 +400,12 @@ def test_clearml_saver_is_used(
     trainer = create_trainer_from_config(project_config)
 
     # Assert ClearMLSaver was initialized with the exp_logger
-    mock_clearml_saver.assert_called_once_with(logger=mock_logger, dirname=str(trainer.run_dir), require_empty=False)
+    mock_clearml_saver.assert_called_once_with(
+        logger=mock_logger,
+        dirname=str(trainer.run_dir),
+        output_uri=True,
+        require_empty=False,
+    )
 
     # Assert setup_best_model_checkpoint was called with the clearml saver
     mock_setup_best.assert_called_once_with(
