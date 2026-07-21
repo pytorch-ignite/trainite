@@ -18,7 +18,7 @@ def main() -> None:
     parser.add_argument("--dims", type=str, default="256", help="Comma-separated model dims")
     parser.add_argument("--lrs", type=str, default="0.0001", help="Comma-separated learning rates")
     parser.add_argument("--epochs", type=int, default=25, help="Number of training epochs")
-    parser.add_argument("--output-csv", type=str, default="sweep_results_d256_lr1e4.csv", help="Path to output CSV")
+    parser.add_argument("--output-csv", type=str, default="sweep.csv", help="Path to output CSV")
     args = parser.parse_args()
 
     depths = [int(x) for x in args.depths.split(",")]
@@ -32,11 +32,11 @@ def main() -> None:
         if not file_exists:
             writer.writeheader()
 
-    for depth in depths:
-        k_values = [depth + 2, depth + 3, depth + 4]
-        for k in k_values:
-            for dim in dims:
-                for lr in lrs:
+    for dim in dims:
+        for lr in lrs:
+            for depth in depths:
+                k_values = [depth + 2, depth + 3, depth + 4]
+                for k in k_values:
                     print(
                         f"\n========================================\n"
                         f"Running configuration: k={k}, depth={depth}, dim={dim}, lr={lr}\n"

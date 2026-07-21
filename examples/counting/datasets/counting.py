@@ -1,7 +1,7 @@
 import random
 import warnings
 from typing import Any
-
+import math
 import torch
 from pydantic import BaseModel, ConfigDict
 from torch.utils.data import Dataset
@@ -93,8 +93,6 @@ class CountingDataset(Dataset):
         seq_map: dict[str, str] = {}
 
         # Pre-calculate possible combinations to avoid infinite loops on small ranges
-        import math
-
         total_possible = sum(math.comb(seq_len - 1, k - 1) for seq_len in range(min_len, max_len + 1) if seq_len >= k)
         target_size = min(total_size, total_possible)
 
@@ -135,6 +133,13 @@ class CountingDataset(Dataset):
 
 
 class DatapointModel(BaseModel):
+    """Contract for a causal-LM transformed item: training tensors + the eval prompt.
+
+    Convention: every causal-LM dataset transform returns this shape. The collate
+    fn batches the `train_*`/`attention_mask` fields; the trainer's inference loop
+    reads `eval_input_ids`/`source`/`target` directly.
+    """
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
     source: str
     target: str
@@ -175,5 +180,5 @@ class CountingTransform:
             train_input_ids=train_input_ids,
             train_label_ids=train_label_ids,
             attention_mask=attention_mask,
-            eval_input_ids=train_input_ids,  # identical to train_input_ids for sequence labeling evaluation
+            eval_input_ids=train_input_ids,
         )

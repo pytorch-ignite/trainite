@@ -1,4 +1,3 @@
-import math
 from typing import Any
 
 import torch
@@ -17,7 +16,6 @@ class TransformerModel(nn.Module):
         dropout: float = 0.1,
         max_seq_len: int = 128,
         pad_token_id: int | None = None,
-        use_rotary_emb: bool = False,  # Ignored for native decoder
         num_classes: int | None = None,
     ) -> None:
         super().__init__()
@@ -25,11 +23,7 @@ class TransformerModel(nn.Module):
         self.embedding = nn.Embedding(vocab_size, hidden_size)
 
         decoder_layer = nn.TransformerDecoderLayer(
-            d_model=hidden_size,
-            nhead=num_heads,
-            dim_feedforward=feedforward_dim,
-            dropout=dropout,
-            batch_first=True
+            d_model=hidden_size, nhead=num_heads, dim_feedforward=feedforward_dim, dropout=dropout, batch_first=True
         )
         self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=num_layers)
 
@@ -58,10 +52,7 @@ class TransformerModel(nn.Module):
 
         # Pass through decoder
         x_decoded = self.decoder(
-            tgt=x_embed,
-            memory=memory,
-            tgt_mask=tgt_mask,
-            tgt_key_padding_mask=tgt_key_padding_mask
+            tgt=x_embed, memory=memory, tgt_mask=tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask
         )
 
         # Final projection to classes (binary targets)
