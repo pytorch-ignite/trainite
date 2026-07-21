@@ -40,7 +40,7 @@ For prefix classification, the target labels indicate whether each character bel
 * **Example (k=2)**: `aaabbb` -> `000111`
 * **Example (k=3)**: `aaabbbaaa` -> `000000111`
 
-Therefore, the model must learn to recognize `L_k` up to `k = d + 2` block alternations, but not beyond that.
+Therefore, the model must learn to recognize `L_k` up to `k = d + 2` block alternations, but not beyond that. To keep the experiments manageable, for each model dimension `d`, we limit `k` to `d + 2`, `d + 3`, and `d + 4` in order to identify the model's generalization capabilities across different sequence lengths while keeping training manageable.
 
 ---
 
