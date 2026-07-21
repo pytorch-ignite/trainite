@@ -58,6 +58,16 @@ DATASET_SPECS = {
         readme_template_path=Path("trainite/templates/components/datasets/string_reverse.md"),
         preprocessor_spec_name="char",
     ),
+    "counting": DatasetSpec(
+        name="counting",
+        implementation_path=Path("trainite/datasets/counting.py"),
+        config_cls_path="trainite.config.datasets.CountingDataConfig",
+        dataset_config_cls_path="trainite.config.datasets.CountingDatasetConfig",
+        implementation_symbol="CountingDataset",
+        builder_symbol="CountingDataset",
+        readme_template_path=Path("trainite/templates/components/datasets/counting.md"),
+        preprocessor_spec_name="char",
+    ),
 }
 
 TRAINER_SPECS = {
