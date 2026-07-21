@@ -3,7 +3,7 @@
 This example project reproduces the prefix-classification length-generalization sweep experiments on the alternating block language `L_k` described in the research paper:
 
 > **Knee-Deep in C-RASP: A Transformer Depth Hierarchy**
-> Michaël Cadilhac, David Chiang
+> Andy Yang, Michaël Cadilhac, David Chiang
 > *[arXiv:2506.16055](https://arxiv.org/pdf/2506.16055)*
 
 The experimental setup and training configurations are replicated from the authors' official implementation repository:
