@@ -109,7 +109,13 @@ class Trainer:
 
         # Setup save handler
         if config.logger == "clearml":
-            save_handler = ClearMLSaver(logger=self.exp_logger, dirname=str(self.run_dir), require_empty=False)
+            if config.logger == "clearml":
+                save_handler = ClearMLSaver(
+                    logger=self.exp_logger,
+                    dirname=str(self.run_dir),
+                    output_uri=True,
+                    require_empty=False,
+                )
         else:
             save_handler = DiskSaver(dirname=str(self.run_dir), require_empty=False)
 

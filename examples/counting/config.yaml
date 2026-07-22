@@ -45,6 +45,7 @@ trainer:
 output:
   root: outputs
   run_name: transformer__counting_l3
-logger: tensorboard
+  clearml_project: trasnforming__counting
+logger: clearml
 seed: 42
 device: null
