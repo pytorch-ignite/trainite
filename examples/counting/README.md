@@ -1,4 +1,4 @@
-# Counting Task: L_k Alternating Language Generalization Sweep
+# Verifying the Transformer Depth Hierarchy via Alternating Block Counting
 
 This example project reproduces the prefix-classification length-generalization sweep experiments on the alternating block language `L_k` described in the research paper:
 
