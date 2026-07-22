@@ -32,6 +32,7 @@ optimizer:
 ```
 
 **Trainite is explicitly not:**
+
 - A replacement for HuggingFace Trainer.
 - A tool for training large models on massive corpora.
 - A framework that forces you into its runtime abstractions.
@@ -109,6 +110,7 @@ trainite init
 ```
 
 Interactive prompt preview:
+
 ```text
 ? Project directory: my-experiment
 ? Model: transformer
@@ -140,8 +142,13 @@ python main.py config.yaml
 ### Monitor & Iterate
 
 - **TensorBoard**: `tensorboard --logdir outputs`
+- **ClearML**: Run `clearml-init`, then set `logger: clearml` in `config.yaml`.
 - **Edit architecture**: Open `models/transformer.py` and modify the model.
 - **Edit hyperparameters**: Open `config.yaml` and change learning rates, batch sizes, data splits, etc.
+
+With ClearML enabled, Trainite keeps checkpoints in the run directory and uploads them to ClearML's default file
+server. Generated projects document how to use another storage URI, defer to ClearML configuration, or keep
+checkpoints local only.
 
 Training outputs are organized by run:
 
@@ -156,32 +163,30 @@ outputs/
         └── tensorboard/        # TensorBoard event files
 ```
 
-
-
 ## Built-in Components
 
 ### Models
 
-| Name | Architecture | Description |
-|---|---|---|
+| Name          | Architecture             | Description                                                                |
+| ------------- | ------------------------ | -------------------------------------------------------------------------- |
 | `transformer` | Decoder-only Transformer | Causal LM with rotary position embeddings (RoPE) and multi-head attention. |
 
 ### Preprocessors
 
-| Name | Description |
-|---|---|
+| Name   | Description                                                                  |
+| ------ | ---------------------------------------------------------------------------- |
 | `char` | Character-level tokenizer mapping printable ASCII characters to integer IDs. |
 
 ### Datasets
 
-| Name | Task | Description |
-|---|---|---|
+| Name             | Task                    | Description                                        |
+| ---------------- | ----------------------- | -------------------------------------------------- |
 | `string-reverse` | Reverse a random string | Synthetic, CPU-generatable. No downloads required. |
 
 ### Trainers
 
-| Name | Description |
-|---|---|
+| Name              | Description                                                                                                                                                                |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `decoder-trainer` | Standard supervised training (next-token prediction). Includes LR warmup + linear decay, checkpointing, early stopping, TensorBoard logging, and inference sample logging. |
 
 ---
@@ -212,15 +217,15 @@ For detailed configuration parameters and data splitting options (e.g., automati
 
 Since the generated code is yours, you can override at any layer without touching the others:
 
-| What to change | How |
-|---|---|
-| Model architecture | Edit `models/<model_name>.py`, or add a new file and update `_target_` in config |
-| Dataset | Edit `datasets/<dataset_name>.py`, or add a new file and update `_target_` in config |
-| Train step | Override `_train_step()` in `trainer.py` |
-| Eval step | Override `_eval_step()` in `trainer.py` |
-| Metrics | Add Ignite metrics in `_attach_metrics()` in `trainer.py` |
-| Handlers | Attach Ignite event handlers to `self.trainer` in `trainer.py` |
-| Config fields | Add fields to the Pydantic models in `config.py` and corresponding keys in `config.yaml` |
+| What to change     | How                                                                                      |
+| ------------------ | ---------------------------------------------------------------------------------------- |
+| Model architecture | Edit `models/<model_name>.py`, or add a new file and update `_target_` in config         |
+| Dataset            | Edit `datasets/<dataset_name>.py`, or add a new file and update `_target_` in config     |
+| Train step         | Override `_train_step()` in `trainer.py`                                                 |
+| Eval step          | Override `_eval_step()` in `trainer.py`                                                  |
+| Metrics            | Add Ignite metrics in `_attach_metrics()` in `trainer.py`                                |
+| Handlers           | Attach Ignite event handlers to `self.trainer` in `trainer.py`                           |
+| Config fields      | Add fields to the Pydantic models in `config.py` and corresponding keys in `config.yaml` |
 
 ---
 
@@ -228,8 +233,8 @@ Since the generated code is yours, you can override at any layer without touchin
 
 Working examples are in the [`examples/`](examples/) directory:
 
-| Example | Description |
-|---|---|
+| Example                                      | Description                                                                                                                                        |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`string_reverse`](examples/string_reverse/) | Train a decoder-only transformer to reverse strings. Demonstrates the full pipeline: data generation, training, evaluation, and inference logging. |
 
 Each example is a standalone project — `cd` into it, install dependencies, and run `python main.py config.yaml`.

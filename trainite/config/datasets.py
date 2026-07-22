@@ -54,6 +54,5 @@ class StringReverseDataConfig(DataWithAutoSplit):
         default_factory=lambda: DataLoaderConfig(
             batch_size=32,
             shuffle=True,
-            collate_fn=None,
         )
     )

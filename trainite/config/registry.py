@@ -20,18 +20,9 @@ class ComponentSpec(BaseModel):
         return get_target(self.config_cls_path)
 
 
-class TrainerSpec(ComponentSpec):
-    pass
-
-
 class ModelSpec(ComponentSpec):
     builder_symbol: str
     collate_fn_target: str | None = None
-    collate_fn_config_cls_path: str | None = None
-
-    @property
-    def collate_fn_config_cls(self) -> type[BaseModel] | None:
-        return get_target(self.collate_fn_config_cls_path) if self.collate_fn_config_cls_path else None
 
 
 class DatasetSpec(ComponentSpec):
@@ -44,10 +35,6 @@ class DatasetSpec(ComponentSpec):
         return get_target(self.dataset_config_cls_path)
 
 
-class PreProcessorSpec(ComponentSpec):
-    pass
-
-
 MODEL_SPECS = {
     "transformer": ModelSpec(
         name="transformer",
@@ -56,7 +43,6 @@ MODEL_SPECS = {
         implementation_symbol="TransformerModel",
         builder_symbol="TransformerModel",
         collate_fn_target="trainite.models.transformer.CausalLMCollateFn",
-        collate_fn_config_cls_path="trainite.config.models.CausalLMCollateFnConfig",
         readme_template_path=Path("trainite/templates/components/models/transformer.md"),
     ),
 }
@@ -75,7 +61,7 @@ DATASET_SPECS = {
 }
 
 TRAINER_SPECS = {
-    "decoder-trainer": TrainerSpec(
+    "decoder-trainer": ComponentSpec(
         name="decoder_trainer",
         implementation_path=Path("trainite/trainers/decoder_trainer.py"),
         config_cls_path="trainite.config.trainers.TrainerConfig",
@@ -85,7 +71,7 @@ TRAINER_SPECS = {
 }
 
 PREPROCESSOR_SPECS = {
-    "char": PreProcessorSpec(
+    "char": ComponentSpec(
         name="char_tokenizer",
         implementation_path=Path("trainite/preprocessors/char_tokenizer.py"),
         config_cls_path="trainite.config.preprocessors.CharTokenizerConfig",
@@ -101,31 +87,3 @@ REGISTRY = {
     "trainers": TRAINER_SPECS,
     "preprocessors": PREPROCESSOR_SPECS,
 }
-
-
-def get_model_config_cls(name: str) -> type[BaseModel]:
-    return MODEL_SPECS[name].config_cls
-
-
-def get_dataset_config_cls(name: str) -> type[BaseModel]:
-    return DATASET_SPECS[name].dataset_config_cls
-
-
-def get_trainer_config_cls(name: str) -> type[BaseModel]:
-    return TRAINER_SPECS[name].config_cls
-
-
-def get_model_spec(name: str) -> ModelSpec:
-    return MODEL_SPECS[name]
-
-
-def get_dataset_spec(name: str) -> DatasetSpec:
-    return DATASET_SPECS[name]
-
-
-def get_trainer_spec(name: str) -> TrainerSpec:
-    return TRAINER_SPECS[name]
-
-
-def get_preprocessor_spec(name: str) -> PreProcessorSpec:
-    return PREPROCESSOR_SPECS[name]

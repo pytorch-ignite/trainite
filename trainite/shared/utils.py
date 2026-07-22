@@ -14,11 +14,10 @@ from ignite.handlers import (
     EarlyStopping,
     create_lr_scheduler_with_warmup,
 )
-from ignite.handlers.checkpoint import CheckpointEvents
+from ignite.handlers.clearml_logger import ClearMLLogger, ClearMLSaver
 from ignite.handlers.fbresearch_logger import FBResearchLogger
 from ignite.handlers.param_scheduler import ParamScheduler
 from ignite.handlers.tensorboard_logger import TensorboardLogger
-from ignite.handlers.wandb_logger import WandBLogger
 from ignite.utils import setup_logger
 from omegaconf import OmegaConf
 from pydantic import BaseModel
@@ -54,6 +53,19 @@ def get_target(target_path: str) -> Any:
     return target_symbol
 
 
+def _inject_if_accepted(target_symbol: Any, **candidates: Any) -> dict[str, Any]:
+    """Inspects the target symbol's signature and filters the candidates to
+    only include those that are accepted by the target symbol.
+    """
+    try:
+        sig = inspect.signature(target_symbol)
+        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+            return candidates
+        return {k: v for k, v in candidates.items() if k in sig.parameters}
+    except Exception:
+        return candidates
+
+
 def instantiate(config: BaseModel, **kwargs) -> Any:
     """
     Instantiates a class or calls a function defined by a `_target_` key
@@ -74,6 +86,7 @@ def instantiate(config: BaseModel, **kwargs) -> Any:
     target_symbol = get_target(target_path)
 
     final_kwargs = {**params, **kwargs}
+    final_kwargs = _inject_if_accepted(target_symbol, **final_kwargs)
 
     return target_symbol(**final_kwargs)
 
@@ -105,16 +118,6 @@ def load_config(path: str | Path, config_cls: type[T]) -> T:
 # ==========================================
 
 
-# Inspects the target symbol's signature and filters the candidates to
-# only include those that are accepted by the target symbol.
-def _inject_if_accepted(target_symbol: Any, **candidates: Any) -> dict[str, Any]:
-    try:
-        sig = inspect.signature(target_symbol)
-        return {k: v for k, v in candidates.items() if k in sig.parameters}
-    except Exception:
-        return {}
-
-
 # Builds the model based on the provided configuration, tokenizer, and device.
 def build_model(model_config: Any, device: str | torch.device, **kwargs) -> nn.Module:
     target_symbol = get_target(model_config.target)
@@ -142,33 +145,38 @@ def create_dataloader(
     dl_config: Any,
     tokenizer: Any,
     shuffle: bool | None = None,
+    collate_fn_target: str | None = None,
 ) -> DataLoader:
-    dl_kwargs = dl_config.model_dump(exclude={"collate_fn", "shuffle"})
+    dl_kwargs = dl_config.model_dump(exclude={"shuffle"})
     if shuffle is None:
         shuffle = getattr(dl_config, "shuffle", False)
     collate_fn = None
-    collate_config = dl_config.collate_fn
-    if collate_config:
-        target_symbol = get_target(collate_config.target)
+    if collate_fn_target:
+        target_symbol = get_target(collate_fn_target)
         if isinstance(target_symbol, type):
-            collate_fn = instantiate(collate_config, tokenizer=tokenizer)
+            collate_fn = target_symbol(tokenizer=tokenizer)
         else:
             collate_fn = target_symbol
     return DataLoader(dataset, shuffle=shuffle, collate_fn=collate_fn, **dl_kwargs)
 
 
 def _loaders_from_splits(
-    data_config: DataConfigBase, tokenizer: Any
+    data_config: DataConfigBase,
+    tokenizer: Any,
+    collate_fn_target: str | None = None,
 ) -> tuple[DataLoader, DataLoader, DataLoader | None]:
     def _make(split_config: Any) -> DataLoader:
         ds = build_dataset(split_config.dataset, split_config.transform, tokenizer)
-        return create_dataloader(ds, split_config.dataloader, tokenizer)
+        return create_dataloader(ds, split_config.dataloader, tokenizer, collate_fn_target=collate_fn_target)
 
     return _make(data_config.train), _make(data_config.val), _make(data_config.test) if data_config.test else None
 
 
 def _loaders_from_ratios(
-    data_config: DataWithAutoSplit, tokenizer: Any, seed: int
+    data_config: DataWithAutoSplit,
+    tokenizer: Any,
+    seed: int,
+    collate_fn_target: str | None = None,
 ) -> tuple[DataLoader, DataLoader, DataLoader | None]:
     dataset = build_dataset(data_config.dataset, data_config.transform, tokenizer)
     total_len = len(dataset)  # type: ignore
@@ -186,16 +194,23 @@ def _loaders_from_ratios(
     )
     dl = data_config.dataloader
     return (
-        create_dataloader(train_ds, dl, tokenizer, shuffle=True),
-        create_dataloader(val_ds, dl, tokenizer, shuffle=False),
-        create_dataloader(test_ds, dl, tokenizer, shuffle=False) if test_len > 0 else None,
+        create_dataloader(train_ds, dl, tokenizer, shuffle=True, collate_fn_target=collate_fn_target),
+        create_dataloader(val_ds, dl, tokenizer, shuffle=False, collate_fn_target=collate_fn_target),
+        create_dataloader(test_ds, dl, tokenizer, shuffle=False, collate_fn_target=collate_fn_target)
+        if test_len > 0
+        else None,
     )
 
 
-def build_dataloaders(data_config: Any, tokenizer: Any, seed: int) -> tuple[DataLoader, DataLoader, DataLoader | None]:
+def build_dataloaders(
+    data_config: Any,
+    tokenizer: Any,
+    seed: int,
+    collate_fn_target: str | None = None,
+) -> tuple[DataLoader, DataLoader, DataLoader | None]:
     if isinstance(data_config, DataWithAutoSplit):
-        return _loaders_from_ratios(data_config, tokenizer, seed)
-    return _loaders_from_splits(data_config, tokenizer)
+        return _loaders_from_ratios(data_config, tokenizer, seed, collate_fn_target)
+    return _loaders_from_splits(data_config, tokenizer, collate_fn_target)
 
 
 # ==========================================
@@ -251,14 +266,15 @@ def attach_early_stopping(
 def setup_training_checkpointing(
     engine: Engine,
     to_save: dict[str, Any],
-    run_dir: Path,
+    save_handler: DiskSaver | ClearMLSaver,
 ) -> Checkpoint:
     last_checkpoint = Checkpoint(
         to_save=to_save,
-        save_handler=DiskSaver(dirname=str(run_dir), require_empty=False),
+        save_handler=save_handler,
         filename_prefix="last",
         n_saved=1,
         global_step_transform=lambda *_: engine.state.iteration,
+        filename_pattern="{filename_prefix}.{ext}",
     )
     engine.add_event_handler(Events.EPOCH_COMPLETED, last_checkpoint)
     return last_checkpoint
@@ -268,25 +284,26 @@ def setup_best_model_checkpoint(
     engine: Engine,
     val_evaluator: Engine,
     to_save: dict[str, Any],
-    run_dir: Path,
+    save_handler: DiskSaver | ClearMLSaver,
     score_function: Callable,
     score_name: str,
 ) -> Checkpoint:
     checkpoint = Checkpoint(
         to_save=to_save,
-        save_handler=DiskSaver(dirname=str(run_dir), require_empty=False),
+        save_handler=save_handler,
         filename_prefix="best",
         score_function=score_function,
         score_name=score_name,
         n_saved=1,
         global_step_transform=lambda *_: engine.state.iteration,
+        filename_pattern="{filename_prefix}.{ext}",
     )
     val_evaluator.add_event_handler(Events.COMPLETED, checkpoint)
     return checkpoint
 
 
 def setup_experiment_tracking(
-    backend: Literal["tensorboard", "wandb"],
+    backend: Literal["tensorboard", "clearml"],
     engine: Engine,
     val_evaluator: Engine,
     train_evaluator: Engine,
@@ -296,10 +313,14 @@ def setup_experiment_tracking(
     metric_names: list[str],
     has_test: bool,
     run_name: str,
-) -> TensorboardLogger | WandBLogger:
-    if backend == "wandb":
-        exp_logger = WandBLogger(project=run_name, dir=str(run_dir), name=str(run_dir).split("/")[-1])
-        exp_logger.save(str(run_dir / "config.yaml"))
+) -> TensorboardLogger | ClearMLLogger:
+    if backend == "clearml":
+        exp_logger = ClearMLLogger(
+            project_name=run_name,
+            task_name=str(run_dir).split("/")[-1],
+        )
+        task = exp_logger.get_task()
+        task.upload_artifact(name="config.yaml", artifact_object=str(run_dir / "config.yaml"))
     else:
         log_dir = run_dir / "tensorboard"
         exp_logger = TensorboardLogger(log_dir=log_dir)
@@ -370,34 +391,3 @@ def setup_console_logger(
         output_transform=lambda output: {"loss": output["loss"].item()},
     )
     return logger
-
-
-def setup_wandb_checkpoint_uploads(
-    trainer: Engine,
-    val_evaluator: Engine,
-    best_checkpoint: Checkpoint,
-    last_checkpoint: Checkpoint,
-    exp_logger: Any,
-    run_name: str,
-    logger: logging.Logger,
-) -> None:
-    """Register events and upload handlers to automatically log checkpoints to W&B in real-time."""
-    val_evaluator.register_events(*CheckpointEvents)
-    trainer.register_events(*CheckpointEvents)
-
-    def upload_best_model_artifact(engine):
-        checkpoint_path = best_checkpoint.last_checkpoint
-        logger.info(f"Uploading new best model artifact to W&B: {checkpoint_path}")
-        artifact = exp_logger.Artifact(name=f"{run_name}-model".replace("/", "-"), type="model")
-        artifact.add_file(str(checkpoint_path))
-        exp_logger.log_artifact(artifact)
-
-    def upload_last_checkpoint_artifact(engine):
-        checkpoint_path = last_checkpoint.last_checkpoint
-        logger.info(f"Uploading last checkpoint artifact to W&B: {checkpoint_path}")
-        artifact = exp_logger.Artifact(name=f"{run_name}-checkpoint".replace("/", "-"), type="checkpoint")
-        artifact.add_file(str(checkpoint_path))
-        exp_logger.log_artifact(artifact)
-
-    val_evaluator.add_event_handler(CheckpointEvents.SAVED_CHECKPOINT, upload_best_model_artifact)
-    trainer.add_event_handler(CheckpointEvents.SAVED_CHECKPOINT, upload_last_checkpoint_artifact)

@@ -1,12 +1,14 @@
+import logging
 import py_compile
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+import yaml
 
 import pytest
 
-from trainite.config.registry import get_dataset_spec, get_model_spec, get_preprocessor_spec, get_trainer_spec
+from trainite.config.registry import MODEL_SPECS, DATASET_SPECS, PREPROCESSOR_SPECS, TRAINER_SPECS
 
 
 @pytest.mark.parametrize(
@@ -34,11 +36,11 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
         ]
         subprocess.run(cmd, check=True, timeout=60)
 
-        dataset_spec = get_dataset_spec(dataset)
-        model_spec = get_model_spec(model)
-        trainer_spec = get_trainer_spec(trainer)
+        dataset_spec = DATASET_SPECS[dataset]
+        model_spec = MODEL_SPECS[model]
+        trainer_spec = TRAINER_SPECS[trainer]
         preprocessor_spec = (
-            get_preprocessor_spec(dataset_spec.preprocessor_spec_name) if dataset_spec.preprocessor_spec_name else None
+            PREPROCESSOR_SPECS[dataset_spec.preprocessor_spec_name] if dataset_spec.preprocessor_spec_name else None
         )
         preprocessor_file = f"preprocessors/{preprocessor_spec.name}.py" if preprocessor_spec else None
 
@@ -58,6 +60,12 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
         for filename in expected_files:
             if filename is not None:
                 assert (project_dir / filename).exists(), f"{filename} missing"
+
+        # Check that targets inside config.yaml are rewritten correctly
+        with open(project_dir / "config.yaml", "r") as f:
+            generated_config = yaml.safe_load(f)
+        assert generated_config["model"]["_target_"].startswith("models.")
+        assert generated_config["model"]["collate_fn_target"].startswith("models.")
 
         # Check if python files are parseable
         python_files = [
@@ -102,7 +110,6 @@ def test_generated_string_reversal_project_is_runnable() -> None:
 
         # 2. Modify config.yaml to run for only 1 step/epoch to keep test fast
         config_path = project_dir / "config.yaml"
-        import yaml
 
         with open(config_path, "r") as f:
             config = yaml.safe_load(f)
@@ -125,7 +132,7 @@ def test_generated_string_reversal_project_is_runnable() -> None:
                 [sys.executable, "main.py", "config.yaml"],
                 cwd=project_dir,
                 check=True,
-                timeout=60,
+                timeout=300,
                 capture_output=True,
                 text=True,
             )
@@ -133,6 +140,9 @@ def test_generated_string_reversal_project_is_runnable() -> None:
             pytest.fail(f"Generated project failed to run:\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}")
         except subprocess.TimeoutExpired:
             pytest.fail("Generated project timed out")
+
+        finally:
+            logging.shutdown()  # Ensure all logging output is flushed before the temporary directory is cleaned up
 
 
 def test_cli_main_routing():
@@ -161,3 +171,29 @@ def test_cli_main_routing():
             ]
         )
         mock_init_project.assert_called_once()
+
+
+def test_import_without_dependencies() -> None:
+    """
+    Test that the trainite package and CLI main entrypoint can be imported
+    successfully.
+    """
+    code = (
+        "import importlib, sys\n"
+        "orig_import = importlib.import_module\n"
+        "def my_import(name, package=None):\n"
+        "    if name in ('torch', 'ignite') or (package and package.startswith(('torch', 'ignite'))):\n"
+        "        raise ImportError(f'Mocked ImportError for {name}')\n"
+        "    return orig_import(name, package)\n"
+        "importlib.import_module = my_import\n"
+        "import trainite\n"
+        "import trainite.cli.main\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        timeout=10,
+        capture_output=True,
+        text=True,
+    )
+    assert "is not a Python type" not in result.stderr

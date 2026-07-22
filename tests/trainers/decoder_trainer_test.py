@@ -1,3 +1,4 @@
+import logging
 import shutil
 import tempfile
 from pathlib import Path
@@ -19,7 +20,6 @@ from trainite.config import (
     PreprocessorConfig,
     DatasetConfig,
     TransformConfig,
-    CollateFnConfig,
 )
 from trainite.datasets.string_reverse import DatapointModel
 from trainite.trainers.decoder_trainer import Trainer, _flatten
@@ -33,7 +33,7 @@ def create_trainer_from_config(config: ProjectConfig) -> Trainer:
     return Trainer(config)
 
 
-class MockComponent(ModelConfig, PreprocessorConfig, DatasetConfig, TransformConfig, CollateFnConfig):
+class MockComponent(ModelConfig, PreprocessorConfig, DatasetConfig, TransformConfig):
     pass
 
 
@@ -194,6 +194,7 @@ def dummy_collate_fn(batch):
 def temp_run_dir():
     temp_dir = tempfile.mkdtemp()
     yield Path(temp_dir)
+    logging.shutdown()  # Ensure all logging handlers are flushed and closed before removing the directory
     shutil.rmtree(temp_dir)
 
 
@@ -385,44 +386,43 @@ def test_decoder_trainer_test_no_loader(project_config):
     mock_warning.assert_called_with("No test loader provided. Skipping testing.")
 
 
+@mock.patch("trainite.trainers.decoder_trainer.ClearMLSaver")
 @mock.patch("trainite.trainers.decoder_trainer.setup_experiment_tracking")
 @mock.patch("trainite.trainers.decoder_trainer.setup_best_model_checkpoint")
-def test_upload_model_to_wandb(mock_setup_best, mock_setup, project_config, temp_run_dir):
-    project_config.logger = "wandb"
-    mock_logger = mock.MagicMock()
-    mock_setup.return_value = mock_logger
-
-    mock_best = mock.MagicMock(last_checkpoint="best_model_1.pt")
-    mock_setup_best.return_value = mock_best
-
-    trainer = create_trainer_from_config(project_config)
-
-    from ignite.handlers.checkpoint import CheckpointEvents
-
-    trainer.val_evaluator.fire_event(CheckpointEvents.SAVED_CHECKPOINT)
-
-    mock_logger.Artifact.return_value.add_file.assert_called_once_with("best_model_1.pt")
-    mock_logger.log_artifact.assert_called_once_with(mock_logger.Artifact.return_value)
-
-
-@mock.patch("trainite.trainers.decoder_trainer.setup_experiment_tracking")
 @mock.patch("trainite.trainers.decoder_trainer.setup_training_checkpointing")
-def test_upload_last_checkpoint_to_wandb(mock_setup_last, mock_setup, project_config, temp_run_dir):
-    project_config.logger = "wandb"
+def test_clearml_saver_is_used(
+    mock_setup_training, mock_setup_best, mock_setup_tracking, mock_clearml_saver, project_config, temp_run_dir
+):
+    project_config.logger = "clearml"
     mock_logger = mock.MagicMock()
-    mock_setup.return_value = mock_logger
-
-    mock_last = mock.MagicMock(last_checkpoint="last_model_1.pt")
-    mock_setup_last.return_value = mock_last
+    mock_setup_tracking.return_value = mock_logger
 
     trainer = create_trainer_from_config(project_config)
 
-    from ignite.handlers.checkpoint import CheckpointEvents
+    # Assert ClearMLSaver was initialized with the exp_logger
+    mock_clearml_saver.assert_called_once_with(
+        logger=mock_logger,
+        dirname=str(trainer.run_dir),
+        output_uri=True,
+        require_empty=False,
+    )
 
-    trainer.trainer.fire_event(CheckpointEvents.SAVED_CHECKPOINT)
+    # Assert setup_best_model_checkpoint was called with the clearml saver
+    mock_setup_best.assert_called_once_with(
+        trainer.trainer,
+        trainer.val_evaluator,
+        {"model": trainer.model, "optimizer": trainer.optimizer},
+        mock_clearml_saver.return_value,
+        score_function=mock.ANY,
+        score_name="val_loss",
+    )
 
-    mock_logger.Artifact.return_value.add_file.assert_called_once_with("last_model_1.pt")
-    mock_logger.log_artifact.assert_called_once_with(mock_logger.Artifact.return_value)
+    # Assert setup_training_checkpointing was called with the clearml saver
+    mock_setup_training.assert_called_once_with(
+        trainer.trainer,
+        {"model": trainer.model, "optimizer": trainer.optimizer},
+        mock_clearml_saver.return_value,
+    )
 
 
 def test_decoder_trainer_test_method(project_config, temp_run_dir):
@@ -483,7 +483,7 @@ def test_decoder_trainer_test_without_val(project_config, temp_run_dir):
 
 
 def test_decoder_trainer_dataloader_collate_fn(project_config):
-    project_config.data.train.dataloader.collate_fn = cc("tests.trainers.decoder_trainer_test.dummy_collate_fn")
+    project_config.model.collate_fn_target = "tests.trainers.decoder_trainer_test.dummy_collate_fn"
     trainer = create_trainer_from_config(project_config)
     assert trainer.train_loader is not None
     assert trainer.train_loader.collate_fn is dummy_collate_fn
@@ -617,8 +617,8 @@ def test_decoder_trainer_dataloader_class_collate_fn(project_config):
         "tests.trainers.decoder_trainer_test.SimpleModel",
         vocab_size=10,
         hidden_size=8,
+        collate_fn_target="tests.trainers.decoder_trainer_test.DummyClassCollateFn",
     )
-    project_config.data.train.dataloader.collate_fn = cc("tests.trainers.decoder_trainer_test.DummyClassCollateFn")
     trainer = create_trainer_from_config(project_config)
     assert trainer.train_loader is not None
     assert isinstance(trainer.train_loader.collate_fn, DummyClassCollateFn)
@@ -652,9 +652,9 @@ def test_setup_inference_and_log_success(project_config, temp_run_dir):
         "tests.trainers.decoder_trainer_test.GenerativeModel",
         vocab_size=10,
         hidden_size=8,
+        collate_fn_target="trainite.models.transformer.CausalLMCollateFn",
     )
     transform = cc("tests.trainers.decoder_trainer_test.DummyTransform")
-    collate = cc("trainite.models.transformer.CausalLMCollateFn")
     project_config.data.train.dataset = cc(
         "tests.trainers.decoder_trainer_test.GenerativeDataset",
         size=16,
@@ -662,7 +662,6 @@ def test_setup_inference_and_log_success(project_config, temp_run_dir):
         vocab_size=10,
     )
     project_config.data.train.transform = transform
-    project_config.data.train.dataloader.collate_fn = collate
     project_config.data.val.dataset = cc(
         "tests.trainers.decoder_trainer_test.GenerativeDataset",
         size=8,
@@ -670,7 +669,6 @@ def test_setup_inference_and_log_success(project_config, temp_run_dir):
         vocab_size=10,
     )
     project_config.data.val.transform = transform
-    project_config.data.val.dataloader.collate_fn = collate
     trainer = create_trainer_from_config(project_config)
     assert trainer.max_inference_new_tokens == 32
     trainer.run()

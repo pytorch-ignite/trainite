@@ -1,8 +1,10 @@
 import importlib
 import importlib.machinery
 import sys
+import warnings
 from types import ModuleType
 from unittest.mock import MagicMock
+from pydantic.warnings import ArbitraryTypeWarning
 
 
 class DynamicMockModule(ModuleType):
@@ -43,5 +45,7 @@ def mock_dependencies(*packages):
             to_mock.append(pkg)
 
     if to_mock:
+        warnings.filterwarnings("ignore", category=ArbitraryTypeWarning)
+
         finder = DependencyMocker(*to_mock)
         sys.meta_path.insert(0, finder)

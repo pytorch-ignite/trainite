@@ -66,7 +66,7 @@ generated = [
     "torch",
     "pytorch-ignite",
     "tensorboard",
-    "wandb",
+    "clearml",
 ]
 dev = [
     "torch",
@@ -75,7 +75,7 @@ dev = [
     "pytest>=9.0.3",
     "pre-commit>=4.6.0",
     "pyrefly>=1.0.0",
-    "wandb",
+    "clearml",
 ]
 
 [tool.ruff]

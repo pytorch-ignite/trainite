@@ -189,15 +189,11 @@ class TransformerModel(nn.Module):
 class CausalLMCollateFn:
     """Collate sequences for decoder-only autoregressive training."""
 
-    def __init__(
-        self,
-        tokenizer: Any,
-        pad_token_id: int | None = None,
-        ignore_index: int = -100,
-    ) -> None:
+    def __init__(self, tokenizer: Any) -> None:
         self.tokenizer = tokenizer
-        self.pad_token_id = pad_token_id if pad_token_id is not None else tokenizer.pad_token_id
-        self.ignore_index = ignore_index
+        pad_id = getattr(tokenizer, "pad_token_id", None)
+        self.pad_token_id = pad_id if pad_id is not None else 0
+        self.ignore_index = -100
 
     def __call__(self, batch: list[Any]) -> dict[str, torch.Tensor]:
         input_ids_list = []

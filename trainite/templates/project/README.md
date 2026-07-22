@@ -79,6 +79,25 @@ If you prefer standard Python tools, you can create a virtual environment and us
    tensorboard --logdir outputs
    ```
 
+## Experiment Logging and Checkpoints
+
+The default `logger: tensorboard` stores metrics and checkpoints locally. To use ClearML instead:
+
+1. Run `clearml-init` to configure your ClearML server and credentials.
+2. Set `logger: clearml` in `config.yaml`.
+
+ClearML runs still keep checkpoints in the local output directory. By default, `ClearMLSaver` also uploads them to
+ClearML's file server with `output_uri=True`.
+
+To change checkpoint storage, edit the `ClearMLSaver` call in `trainer.py`:
+
+- Use a storage URI such as `s3://bucket/path` to upload somewhere else.
+- Use `None` to leave the destination to `CLEARML_DEFAULT_OUTPUT_URI` or
+  `sdk.development.default_output_uri` in `clearml.conf`.
+
+To disable checkpoint uploads while retaining ClearML metric logging, pass `output_uri=False` to `ClearMLLogger` in
+`utils.py` and use `output_uri=None` for `ClearMLSaver` in `trainer.py`.
+
 ## Components
 
 ### Model: {{model_name}}
@@ -92,6 +111,12 @@ If you prefer standard Python tools, you can create a virtual environment and us
 
 ### Preprocessor: {{preprocessor_name}}
 {{preprocessor_docs}}
+
+## Understanding `utils.py`
+
+`utils.py` contains the bootstrapping and setup logic that links your configurations to executable code. It primarily acts as the file where all the helper functions are located that are being used in `trainer.py`. It handles parsing of dynamic `_target_` paths from `config.yaml`, builds your models and datasets, manages dataset splitting, and attaches standard PyTorch-Ignite event handlers (such as checkpointing, early stopping, learning rate scheduling, and logging).
+
+Since the generated code in `utils.py` belongs to you, you can modify it directly to customize checkpoint rules, adjust early stopping metrics, or add new loggers.
 
 ## Customization
 
