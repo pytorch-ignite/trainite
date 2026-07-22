@@ -1,6 +1,7 @@
 import random
 import warnings
 from typing import Any
+import math
 
 import torch
 from pydantic import BaseModel, ConfigDict
@@ -93,8 +94,6 @@ class CountingDataset(Dataset):
         seq_map: dict[str, str] = {}
 
         # Pre-calculate possible combinations to avoid infinite loops on small ranges
-        import math
-
         total_possible = sum(math.comb(seq_len - 1, k - 1) for seq_len in range(min_len, max_len + 1) if seq_len >= k)
         target_size = min(total_size, total_possible)
 
