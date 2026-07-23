@@ -1,17 +1,12 @@
 import string
-
 import torch
-
-
-# Hardcoded universal vocabulary: all printable ASCII characters
-UNIVERSAL_VOCAB = string.ascii_letters + string.digits + string.punctuation + " "
 
 
 class CharTokenizer:
     """A simple character-level tokenizer with a hardcoded universal vocabulary.
     Consists of all printable ASCII characters, plus special tokens for padding, beginning of sequence, separator, end of sequence, and unknown characters.
 
-    Maps each character in UNIVERSAL_VOCAB to a unique integer ID.
+    Maps each character in string.printable to a unique integer ID.
     ID 0 is reserved as the <PAD> token.
     ID 1 is reserved as the <BOS> token.
     ID 2 is reserved as the <SEP> token.
@@ -26,8 +21,8 @@ class CharTokenizer:
         self.eos_token_id = 3
         self.unk_token_id = 4
 
-        self.char_to_id: dict[str, int] = {c: i + 5 for i, c in enumerate(UNIVERSAL_VOCAB)}
-        self.id_to_char: dict[int, str] = {i + 5: c for i, c in enumerate(UNIVERSAL_VOCAB)}
+        self.char_to_id: dict[str, int] = {c: i + 5 for i, c in enumerate(string.printable)}
+        self.id_to_char: dict[int, str] = {i + 5: c for i, c in enumerate(string.printable)}
 
         self.special_tokens: dict[int, str] = {
             self.pad_token_id: "<PAD>",
@@ -43,7 +38,7 @@ class CharTokenizer:
     @property
     def vocab_size(self) -> int:
         """Number of unique tokens in the vocabulary (includes special tokens)."""
-        return len(UNIVERSAL_VOCAB) + len(self.special_tokens)
+        return len(string.printable) + len(self.special_tokens)
 
     def encode(self, text: str) -> list[int]:
         """Convert a string to a list of token IDs, mapping unrecognized characters to UNK."""
