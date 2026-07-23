@@ -102,7 +102,7 @@ class Trainer:
             "optimizers": self.optimizer,
             "evaluators": evaluators,
             "log_every_iters": self.trainer_config.log_every_steps,
-            "trainer_metric_names": ["loss"],
+            "trainer_metric_names": ["batch_loss"],
             "evaluator_metric_names": ["loss", "token_accuracy"],
         }
         if config.logger == "clearml":
@@ -239,7 +239,7 @@ class Trainer:
         )
 
     def _attach_metrics(self) -> dict[str, Metric]:
-        RunningAverage(output_transform=lambda output: output["loss"]).attach(self.trainer, "loss")
+        RunningAverage(output_transform=lambda output: output["loss"]).attach(self.trainer, "batch_loss")
 
         ignore_index = self.criterion.ignore_index
 
