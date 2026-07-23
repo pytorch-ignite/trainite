@@ -7,11 +7,8 @@ import torch
 from pydantic import BaseModel, ConfigDict
 from torch.utils.data import Dataset
 
-# Hardcoded universal vocabulary: all printable ASCII characters
-UNIVERSAL_VOCAB = string.ascii_letters + string.digits + string.punctuation + " "
-
 CHARSET_PRESETS = {
-    "@universal": UNIVERSAL_VOCAB,
+    "@universal": string.printable,
     "@alpha": string.ascii_letters,
     "@alpha_lowercase": string.ascii_lowercase,
     "@alpha_uppercase": string.ascii_uppercase,
@@ -41,7 +38,7 @@ class StringReverseDataset(Dataset):
         seed: int = 42,
     ) -> None:
         if charset is None:
-            chars = UNIVERSAL_VOCAB
+            chars = string.printable
         elif charset in CHARSET_PRESETS:
             chars = CHARSET_PRESETS[charset]
         else:

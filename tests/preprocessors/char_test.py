@@ -1,16 +1,17 @@
 import torch
-from trainite.preprocessors import UNIVERSAL_VOCAB, CharTokenizer, CharTokenizerConfig
+from trainite.preprocessors import CharTokenizer, CharTokenizerConfig
+import string
 
 
 def test_char_tokenizer_vocab_size():
     tokenizer = CharTokenizer()
-    assert tokenizer.vocab_size == len(UNIVERSAL_VOCAB) + len(tokenizer.special_tokens)
+    assert tokenizer.vocab_size == len(string.printable) + len(tokenizer.special_tokens)
 
 
 def test_char_tokenizer_encode():
     tokenizer = CharTokenizer()
     encoded = tokenizer.encode("abc")
-    assert encoded == [5, 6, 7]
+    assert encoded == [15, 16, 17]
 
 
 def test_char_tokenizer_decode():
@@ -30,7 +31,7 @@ def test_char_tokenizer_special_tokens():
 
 def test_char_tokenizer_unk():
     tokenizer = CharTokenizer()
-    # Δ is not in the universal vocab, should map to UNK token ID 4
+    # Δ is not in the vocab, should map to UNK token ID 4
     assert tokenizer.encode("Δ") == [4]
     assert tokenizer.decode([4]) == "<UNK>"
 
@@ -80,7 +81,7 @@ def test_char_tokenizer_call_no_special_tokens():
     tokenizer = CharTokenizer()
     result = tokenizer("abc", add_special_tokens=False)
     assert len(result["input_ids"]) == 3
-    assert result["input_ids"] == [5, 6, 7]
+    assert result["input_ids"] == [15, 16, 17]
 
 
 def test_char_tokenizer_call_max_length_padding():
