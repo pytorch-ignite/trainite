@@ -387,15 +387,15 @@ def test_decoder_trainer_test_no_loader(project_config):
 
 
 @mock.patch("trainite.trainers.decoder_trainer.ClearMLSaver")
-@mock.patch("trainite.trainers.decoder_trainer.setup_experiment_tracking")
+@mock.patch("trainite.trainers.decoder_trainer.setup_clearml_logging")
 @mock.patch("trainite.trainers.decoder_trainer.setup_best_model_checkpoint")
 @mock.patch("trainite.trainers.decoder_trainer.setup_training_checkpointing")
 def test_clearml_saver_is_used(
-    mock_setup_training, mock_setup_best, mock_setup_tracking, mock_clearml_saver, project_config, temp_run_dir
+    mock_setup_training, mock_setup_best, mock_setup_logging, mock_clearml_saver, project_config, temp_run_dir
 ):
     project_config.logger = "clearml"
     mock_logger = mock.MagicMock()
-    mock_setup_tracking.return_value = mock_logger
+    mock_setup_logging.return_value = mock_logger
 
     trainer = create_trainer_from_config(project_config)
 
