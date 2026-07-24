@@ -140,7 +140,9 @@ class TransformerBlock(nn.Module):
         return x
 
 
-class TransformerModel(nn.Module):
+class RoPETransformerModel(nn.Module):
+    """Decoder-only Transformer language model using Rotary Position Embeddings (RoPE)."""
+
     def __init__(
         self,
         vocab_size: int = 100,

@@ -1,6 +1,6 @@
-# Transformer model
+# Basic Transformer model
 
-It is a decoder-only Transformer: given a sequence of token IDs, it predicts the next token at every position.
+It is a decoder-only Transformer using absolute positional encoding: given a sequence of token IDs, it predicts the next token at every position.
 
 ## What goes in / out
 
@@ -15,10 +15,10 @@ The trainer uses these logits with cross-entropy loss.
 
 The model is small and standard:
 
-1. **Embedding**
+1. **Token Embedding**
    Converts token IDs into vectors.
-2. **Positional encoding**
-   Adds token order information.
+2. **Absolute Positional Embedding**
+   Adds token position vectors (`nn.Embedding(max_seq_len, hidden_size)`). Position IDs are computed dynamically from `attention_mask` to support left-padded batches.
 3. **Transformer blocks**
    Repeated attention + feedforward layers.
 4. **Final projection**
@@ -30,13 +30,10 @@ The model is small and standard:
 Padding ID is `0`. The model ignores padded positions in attention.
 
 ### Sequence length
-`max_seq_len` represents the precomputed cache size for RoPE. Inputs longer than this will fall back to slower on-the-fly calculations.
+`max_seq_len` represents the maximum supported sequence length. Inputs cannot exceed this limit.
 
 ### Hidden size and heads
 `hidden_size` must be divisible by `num_heads`.
-
-### Rotary positional encoding
-`head_dim` (which is `hidden_size // num_heads`) must be even because RoPE rotates pairs of dimensions.
 
 ## Config knobs
 
@@ -64,13 +61,13 @@ A common choice is `2x` to `4x` of `hidden_size`.
 Dropout rate used in attention and feedforward layers.
 
 ### `max_seq_len`
-Precomputed cache size for the rotary position embeddings.
+Maximum sequence length supported by the positional embeddings.
 
 ## Minimal config example
 
 ```yaml
 model:
-  _target_: models.transformer.TransformerModel
+  _target_: models.basic_transformer.BasicTransformerModel
   hidden_size: 128
   num_layers: 4
   num_heads: 4
@@ -81,12 +78,11 @@ model:
 
 ## When to change this file
 
-Edit `models/transformer.py` if you want to:
+Edit `models/basic_transformer.py` if you want to:
 
 - make the model wider or deeper
 - swap attention or feedforward behavior
-- change how padding is handled
-- add caching, rotary embeddings, or other sequence features
+- change positional encoding strategy (e.g. sinusoidal vs learned)
 
 ## Good starting rule
 

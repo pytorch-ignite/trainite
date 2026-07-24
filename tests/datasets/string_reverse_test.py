@@ -105,7 +105,7 @@ def test_config_build_string_reverse_dataset():
     dataset = build_dataset(dataset_conf.dataset, dataset_conf.transform, tokenizer)
     assert isinstance(dataset, TransformedDataset)
 
-    model_spec = MODEL_SPECS["transformer"]
+    model_spec = MODEL_SPECS["rope-transformer"]
     collate_fn_obj = get_target(model_spec.collate_fn_target)(tokenizer=tokenizer)
 
     dataloader_conf = dataset_conf.dataloader

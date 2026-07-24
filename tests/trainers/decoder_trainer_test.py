@@ -652,7 +652,7 @@ def test_setup_inference_and_log_success(project_config, temp_run_dir):
         "tests.trainers.decoder_trainer_test.GenerativeModel",
         vocab_size=10,
         hidden_size=8,
-        collate_fn_target="trainite.models.transformer.CausalLMCollateFn",
+        collate_fn_target="trainite.models.rope_transformer.CausalLMCollateFn",
     )
     transform = cc("tests.trainers.decoder_trainer_test.DummyTransform")
     project_config.data.train.dataset = cc(

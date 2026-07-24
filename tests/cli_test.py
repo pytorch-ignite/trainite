@@ -14,7 +14,8 @@ from trainite.config.registry import MODEL_SPECS, DATASET_SPECS, PREPROCESSOR_SP
 @pytest.mark.parametrize(
     "model,dataset,trainer",
     [
-        ("transformer", "string-reverse", "decoder-trainer"),
+        ("basic-transformer", "string-reverse", "decoder-trainer"),
+        ("rope-transformer", "string-reverse", "decoder-trainer"),
     ],
 )
 def test_init_generates_valid_project(model: str, dataset: str, trainer: str) -> None:
@@ -98,7 +99,7 @@ def test_generated_string_reversal_project_is_runnable() -> None:
                 "trainite.cli",
                 "init",
                 "--model",
-                "transformer",
+                "rope-transformer",
                 "--dataset",
                 "string-reverse",
                 "--trainer",
@@ -162,7 +163,7 @@ def test_cli_main_routing():
             argv=[
                 "init",
                 "--model",
-                "transformer",
+                "rope-transformer",
                 "--dataset",
                 "string-reverse",
                 "--trainer",
