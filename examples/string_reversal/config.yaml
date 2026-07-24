@@ -22,7 +22,7 @@ data:
   dataset:
     _target_: datasets.string_reverse.StringReverseDataset
     per_seq_size: 256
-    charset: "@alpha"
+    charset: "@alphanumeric"
     min_seq_len: 1
     max_seq_len: 16
     seq_len: null
