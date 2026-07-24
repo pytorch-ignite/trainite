@@ -169,6 +169,7 @@ class Trainer:
             self.trainer,
             {"model": self.model, "optimizer": self.optimizer},
             save_handler,
+            every=self.trainer_config.checkpoint_every_epochs,
         )
         # Attach inference logger if inference logging is enabled
         if self.inference_every_epochs is not None:

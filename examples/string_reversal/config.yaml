@@ -21,7 +21,7 @@ scheduler:
 data:
   dataset:
     _target_: datasets.string_reverse.StringReverseDataset
-    per_seq_size: 256
+    per_seq_size: 10000
     charset: "@alphanumeric"
     min_seq_len: 1
     max_seq_len: 16
@@ -31,7 +31,7 @@ data:
     _target_: datasets.string_reverse.PromptCompletionTransform
     ignore_index: -100
   dataloader:
-    batch_size: 32
+    batch_size: 128
     shuffle: true
     num_workers: 2
   test_ratio: 0.1
@@ -46,6 +46,7 @@ trainer:
   inference_num_samples: 3
   max_inference_new_tokens: 16
   grad_clip_norm: null
+  checkpoint_every_epochs: 10
 output:
   root: outputs
   run_name: transformer_string_reversal

@@ -282,6 +282,7 @@ def setup_training_checkpointing(
     engine: Engine,
     to_save: dict[str, Any],
     save_handler: DiskSaver | ClearMLSaver,
+    every: int = 10,
 ) -> Checkpoint:
     last_checkpoint = Checkpoint(
         to_save=to_save,
@@ -291,7 +292,7 @@ def setup_training_checkpointing(
         global_step_transform=lambda *_: engine.state.iteration,
         filename_pattern="{filename_prefix}.{ext}",
     )
-    engine.add_event_handler(Events.EPOCH_COMPLETED, last_checkpoint)
+    engine.add_event_handler(Events.EPOCH_COMPLETED(every=every), last_checkpoint)
     return last_checkpoint
 
 
