@@ -1,5 +1,10 @@
 # Trainite Project: {{project_name}}
 
+> Generated with Trainite v{{trainite_version}} using:
+> ```bash
+> {{recreation_command}}
+> ```
+
 Welcome to your new Trainite-generated training project!
 
 Trainite is a toolbox for training language models with PyTorch-Ignite. This project contains real, readable Python files that you own and can modify as needed.
