@@ -7,11 +7,8 @@ import torch
 from pydantic import BaseModel, ConfigDict
 from torch.utils.data import Dataset
 
-# Hardcoded universal vocabulary: all printable ASCII characters
-UNIVERSAL_VOCAB = string.ascii_letters + string.digits + string.punctuation + " "
-
 CHARSET_PRESETS = {
-    "@universal": UNIVERSAL_VOCAB,
+    "@universal": string.ascii_letters + string.digits + string.punctuation + " ",
     "@alpha": string.ascii_letters,
     "@alpha_lowercase": string.ascii_lowercase,
     "@alpha_uppercase": string.ascii_uppercase,
@@ -40,17 +37,20 @@ class StringReverseDataset(Dataset):
         charset: str | None = None,
         seed: int = 42,
     ) -> None:
-        if charset is None:
-            chars = UNIVERSAL_VOCAB
-        elif charset in CHARSET_PRESETS:
+        charset = "@universal" if charset is None else charset
+        if charset in CHARSET_PRESETS:
             chars = CHARSET_PRESETS[charset]
+        elif charset.startswith("@"):
+            raise ValueError(f"Unknown charset preset: {charset}")
         else:
             chars = charset
 
-        self.chars = chars
+        if not chars:
+            raise ValueError("Charset cannot be empty.")
+        if len(set(chars)) != len(chars):
+            raise ValueError("Charset must not contain duplicate characters.")
 
-        if not self.chars:
-            raise ValueError(f"Charset '{charset}' resulted in empty characters.")
+        self.chars = chars
 
         if seq_len is not None and (min_seq_len is not None or max_seq_len is not None):
             raise ValueError("Cannot specify both seq_len and min_seq_len/max_seq_len.")

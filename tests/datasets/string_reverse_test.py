@@ -64,6 +64,15 @@ def test_string_reverse_dataset_charset_presets(preset: str):
         assert len(dataset.chars) == len(preset)
 
 
+@pytest.mark.parametrize(
+    ("charset", "message"),
+    [("@unknown", "Unknown charset preset"), ("aab", "duplicate characters"), ("", "cannot be empty")],
+)
+def test_string_reverse_dataset_rejects_invalid_charset(charset: str, message: str):
+    with pytest.raises(ValueError, match=message):
+        StringReverseDataset(per_seq_size=5, seq_len=3, charset=charset)
+
+
 def test_build_string_reverse_dataset():
     dataset = StringReverseDataset(per_seq_size=5, seq_len=3)
     assert isinstance(dataset, StringReverseDataset)
@@ -138,7 +147,7 @@ def test_string_reverse_dataset_size_capping_and_warning():
 
 def test_charset_empty_raises():
     """Empty charset should raise ValueError."""
-    with pytest.raises(ValueError, match="resulted in empty characters"):
+    with pytest.raises(ValueError, match="cannot be empty"):
         StringReverseDataset(
             per_seq_size=5,
             seq_len=3,

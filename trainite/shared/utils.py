@@ -3,7 +3,7 @@ import inspect
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Literal, TypeVar
+from typing import Any, Callable, TypeVar
 
 import torch
 import yaml
@@ -14,10 +14,9 @@ from ignite.handlers import (
     EarlyStopping,
     create_lr_scheduler_with_warmup,
 )
-from ignite.handlers.clearml_logger import ClearMLLogger, ClearMLSaver
+from ignite.handlers.clearml_logger import ClearMLSaver
 from ignite.handlers.fbresearch_logger import FBResearchLogger
 from ignite.handlers.param_scheduler import ParamScheduler
-from ignite.handlers.tensorboard_logger import TensorboardLogger
 from ignite.utils import setup_logger
 from omegaconf import OmegaConf
 from pydantic import BaseModel
@@ -300,74 +299,6 @@ def setup_best_model_checkpoint(
     )
     val_evaluator.add_event_handler(Events.COMPLETED, checkpoint)
     return checkpoint
-
-
-def setup_experiment_tracking(
-    backend: Literal["tensorboard", "clearml"],
-    engine: Engine,
-    val_evaluator: Engine,
-    train_evaluator: Engine,
-    test_evaluator: Engine,
-    optimizer: Any,
-    run_dir: Path,
-    metric_names: list[str],
-    has_test: bool,
-    run_name: str,
-) -> TensorboardLogger | ClearMLLogger:
-    if backend == "clearml":
-        exp_logger = ClearMLLogger(
-            project_name=run_name,
-            task_name=str(run_dir).split("/")[-1],
-        )
-        task = exp_logger.get_task()
-        task.upload_artifact(name="config.yaml", artifact_object=str(run_dir / "config.yaml"))
-    else:
-        log_dir = run_dir / "tensorboard"
-        exp_logger = TensorboardLogger(log_dir=log_dir)
-
-    # Log training iteration loss
-    exp_logger.attach_output_handler(
-        engine,
-        event_name=Events.ITERATION_COMPLETED,
-        tag="training",
-        output_transform=lambda output: {"batch_loss": output["loss"]},
-    )
-
-    # Log training epoch metrics
-    exp_logger.attach_output_handler(
-        train_evaluator,
-        event_name=Events.EPOCH_COMPLETED,
-        tag="training",
-        metric_names=metric_names,
-        global_step_transform=lambda *_: engine.state.iteration,
-    )
-
-    # Log validation epoch metrics
-    exp_logger.attach_output_handler(
-        val_evaluator,
-        event_name=Events.EPOCH_COMPLETED,
-        tag="validation",
-        metric_names=metric_names,
-        global_step_transform=lambda *_: engine.state.iteration,
-    )
-
-    # Log test metrics if applicable
-    if has_test:
-        exp_logger.attach_output_handler(
-            test_evaluator,
-            event_name=Events.COMPLETED,
-            tag="testing",
-            metric_names=metric_names,
-            global_step_transform=lambda *_: engine.state.iteration,
-        )
-
-    # Log optimizer learning rates
-    exp_logger.attach_opt_params_handler(
-        engine,
-        event_name=Events.ITERATION_STARTED,
-        optimizer=optimizer,
-    )
-    return exp_logger
 
 
 def setup_console_logger(

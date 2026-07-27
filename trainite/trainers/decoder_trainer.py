@@ -1,14 +1,16 @@
+import html
 import logging
 
 import ignite.distributed as idist
 import torch
 from ignite.engine import Engine, Events
+from ignite.handlers import DiskSaver
+from ignite.handlers.clearml_logger import ClearMLSaver
+from ignite.handlers.logger_utils import setup_clearml_logging, setup_tb_logging
 from ignite.metrics import Accuracy, Loss, Metric, RunningAverage
 from ignite.utils import setup_logger
 from torch import nn
 from torch.utils.data import DataLoader
-from ignite.handlers import DiskSaver
-from ignite.handlers.clearml_logger import ClearMLSaver
 
 from trainite.config.base import (
     ProjectConfig,
@@ -25,7 +27,6 @@ from trainite.shared.utils import (
     make_run_dir,
     setup_best_model_checkpoint,
     setup_console_logger,
-    setup_experiment_tracking,
     setup_training_checkpointing,
 )
 
@@ -92,19 +93,32 @@ class Trainer:
             loss = engine_val.state.metrics["loss"]
             return -loss
 
-        # Attach experiment logger (TensorBoard or ClearML)
-        self.exp_logger = setup_experiment_tracking(
-            config.logger,
-            self.trainer,
-            self.val_evaluator,
-            self.train_evaluator,
-            self.test_evaluator,
-            self.optimizer,
-            self.run_dir,
-            ["loss", "token_accuracy"],
-            bool(self.test_loader),
-            config.output.run_name,
-        )
+        evaluators = {"training": self.train_evaluator, "validation": self.val_evaluator}
+        if self.test_loader:
+            evaluators["testing"] = self.test_evaluator
+
+        logging_kwargs = {
+            "trainer": self.trainer,
+            "optimizers": self.optimizer,
+            "evaluators": evaluators,
+            "log_every_iters": self.trainer_config.log_every_steps,
+            "trainer_metric_names": ["batch_loss"],
+            "evaluator_metric_names": ["loss", "token_accuracy"],
+        }
+        if config.logger == "clearml":
+            self.exp_logger = setup_clearml_logging(
+                **logging_kwargs,
+                project_name=config.output.run_name,
+                task_name=self.run_dir.name,
+            )
+            self.exp_logger.get_task().upload_artifact(
+                name="config.yaml", artifact_object=str(self.run_dir / "config.yaml")
+            )
+        else:
+            self.exp_logger = setup_tb_logging(
+                output_path=str(self.run_dir / "tensorboard"),
+                **logging_kwargs,
+            )
 
         # Setup save handler
         if config.logger == "clearml":
@@ -225,7 +239,7 @@ class Trainer:
         )
 
     def _attach_metrics(self) -> dict[str, Metric]:
-        RunningAverage(output_transform=lambda output: output["loss"]).attach(self.trainer, "loss")
+        RunningAverage(output_transform=lambda output: output["loss"]).attach(self.trainer, "batch_loss")
 
         ignore_index = self.criterion.ignore_index
 
@@ -250,19 +264,13 @@ class Trainer:
         return metrics
 
     def attach_inference_logger(self) -> None:
-        self.trainer.add_event_handler(
-            Events.EPOCH_COMPLETED(every=self.inference_every_epochs),
-            self._log_inference,
-            self.train_loader,
-            "Train",
-        )
-
-        self.trainer.add_event_handler(
-            Events.EPOCH_COMPLETED(every=self.inference_every_epochs),
-            self._log_inference,
-            self.val_loader,
-            "Val",
-        )
+        for loader, name in ((self.train_loader, "Train"), (self.val_loader, "Val")):
+            self.trainer.add_event_handler(
+                Events.EPOCH_COMPLETED(every=self.inference_every_epochs),
+                self._log_inference,
+                loader,
+                name,
+            )
 
     def _log_text(self, tag: str, text: str, step: int) -> None:
         # Both backends escape HTML/text in the caller; clearml uses report_text, TB uses markdown.
@@ -282,7 +290,6 @@ class Trainer:
 
         # Read generation prompts straight off the DatapointModel contract.
         prompt_ids_list: list[torch.Tensor] = []
-        prompt_attn_list: list[torch.Tensor] = []
         targets: list[str] = []
         sources: list[str] = []
         for i in range(num_samples):
@@ -291,10 +298,7 @@ class Trainer:
             target = item.target
 
             input_ids = item.eval_input_ids
-            attention_mask = torch.ones_like(input_ids, dtype=torch.long)
-
             prompt_ids_list.append(input_ids)
-            prompt_attn_list.append(attention_mask)
             targets.append(target)
             sources.append(source)
         self.model.eval()
@@ -319,7 +323,11 @@ class Trainer:
             .to(self.device)
         )
         batch_attention_mask = (
-            torch.nn.utils.rnn.pad_sequence([t.flip(0) for t in prompt_attn_list], batch_first=True, padding_value=0)
+            torch.nn.utils.rnn.pad_sequence(
+                [torch.ones_like(t, dtype=torch.long).flip(0) for t in prompt_ids_list],
+                batch_first=True,
+                padding_value=0,
+            )
             .flip(1)
             .to(self.device)
         )
@@ -337,24 +345,21 @@ class Trainer:
             for tokens in new_tokens
         ]
 
-        for idx in range(num_samples):
+        for idx, (source, target, prediction) in enumerate(zip(sources, targets, decoded_strs), 1):
             self.logger.info(
                 "    Sample %d | Prompt: %r | Target: %r | Prediction: %r",
-                idx + 1,
-                sources[idx],
-                targets[idx],
-                decoded_strs[idx],
+                idx,
+                source,
+                target,
+                prediction,
             )
 
         lines = []
-        for idx in range(num_samples):
-            lines.append(f"Sample {idx + 1}")
-            prompt = sources[idx].strip() or "(empty)"
-            target = targets[idx].strip() or "(empty)"
-            pred = decoded_strs[idx].strip() or "(empty)"
-            for key, val in [("Prompt", prompt), ("Target", target), ("Prediction", pred)]:
+        for idx, (source, target, prediction) in enumerate(zip(sources, targets, decoded_strs), 1):
+            lines.append(f"Sample {idx}")
+            for key, val in [("Prompt", source), ("Target", target), ("Prediction", prediction)]:
                 # Escape markup so TB markdown / clearml console don't swallow <, >, & in outputs.
-                val = val.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                val = html.escape(val.strip() or "(empty)", quote=False)
                 lines.append(f"  {key}:     {val}")
             lines.append("")
         name_map = {"Train": "training", "Val": "validation", "Test": "testing"}
