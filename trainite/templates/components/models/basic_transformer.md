@@ -17,8 +17,8 @@ The model is small and standard:
 
 1. **Token Embedding**
    Converts token IDs into vectors.
-2. **Absolute Positional Embedding**
-   Adds token position vectors (`nn.Embedding(max_seq_len, hidden_size)`). Position IDs are computed dynamically from `attention_mask` to support left-padded batches.
+2. **Absolute Positional Encoding**
+   Adds sinusoidal position vectors (`SinusoidalPositionalEncoding(hidden_size, max_seq_len)`). Position IDs are computed dynamically from `attention_mask` to support left-padded batches.
 3. **Transformer blocks**
    Repeated attention + feedforward layers.
 4. **Final projection**

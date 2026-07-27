@@ -6,6 +6,24 @@ from torch import nn
 from torch.nn.utils.rnn import pad_sequence
 
 
+class SinusoidalPositionalEncoding(nn.Module):
+    def __init__(self, d_model: int, max_seq_len: int = 512, dropout: float = 0.1) -> None:
+        super().__init__()
+        if d_model % 2 != 0:
+            raise ValueError("d_model must be even for sinusoidal positional encoding.")
+
+        self.dropout = nn.Dropout(p=dropout)
+        pe = torch.zeros(max_seq_len, d_model)
+        position = torch.arange(0, max_seq_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2, dtype=torch.float) * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        self.register_buffer("pe", pe, persistent=False)
+
+    def forward(self, positions: torch.Tensor) -> torch.Tensor:
+        return self.dropout(self.pe[positions])
+
+
 class Attention(nn.Module):
     def __init__(self, embed_dim: int, num_heads: int, dropout: float = 0.1):
         super().__init__()
@@ -88,7 +106,7 @@ class TransformerBlock(nn.Module):
 
 
 class BasicTransformerModel(nn.Module):
-    """Decoder-only Transformer language model using absolute positional encoding."""
+    """Decoder-only Transformer language model using sinusoidal absolute positional encoding."""
 
     def __init__(
         self,
@@ -104,7 +122,7 @@ class BasicTransformerModel(nn.Module):
         super().__init__()
         pad_token_id = pad_token_id if pad_token_id is not None else 0
         self.embedding = nn.Embedding(vocab_size, hidden_size, padding_idx=pad_token_id)
-        self.pos_emb = nn.Embedding(max_seq_len, hidden_size)
+        self.pos_encoding = SinusoidalPositionalEncoding(hidden_size, max_seq_len, dropout=dropout)
         self.blocks = nn.ModuleList(
             [
                 TransformerBlock(
@@ -127,7 +145,7 @@ class BasicTransformerModel(nn.Module):
         else:
             positions = torch.arange(S, device=input_ids.device).unsqueeze(0)
 
-        x = self.embedding(input_ids) * math.sqrt(self.embedding.embedding_dim) + self.pos_emb(positions)
+        x = self.embedding(input_ids) * math.sqrt(self.embedding.embedding_dim) + self.pos_encoding(positions)
 
         padding_mask: torch.Tensor | None = None
         if attention_mask is not None:
