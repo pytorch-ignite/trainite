@@ -12,13 +12,14 @@ from trainite.config.registry import MODEL_SPECS, DATASET_SPECS, PREPROCESSOR_SP
 
 
 @pytest.mark.parametrize(
-    "model,dataset,trainer",
+    "models,dataset,trainer",
     [
-        ("basic-transformer", "string-reverse", "decoder-trainer"),
-        ("rope-transformer", "string-reverse", "decoder-trainer"),
+        (["basic-transformer"], "string-reverse", "decoder-trainer"),
+        (["rope-transformer"], "string-reverse", "decoder-trainer"),
+        (["rope-transformer", "basic-transformer"], "string-reverse", "decoder-trainer"),
     ],
 )
-def test_init_generates_valid_project(model: str, dataset: str, trainer: str) -> None:
+def test_init_generates_valid_project(models: list[str], dataset: str, trainer: str) -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         project_dir = Path(temp_dir) / "demo-project"
         # Run trainite init
@@ -28,7 +29,7 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
             "trainite.cli",
             "init",
             "--model",
-            model,
+            *models,
             "--dataset",
             dataset,
             "--trainer",
@@ -38,7 +39,7 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
         subprocess.run(cmd, check=True, timeout=60)
 
         dataset_spec = DATASET_SPECS[dataset]
-        model_spec = MODEL_SPECS[model]
+        model_specs = [MODEL_SPECS[m] for m in models]
         trainer_spec = TRAINER_SPECS[trainer]
         preprocessor_spec = (
             PREPROCESSOR_SPECS[dataset_spec.preprocessor_spec_name] if dataset_spec.preprocessor_spec_name else None
@@ -48,7 +49,7 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
         expected_files = [
             "config.yaml",
             "config.py",
-            f"models/{model_spec.name}.py",
+            *[f"models/{spec.name}.py" for spec in model_specs],
             f"datasets/{dataset_spec.name}.py",
             "datasets/transformed.py",
             "trainer.py",
@@ -62,16 +63,19 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
             if filename is not None:
                 assert (project_dir / filename).exists(), f"{filename} missing"
 
-        # Check that targets inside config.yaml are rewritten correctly
+        # Check that target inside config.yaml is rewritten correctly and points to primary model
         with open(project_dir / "config.yaml", "r") as f:
             generated_config = yaml.safe_load(f)
-        assert generated_config["model"]["_target_"].startswith("models.")
+        primary_spec = model_specs[0]
+        assert (
+            generated_config["model"]["_target_"] == f"models.{primary_spec.name}.{primary_spec.implementation_symbol}"
+        )
         assert generated_config["model"]["collate_fn_target"].startswith("models.")
 
         # Check if python files are parseable
         python_files = [
             "config.py",
-            f"models/{model_spec.name}.py",
+            *[f"models/{spec.name}.py" for spec in model_specs],
             f"datasets/{dataset_spec.name}.py",
             "datasets/transformed.py",
             "trainer.py",
@@ -100,6 +104,7 @@ def test_generated_string_reversal_project_is_runnable() -> None:
                 "init",
                 "--model",
                 "rope-transformer",
+                "basic-transformer",
                 "--dataset",
                 "string-reverse",
                 "--trainer",
@@ -164,6 +169,7 @@ def test_cli_main_routing():
                 "init",
                 "--model",
                 "rope-transformer",
+                "basic-transformer",
                 "--dataset",
                 "string-reverse",
                 "--trainer",
@@ -198,3 +204,10 @@ def test_import_without_dependencies() -> None:
         text=True,
     )
     assert "is not a Python type" not in result.stderr
+
+
+def test_duplicate_models_raises_error():
+    from trainite.cli.init import Init
+
+    with pytest.raises(ValueError, match="Duplicate model entries are not allowed"):
+        Init(model=("rope-transformer", "rope-transformer"))

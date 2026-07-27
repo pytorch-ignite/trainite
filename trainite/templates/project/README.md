@@ -105,7 +105,7 @@ To disable checkpoint uploads while retaining ClearML metric logging, pass `outp
 
 ## Components
 
-### Model: {{model_name}}
+### Models: {{model_name}}
 {{model_docs}}
 
 ### Dataset: {{dataset_name}}

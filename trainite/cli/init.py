@@ -6,7 +6,7 @@ import questionary
 import tomlkit
 import tyro
 from packaging.requirements import Requirement
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from trainite import __version__ as TRAINITE_VERSION
 from trainite.config import (
@@ -67,6 +67,20 @@ def _prompt_choice(prompt: str, choices: Sequence[str], default: str, instructio
     ).ask()
     if result is None:
         raise SystemExit(0)
+    return result
+
+
+def _prompt_multi_choice(
+    prompt: str, choices: Sequence[str], default: Sequence[str] | None = None, instruction: str | None = None
+) -> list[str]:
+    formatted_choices = [questionary.Choice(c, checked=(c in default if default else False)) for c in choices]
+    result = questionary.checkbox(
+        prompt,
+        choices=formatted_choices,
+        instruction=instruction,
+    ).ask()
+    if result is None or len(result) == 0:
+        raise SystemExit("At least one model must be selected.")
     return result
 
 
@@ -183,7 +197,8 @@ def _module_rewrites(sources: dict[str, Path]) -> list[tuple[str, str]]:
 
 def _recreation_command(config: "Init", project_name: str) -> str:
     cmd_parts = ["trainite", "init", project_name]
-    cmd_parts.append(f"--model {config.model}")
+    models = config.model if isinstance(config.model, (tuple, list)) else (config.model,)
+    cmd_parts.append(f"--model {' '.join(models)}")
     cmd_parts.append(f"--dataset {config.dataset}")
     cmd_parts.append(f"--trainer {config.trainer}")
     if config.output_root != "outputs":
@@ -194,14 +209,14 @@ def _recreation_command(config: "Init", project_name: str) -> str:
 
 
 def _build_templates(
-    model_spec: ModelSpec,
+    model_specs: Sequence[ModelSpec],
     dataset_spec: DatasetSpec,
     trainer_spec: ComponentSpec,
     preprocessor_spec: ComponentSpec | None,
     project_name: str,
     recreation_command: str = "",
 ) -> tuple[dict[str, str], list[tuple[str, str]]]:
-    specs = [model_spec, dataset_spec, trainer_spec, preprocessor_spec]
+    specs = [*model_specs, dataset_spec, trainer_spec, preprocessor_spec]
     spec_deps = set()
     for spec in specs:
         if spec is not None:
@@ -215,15 +230,20 @@ def _build_templates(
         final_deps.add(val)
 
     # Generated file -> source file it is copied from
-    sources = {
-        f"models/{model_spec.name}.py": model_spec.implementation_path,
-        f"datasets/{dataset_spec.name}.py": dataset_spec.implementation_path,
-        "datasets/transformed.py": Path("trainite/datasets/transformed.py"),
-        "trainer.py": trainer_spec.implementation_path,
-        "utils.py": Path("trainite/shared/utils.py"),
-        "main.py": Path("trainite/shared/main.py"),
-        "config.py": Path("trainite/config/base.py"),
-    }
+    sources: dict[str, Path] = {}
+    for spec in model_specs:
+        sources[f"models/{spec.name}.py"] = spec.implementation_path
+
+    sources.update(
+        {
+            f"datasets/{dataset_spec.name}.py": dataset_spec.implementation_path,
+            "datasets/transformed.py": Path("trainite/datasets/transformed.py"),
+            "trainer.py": trainer_spec.implementation_path,
+            "utils.py": Path("trainite/shared/utils.py"),
+            "main.py": Path("trainite/shared/main.py"),
+            "config.py": Path("trainite/config/base.py"),
+        }
+    )
     if preprocessor_spec:
         sources[f"preprocessors/{preprocessor_spec.name}.py"] = preprocessor_spec.implementation_path
 
@@ -235,12 +255,15 @@ def _build_templates(
             return _render_template(PROJECT_ROOT / spec.readme_template_path)
         return ""
 
+    model_names_str = ", ".join(spec.name for spec in model_specs)
+    model_docs_str = "\n\n".join(f"#### {spec.name}\n{_docs(spec)}" for spec in model_specs)
+
     readme_replacements = [
         ("{{project_name}}", project_name),
         ("{{trainite_version}}", TRAINITE_VERSION),
         ("{{recreation_command}}", recreation_command),
-        ("{{model_name}}", model_spec.name),
-        ("{{model_docs}}", _docs(model_spec)),
+        ("{{model_name}}", model_names_str),
+        ("{{model_docs}}", model_docs_str),
         ("{{dataset_name}}", dataset_spec.name),
         ("{{dataset_docs}}", _docs(dataset_spec)),
         ("{{trainer_name}}", trainer_spec.name),
@@ -264,7 +287,20 @@ def run_interactive_mode() -> None:
         "my-cool-experiment",
         "Directory to create the starter project in \n",
     )
-    model = _prompt_choice("Model:", MODEL_CHOICES, MODEL_CHOICES[0], "Starter model template to use")
+    models = _prompt_multi_choice(
+        "Model(s):",
+        MODEL_CHOICES,
+        default=["rope-transformer"],
+        instruction="Select starter model template(s) to include (use space to select)",
+    )
+    if len(models) > 1:
+        primary_model = _prompt_choice(
+            "Primary active model in config.yaml:",
+            models,
+            default=models[0],
+            instruction="Choose which model is configured as default active in config.yaml",
+        )
+        models = [primary_model] + [m for m in models if m != primary_model]
     dataset = _prompt_choice(
         "Dataset:",
         DATASET_CHOICES,
@@ -280,13 +316,13 @@ def run_interactive_mode() -> None:
     output_root = _prompt_text("Output directory:", "outputs", "Output directory for generated files \n")
     run_name = _prompt_text(
         "Run name:",
-        f"{model}__{dataset}",
+        f"{models[0]}__{dataset}",
         "Run name for generated config (used in output paths and logging) \n",
     )
 
     config = Init(
         project_dir=project_dir,
-        model=model,
+        model=tuple(models),
         dataset=dataset,
         trainer=trainer,
         output_root=output_root,
@@ -320,7 +356,7 @@ class Init(BaseModel):
 
     Args:
         project_dir: Directory to create the starter project in.
-        model: Starter model template to use.
+        model: Starter model template(s) to use.
         dataset: Starter dataset template to use.
         trainer: Starter trainer template to use.
         output_root: Output root for generated config.
@@ -329,12 +365,25 @@ class Init(BaseModel):
     """
 
     project_dir: tyro.conf.Positional[str] = "my-cool-experiment"
-    model: ModelType = "rope-transformer"
+    model: tuple[ModelType, ...] = ("rope-transformer",)
     dataset: DatasetType = "string-reverse"
     trainer: TrainerType = "decoder-trainer"
     output_root: str = "outputs"
     run_name: str = ""
     force: bool = False
+
+    @field_validator("model", mode="before")
+    @classmethod
+    def validate_models(cls, v: Any) -> tuple[str, ...]:
+        if isinstance(v, str):
+            v = (v,)
+        if isinstance(v, (list, tuple)):
+            if not v:
+                raise ValueError("At least one model must be specified.")
+            if len(v) != len(set(v)):
+                raise ValueError("Duplicate model entries are not allowed.")
+            return tuple(v)
+        return v
 
 
 def init_project(config: Init) -> None:
@@ -345,19 +394,21 @@ def init_project(config: Init) -> None:
     """
 
     project_dir = config.project_dir
-    model = config.model
+    models = config.model
     dataset = config.dataset
     trainer = config.trainer
     output_root = config.output_root
     run_name = config.run_name
     force = config.force
 
-    resolved_run_name = run_name or f"{model}__{dataset}"
+    primary_model = models[0]
+    resolved_run_name = run_name or f"{primary_model}__{dataset}"
     resolved_project_dir = _project_directory(project_dir, force)
 
     output_config = OutputConfig(root=output_root, run_name=resolved_run_name)
 
-    model_spec = MODEL_SPECS[model]
+    model_specs = [MODEL_SPECS[m] for m in models]
+    primary_model_spec = model_specs[0]
     dataset_spec = DATASET_SPECS[dataset]
     trainer_spec = TRAINER_SPECS[trainer]
     preprocessor_spec = (
@@ -368,11 +419,11 @@ def init_project(config: Init) -> None:
 
     # Build templates for the starter project
     templates, rewrites = _build_templates(
-        model_spec, dataset_spec, trainer_spec, preprocessor_spec, resolved_project_dir.name, recreation_cmd
+        model_specs, dataset_spec, trainer_spec, preprocessor_spec, resolved_project_dir.name, recreation_cmd
     )
 
-    # Instantiate configs from specs
-    model_component = model_spec.config_cls(collate_fn_target=model_spec.collate_fn_target)
+    # Instantiate configs from specs (primary model is used for default config.yaml)
+    model_component = primary_model_spec.config_cls(collate_fn_target=primary_model_spec.collate_fn_target)
     data_config = dataset_spec.config_cls()
     trainer_component = trainer_spec.config_cls()
 
