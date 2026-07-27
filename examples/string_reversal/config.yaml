@@ -1,5 +1,6 @@
 preprocessor:
   _target_: preprocessors.char_tokenizer.CharTokenizer
+  charset: "@alphanumeric"
 model:
   _target_: models.transformer.TransformerModel
   collate_fn_target: models.transformer.CausalLMCollateFn
