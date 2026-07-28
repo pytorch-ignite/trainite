@@ -1,4 +1,4 @@
-# Verifying the Transformer Depth Hierarchy via Alternating Block Counting
+# Reproducing "Knee-Deep in C-RASP: A Transformer Depth Hierarchy" Experiments
 
 This example project reproduces the prefix-classification length-generalization sweep experiments on the alternating block language `L_k` described in the research paper:
 
@@ -15,7 +15,7 @@ The experiments empirically verify the paper's theory predicting the depth requi
 
 ## Project Origin & Customization
 
-This project was generated using the `trainite` CLI with the built-in counting dataset:
+This project was generated using the `trainite` CLI with the built-in counting dataset. *(Note: See the [main README](../../README.md) for Trainite installation instructions).*
 ```bash
 trainite init --dataset counting
 ```
