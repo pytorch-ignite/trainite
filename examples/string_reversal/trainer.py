@@ -133,6 +133,7 @@ class Trainer:
                 **logging_kwargs,
                 project_name=config.output.project or config.output.run_name,
                 task_name=config.output.run_name,
+                auto_connect_frameworks={"pytorch": False},
             )
             self.exp_logger.get_task().upload_artifact(
                 name="config.yaml", artifact_object=str(self.run_dir / "config.yaml")
@@ -337,7 +338,7 @@ class Trainer:
         )
 
         step = self.trainer.state.iteration if self.trainer.state else 0
-        self.evaluate_autoregressive(loader, "Test", step=step)
+        self.evaluate_autoregressive(loader, "Test", step=step, num_log_samples=self.inference_num_samples)
 
     def _attach_metrics(self) -> dict[str, Metric]:
         RunningAverage(output_transform=lambda output: output["loss"]).attach(self.trainer, "batch_loss")
