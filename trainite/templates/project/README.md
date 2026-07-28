@@ -1,5 +1,10 @@
 # Trainite Project: {{project_name}}
 
+> Generated with Trainite v{{trainite_version}} using:
+> ```bash
+> {{recreation_command}}
+> ```
+
 Welcome to your new Trainite-generated training project!
 
 Trainite is a toolbox for training language models with PyTorch-Ignite. This project contains real, readable Python files that you own and can modify as needed.
@@ -100,7 +105,7 @@ To disable checkpoint uploads while retaining ClearML metric logging, pass `outp
 
 ## Components
 
-### Model: {{model_name}}
+### Models: {{model_name}}
 {{model_docs}}
 
 ### Dataset: {{dataset_name}}

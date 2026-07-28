@@ -1,23 +1,23 @@
-import html
+import itertools
 import logging
 
 import ignite.distributed as idist
 import torch
 from ignite.engine import Engine, Events
-from ignite.handlers import DiskSaver
-from ignite.handlers.clearml_logger import ClearMLSaver
-from ignite.handlers.logger_utils import setup_clearml_logging, setup_tb_logging
 from ignite.metrics import Accuracy, Loss, Metric, RunningAverage
 from ignite.utils import setup_logger
 from torch import nn
 from torch.utils.data import DataLoader
 
-from trainite.config.base import (
+from ignite.handlers import DiskSaver
+from ignite.handlers.clearml_logger import ClearMLSaver
+
+from config import (
     ProjectConfig,
     TrainerConfig,
 )
 
-from trainite.shared.utils import (
+from utils import (
     attach_early_stopping,
     attach_lr_scheduler,
     build_dataloaders,
@@ -27,6 +27,7 @@ from trainite.shared.utils import (
     make_run_dir,
     setup_best_model_checkpoint,
     setup_console_logger,
+    setup_experiment_tracking,
     setup_training_checkpointing,
 )
 
@@ -47,10 +48,7 @@ class Trainer:
         self.device: str | torch.device = idist.device() if config.device is None else config.device
         self.tokenizer = instantiate(config.preprocessor)
         self.train_loader, self.val_loader, self.test_loader = build_dataloaders(
-            config.data,
-            self.tokenizer,
-            config.seed,
-            collate_fn_target=config.model.collate_fn_target,
+            config.data, self.tokenizer, config.seed
         )
         self.model = build_model(
             config.model, self.device, vocab_size=self.tokenizer.vocab_size, pad_token_id=self.tokenizer.pad_token_id
@@ -82,7 +80,8 @@ class Trainer:
         )
 
         # Attach learning rate scheduler
-        attach_lr_scheduler(self.trainer, self.optimizer, self.total_iters, config.optimizer.lr)
+        if self.trainer_config.use_lr_scheduler:
+            attach_lr_scheduler(self.trainer, self.optimizer, self.total_iters, config.optimizer.lr)
 
         # Attach early stopping
         if self.trainer_config.early_stopping_patience is not None:
@@ -93,42 +92,30 @@ class Trainer:
             loss = engine_val.state.metrics["loss"]
             return -loss
 
-        evaluators = {"training": self.train_evaluator, "validation": self.val_evaluator}
-        if self.test_loader:
-            evaluators["testing"] = self.test_evaluator
-
-        logging_kwargs = {
-            "trainer": self.trainer,
-            "optimizers": self.optimizer,
-            "evaluators": evaluators,
-            "log_every_iters": self.trainer_config.log_every_steps,
-            "trainer_metric_names": ["batch_loss"],
-            "evaluator_metric_names": ["loss", "token_accuracy"],
-        }
-        if config.logger == "clearml":
-            self.exp_logger = setup_clearml_logging(
-                **logging_kwargs,
-                project_name=config.output.run_name,
-                task_name=self.run_dir.name,
-            )
-            self.exp_logger.get_task().upload_artifact(
-                name="config.yaml", artifact_object=str(self.run_dir / "config.yaml")
-            )
-        else:
-            self.exp_logger = setup_tb_logging(
-                output_path=str(self.run_dir / "tensorboard"),
-                **logging_kwargs,
-            )
+        # Attach experiment logger (TensorBoard or ClearML)
+        self.exp_logger = setup_experiment_tracking(
+            config.logger,
+            self.trainer,
+            self.val_evaluator,
+            self.train_evaluator,
+            self.test_evaluator,
+            self.optimizer,
+            self.run_dir,
+            ["loss", "sequence_accuracy"],
+            bool(self.test_loader),
+            config.output.run_name,
+            getattr(config.output, "clearml_project", None),
+        )
 
         # Setup save handler
         if config.logger == "clearml":
-            # Keep local checkpoints in run_dir; ClearML uses its configured output_uri for optional uploads.
-            save_handler = ClearMLSaver(
-                logger=self.exp_logger,
-                dirname=str(self.run_dir),
-                output_uri=True,
-                require_empty=False,
-            )
+            if config.logger == "clearml":
+                save_handler = ClearMLSaver(
+                    logger=self.exp_logger,
+                    dirname=str(self.run_dir),
+                    output_uri=True,
+                    require_empty=False,
+                )
         else:
             save_handler = DiskSaver(dirname=str(self.run_dir), require_empty=False)
 
@@ -149,6 +136,14 @@ class Trainer:
         # Attach inference logger if inference logging is enabled
         if self.inference_every_epochs is not None:
             self.attach_inference_logger()
+
+        # Terminate early if sequence accuracy reaches 100%
+        @self.val_evaluator.on(Events.COMPLETED)
+        def terminate_on_perfect_accuracy(engine):
+            acc = engine.state.metrics.get("sequence_accuracy", 0.0)
+            if acc >= 1.0:
+                self.logger.info("Validation accuracy reached 100%. Terminating training early.")
+                self.trainer.terminate()
 
     def _train_step(self, engine: Engine, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         self.model.train()
@@ -186,7 +181,8 @@ class Trainer:
 
     def _run_evaluations(self, engine: Engine) -> None:
         self.logger.info("Evaluating on training set...")
-        self.train_evaluator.run(self.train_loader, epoch_length=min(len(self.train_loader), len(self.val_loader)))
+        eval_loader = itertools.islice(self.train_loader, len(self.val_loader))
+        self.train_evaluator.run(eval_loader)
         train_metrics = self.train_evaluator.state.metrics
         epoch = engine.state.epoch
 
@@ -194,22 +190,22 @@ class Trainer:
         self.val_evaluator.run(self.val_loader)
         val_metrics = self.val_evaluator.state.metrics
         self.logger.info(
-            "epoch=%s train_loss=%.4f train_token_acc=%.4f val_loss=%.4f val_token_acc=%.4f",
+            "epoch=%s train_loss=%.4f train_sequence_acc=%.4f val_loss=%.4f val_sequence_acc=%.4f",
             epoch,
             train_metrics["loss"],
-            train_metrics["token_accuracy"],
+            train_metrics["sequence_accuracy"],
             val_metrics["loss"],
-            val_metrics["token_accuracy"],
+            val_metrics["sequence_accuracy"],
         )
 
-    def run(self) -> None:
+    def run(self, close_logger: bool = True) -> None:
         self.logger.info("starting run in %s", self.run_dir)
-        try:
-            self.trainer.run(self.train_loader, max_epochs=self.epochs)
+        self.trainer.run(self.train_loader, max_epochs=self.epochs)
 
-            if self.test_loader:
-                self.test()
-        finally:
+        if self.test_loader:
+            self.test()
+
+        if close_logger:
             self.exp_logger.close()
 
     def test(self, test_loader: DataLoader | None = None) -> None:
@@ -233,18 +229,34 @@ class Trainer:
         self.test_evaluator.run(loader)
         metrics = self.test_evaluator.state.metrics
         self.logger.info(
-            "Test results: loss=%.4f token_acc=%.4f",
+            "Test results: loss=%.4f sequence_acc=%.4f",
             metrics["loss"],
-            metrics["token_accuracy"],
+            metrics["sequence_accuracy"],
         )
 
     def _attach_metrics(self) -> dict[str, Metric]:
-        RunningAverage(output_transform=lambda output: output["loss"]).attach(self.trainer, "batch_loss")
+        RunningAverage(output_transform=lambda output: output["loss"]).attach(self.trainer, "loss")
 
         ignore_index = self.criterion.ignore_index
 
         def transform_fn(output):
             return _flatten(output, ignore_index=ignore_index)
+
+        def sequence_accuracy_transform(output) -> tuple[torch.Tensor, torch.Tensor]:
+            logits, targets = output["logits"], output["targets"]  # (B, S, C), (B, S)
+            preds = torch.argmax(logits, dim=-1)
+
+            # Identify non-ignored positions
+            mask = targets != ignore_index
+
+            # Sequence is correct if all non-ignored positions match
+            correct_mask = (~mask) | (preds == targets)
+            seq_correct = correct_mask.all(dim=-1).long()  # (B,) containing 0 or 1
+
+            # Compare against a target of all 1s (representing "fully correct sequence")
+            seq_targets = torch.ones_like(seq_correct)
+
+            return seq_correct, seq_targets
 
         metrics = {}
         for prefix, evaluator in [
@@ -253,24 +265,30 @@ class Trainer:
             ("test", self.test_evaluator),
         ]:
             loss = Loss(self.criterion, output_transform=transform_fn)
-            token_acc = Accuracy(output_transform=transform_fn)
+            token_acc = Accuracy(output_transform=sequence_accuracy_transform)
 
             loss.attach(evaluator, "loss")
-            token_acc.attach(evaluator, "token_accuracy")
+            token_acc.attach(evaluator, "sequence_accuracy")
 
             metrics[f"{prefix}_loss"] = loss
-            metrics[f"{prefix}_token_accuracy"] = token_acc
+            metrics[f"{prefix}_sequence_accuracy"] = token_acc
 
         return metrics
 
     def attach_inference_logger(self) -> None:
-        for loader, name in ((self.train_loader, "Train"), (self.val_loader, "Val")):
-            self.trainer.add_event_handler(
-                Events.EPOCH_COMPLETED(every=self.inference_every_epochs),
-                self._log_inference,
-                loader,
-                name,
-            )
+        self.trainer.add_event_handler(
+            Events.EPOCH_COMPLETED(every=self.inference_every_epochs),
+            self._log_inference,
+            self.train_loader,
+            "Train",
+        )
+
+        self.trainer.add_event_handler(
+            Events.EPOCH_COMPLETED(every=self.inference_every_epochs),
+            self._log_inference,
+            self.val_loader,
+            "Val",
+        )
 
     def _log_text(self, tag: str, text: str, step: int) -> None:
         # Both backends escape HTML/text in the caller; clearml uses report_text, TB uses markdown.
@@ -288,8 +306,8 @@ class Trainer:
         total_samples = len(dataset)  # type: ignore
         num_samples = min(self.inference_num_samples, total_samples)
 
-        # Read generation prompts straight off the DatapointModel contract.
         prompt_ids_list: list[torch.Tensor] = []
+        prompt_attn_list: list[torch.Tensor] = []
         targets: list[str] = []
         sources: list[str] = []
         for i in range(num_samples):
@@ -298,23 +316,15 @@ class Trainer:
             target = item.target
 
             input_ids = item.eval_input_ids
+            attention_mask = item.attention_mask
+
             prompt_ids_list.append(input_ids)
+            prompt_attn_list.append(attention_mask)
             targets.append(target)
             sources.append(source)
         self.model.eval()
 
-        # Left-pad the prompts (reverse -> pad_sequence -> reverse) so every
-        # sequence in the batch ends at the same position and the newly
-        # generated tokens line up in a single column.
-        #
-        # NOTE: this is safe for the default model because it uses rotary
-        # (relative) positions, where shifting the whole prompt right by the
-        # pad width preserves the distances between real tokens and the padding
-        # is masked out of attention. If you swap in a model with absolute or
-        # sinusoidal position embeddings indexed by slot, left-padding will
-        # offset every real token's position and silently degrade generation --
-        # you would then need to right-pad, or derive position_ids from the
-        # attention mask instead of using the raw slot index.
+        # Left-pad sequences to batch together
         batch_input_ids = (
             torch.nn.utils.rnn.pad_sequence(
                 [t.flip(0) for t in prompt_ids_list], batch_first=True, padding_value=pad_token_id
@@ -323,43 +333,40 @@ class Trainer:
             .to(self.device)
         )
         batch_attention_mask = (
-            torch.nn.utils.rnn.pad_sequence(
-                [torch.ones_like(t, dtype=torch.long).flip(0) for t in prompt_ids_list],
-                batch_first=True,
-                padding_value=0,
-            )
+            torch.nn.utils.rnn.pad_sequence([t.flip(0) for t in prompt_attn_list], batch_first=True, padding_value=0)
             .flip(1)
             .to(self.device)
         )
-        sequences = self.generate(
-            input_ids=batch_input_ids,
-            max_new_tokens=self.max_inference_new_tokens,
-            attention_mask=batch_attention_mask,
-        )
-        new_tokens = sequences[:, batch_input_ids.shape[1] :]
-        decoded_strs = [
-            self.tokenizer.decode(
-                tokens.tolist(),
-                skip_special_tokens=True,
-            )
-            for tokens in new_tokens
-        ]
 
-        for idx, (source, target, prediction) in enumerate(zip(sources, targets, decoded_strs), 1):
+        with torch.no_grad():
+            logits = self.model(batch_input_ids, attention_mask=batch_attention_mask)
+            preds = torch.argmax(logits, dim=-1)
+
+        decoded_strs = []
+        for idx in range(num_samples):
+            seq_len = prompt_ids_list[idx].shape[0]
+            # Extract prediction excluding the BOS prefix
+            seq_preds = preds[idx, -seq_len:][1:]
+            pred_str = "".join(str(p.item()) for p in seq_preds)
+            decoded_strs.append(pred_str)
+
+        for idx in range(num_samples):
             self.logger.info(
-                "    Sample %d | Prompt: %r | Target: %r | Prediction: %r",
-                idx,
-                source,
-                target,
-                prediction,
+                "    Sample %d | Input: %s | Target: %s | Prediction: %s",
+                idx + 1,
+                sources[idx],
+                targets[idx],
+                decoded_strs[idx],
             )
 
         lines = []
-        for idx, (source, target, prediction) in enumerate(zip(sources, targets, decoded_strs), 1):
-            lines.append(f"Sample {idx}")
-            for key, val in [("Prompt", source), ("Target", target), ("Prediction", prediction)]:
-                # Escape markup so TB markdown / clearml console don't swallow <, >, & in outputs.
-                val = html.escape(val.strip() or "(empty)", quote=False)
+        for idx in range(num_samples):
+            lines.append(f"Sample {idx + 1}")
+            prompt = sources[idx].strip() or "(empty)"
+            target = targets[idx].strip() or "(empty)"
+            pred = decoded_strs[idx].strip() or "(empty)"
+            for key, val in [("Input", prompt), ("Target", target), ("Prediction", pred)]:
+                val = val.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 lines.append(f"  {key}:     {val}")
             lines.append("")
         name_map = {"Train": "training", "Val": "validation", "Test": "testing"}

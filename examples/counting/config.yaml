@@ -1,0 +1,51 @@
+preprocessor:
+  _target_: preprocessors.char_tokenizer.CharTokenizer
+model:
+  _target_: models.transformer.TransformerModel
+  hidden_size: 64
+  num_layers: 2
+  num_heads: 1
+  feedforward_dim: 2048
+  dropout: 0.1
+  max_seq_len: 256
+  num_classes: 2
+optimizer:
+  _target_: torch.optim.Adam
+  lr: 0.001
+data:
+  dataset:
+    _target_: datasets.counting.CountingDataset
+    total_size: 1000
+    min_seq_len: 201
+    max_seq_len: 250
+    k: 3
+    seed: 42
+  transform:
+    _target_: datasets.counting.CountingTransform
+    ignore_index: -100
+  dataloader:
+    batch_size: 1
+    shuffle: true
+    num_workers: 2
+    collate_fn:
+      _target_: models.transformer.CausalLMCollateFn
+      ignore_index: -100
+      pad_token_id: null
+  test_ratio: 0.0
+  val_ratio: 0.2
+trainer:
+  epochs: 25
+  log_every_steps: 10
+  early_stopping_patience: null
+  inference_every_epochs: 2
+  inference_num_samples: 5
+  max_inference_new_tokens: 16
+  grad_clip_norm: 1.0
+  use_lr_scheduler: false
+output:
+  root: outputs
+  run_name: transformer__counting_l3
+  clearml_project: trasnforming__counting
+logger: clearml
+seed: 42
+device: null
