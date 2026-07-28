@@ -1,6 +1,6 @@
-# Transformer model
+# RoPE Transformer model
 
-It is a decoder-only Transformer: given a sequence of token IDs, it predicts the next token at every position.
+It is a decoder-only Transformer with Rotary Position Embeddings (RoPE): given a sequence of token IDs, it predicts the next token at every position.
 
 ## What goes in / out
 
@@ -17,8 +17,8 @@ The model is small and standard:
 
 1. **Embedding**
    Converts token IDs into vectors.
-2. **Positional encoding**
-   Adds token order information.
+2. **Rotary Positional Encoding (RoPE)**
+   Applies relative position rotation to query and key vectors.
 3. **Transformer blocks**
    Repeated attention + feedforward layers.
 4. **Final projection**
@@ -70,7 +70,7 @@ Precomputed cache size for the rotary position embeddings.
 
 ```yaml
 model:
-  _target_: models.transformer.TransformerModel
+  _target_: models.rope_transformer.RoPETransformerModel
   hidden_size: 128
   num_layers: 4
   num_heads: 4
@@ -81,12 +81,12 @@ model:
 
 ## When to change this file
 
-Edit `models/transformer.py` if you want to:
+Edit `models/rope_transformer.py` if you want to:
 
 - make the model wider or deeper
 - swap attention or feedforward behavior
 - change how padding is handled
-- add caching, rotary embeddings, or other sequence features
+- add caching or other sequence features
 
 ## Good starting rule
 

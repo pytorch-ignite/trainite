@@ -1,10 +1,35 @@
+import string
+
+import pytest
 import torch
-from trainite.preprocessors import UNIVERSAL_VOCAB, CharTokenizer, CharTokenizerConfig
+from trainite.preprocessors import CharTokenizer, CharTokenizerConfig
 
 
 def test_char_tokenizer_vocab_size():
     tokenizer = CharTokenizer()
-    assert tokenizer.vocab_size == len(UNIVERSAL_VOCAB) + len(tokenizer.special_tokens)
+    printable_ascii = string.ascii_letters + string.digits + string.punctuation + " "
+    assert tokenizer.vocab_size == len(printable_ascii) + len(tokenizer.special_tokens)
+
+
+def test_char_tokenizer_charset_preset():
+    tokenizer = CharTokenizer(charset="@alphanumeric")
+    assert tokenizer.vocab_size == len(string.ascii_letters + string.digits) + len(tokenizer.special_tokens)
+    assert tokenizer.encode("!") == [tokenizer.unk_token_id]
+
+
+def test_char_tokenizer_custom_charset():
+    tokenizer = CharTokenizer(charset="abc")
+    assert tokenizer.vocab_size == 8
+    assert tokenizer.encode("abcx") == [5, 6, 7, tokenizer.unk_token_id]
+
+
+@pytest.mark.parametrize(
+    ("charset", "message"),
+    [("@unknown", "Unknown charset preset"), ("aab", "duplicate characters"), ("", "cannot be empty")],
+)
+def test_char_tokenizer_rejects_invalid_charset(charset: str, message: str):
+    with pytest.raises(ValueError, match=message):
+        CharTokenizer(charset=charset)
 
 
 def test_char_tokenizer_encode():
@@ -30,7 +55,7 @@ def test_char_tokenizer_special_tokens():
 
 def test_char_tokenizer_unk():
     tokenizer = CharTokenizer()
-    # Δ is not in the universal vocab, should map to UNK token ID 4
+    # Δ is not in the vocab, should map to UNK token ID 4
     assert tokenizer.encode("Δ") == [4]
     assert tokenizer.decode([4]) == "<UNK>"
 
@@ -96,3 +121,4 @@ def test_char_tokenizer_call_max_length_padding():
 def test_char_tokenizer_config():
     config = CharTokenizerConfig()
     assert config.target == "trainite.preprocessors.char_tokenizer.CharTokenizer"
+    assert config.charset == "@universal"

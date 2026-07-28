@@ -1,10 +1,10 @@
 # Char Tokenizer
 
-`CharTokenizer` is a simple character-level tokenizer with a hardcoded universal vocabulary.
+`CharTokenizer` is a simple character-level tokenizer with a configurable vocabulary.
 
 ## Features
 
-- Character-to-ID mapping of printable ASCII characters plus space.
+- Character-to-ID mapping from a charset preset or literal custom charset.
 - Special tokens:
   - `<PAD>` (ID 0)
   - `<BOS>` (ID 1)
@@ -16,11 +16,17 @@
 ## Config knobs
 
 ### `_target_`
+
 Must be set to `preprocessors.char_tokenizer.CharTokenizer` in the template config.
+
+### `charset`
+
+Accepts the same presets as the string-reverse dataset, including `@universal`, `@alpha`, `@digits`, and `@alphanumeric`. A literal string defines a custom vocabulary.
 
 ## Minimal config example
 
 ```yaml
 preprocessor:
   _target_: preprocessors.char_tokenizer.CharTokenizer
+  charset: "@alphanumeric"
 ```
