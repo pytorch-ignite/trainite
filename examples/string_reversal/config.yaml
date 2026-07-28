@@ -39,12 +39,12 @@ data:
   val_ratio: 0.1
 trainer:
   epochs: 3
-  log_every_steps: 25
+  log_every_steps: 50
   early_stopping_patience: null
   stop_on_perfect_acc: true
   stop_on_lr_floor: true
   inference_every_epochs: 10
-  inference_num_samples: 3
+  inference_num_samples: 1
   max_inference_new_tokens: 16
   grad_clip_norm: null
   checkpoint_every_epochs: 10

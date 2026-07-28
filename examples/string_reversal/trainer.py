@@ -6,7 +6,6 @@ import ignite.distributed as idist
 import torch
 from ignite.engine import Engine, Events
 from ignite.handlers import DiskSaver
-from ignite.handlers.clearml_logger import ClearMLSaver
 from ignite.handlers.logger_utils import setup_clearml_logging, setup_tb_logging
 from ignite.metrics import Accuracy, Loss, Metric, RunningAverage
 from ignite.utils import setup_logger
@@ -144,17 +143,8 @@ class Trainer:
                 **logging_kwargs,
             )
 
-        # Setup save handler
-        if config.logger == "clearml":
-            # Keep local checkpoints in run_dir; ClearML uses its configured output_uri for optional uploads.
-            save_handler = ClearMLSaver(
-                logger=self.exp_logger,
-                dirname=str(self.run_dir),
-                output_uri=True,
-                require_empty=False,
-            )
-        else:
-            save_handler = DiskSaver(dirname=str(self.run_dir), require_empty=False)
+        # Save locally during training so remote logging cannot stall an epoch.
+        save_handler = DiskSaver(dirname=str(self.run_dir), require_empty=False)
 
         # Attach checkpointing
         self.best_checkpoint = setup_best_model_checkpoint(
@@ -237,6 +227,11 @@ class Trainer:
 
             if self.test_loader:
                 self.test()
+
+            if self.config.logger == "clearml":
+                task = self.exp_logger.get_task()
+                for checkpoint in self.run_dir.glob("*.pt"):
+                    task.upload_artifact(checkpoint.name, artifact_object=str(checkpoint))
         finally:
             self.exp_logger.close()
 
