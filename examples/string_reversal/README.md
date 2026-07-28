@@ -144,6 +144,25 @@ If you prefer standard Python tools, you can create a virtual environment and us
    tensorboard --logdir outputs
    ```
 
+## Running Sweeps
+
+Sweep modes are `depth`, `width`, and `full`. For the final results, each run used a two-hour (7,200-second) wall-clock budget.
+
+```bash
+# Preview the runs without training
+uv run python sweep.py depth --dry-run
+
+# Run locally with TensorBoard
+uv run python sweep.py depth --logger tensorboard
+
+# Run the final ClearML sweep with a two-hour budget per run
+uv run python sweep.py depth --logger clearml --time-budget 7200
+```
+
+Change `depth` to `width` or `full` to run a different sweep. Without `--time-budget`, runs have no wall-clock limit.
+
+````
+
 ## Experiment Logging and Checkpoints
 
 The default `logger: tensorboard` stores metrics and checkpoints locally. To use ClearML instead:
@@ -248,7 +267,7 @@ model:
   feedforward_dim: 256
   dropout: 0.1
   max_seq_len: 64
-```
+````
 
 ## When to change this file
 
