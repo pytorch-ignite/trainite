@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from trainite.cli.init import Init
 import yaml
 
 import pytest
@@ -207,7 +208,5 @@ def test_import_without_dependencies() -> None:
 
 
 def test_duplicate_models_raises_error():
-    from trainite.cli.init import Init
-
     with pytest.raises(ValueError, match="Duplicate model entries are not allowed"):
         Init(model=("rope-transformer", "rope-transformer"))
