@@ -86,7 +86,7 @@ def test_counting_transform_and_collator():
     assert dp.train_label_ids[0] == 0  # Targets prepend 0 for BOS position
 
     # Verify collator
-    model_spec = MODEL_SPECS["transformer"]
+    model_spec = MODEL_SPECS["basic-transformer"]
     collate_fn_cls = get_target(model_spec.collate_fn_target)
     collate_fn = collate_fn_cls(tokenizer=tokenizer)
 

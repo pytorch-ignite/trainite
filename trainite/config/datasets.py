@@ -79,10 +79,10 @@ class CountingDatasetConfig(DatasetConfig):
         default="trainite.datasets.counting.CountingDataset",
         alias="_target_",
     )
-    total_size: int = Field(default=1000, gt=0)
+    total_size: int = Field(default=100, gt=0)
     k: int = Field(default=3, gt=0)
-    min_seq_len: int | None = Field(default=201, gt=0)
-    max_seq_len: int | None = Field(default=250, gt=0)
+    min_seq_len: int | None = Field(default=10, gt=0)
+    max_seq_len: int | None = Field(default=20, gt=0)
     seq_len: int | None = Field(default=None, gt=0)
     seed: int = 42
 

@@ -92,9 +92,18 @@ def test_init_generates_valid_project(models: list[str], dataset: str, trainer: 
                 py_compile.compile(str(project_dir / filename), doraise=True)
 
 
-def test_generated_string_reversal_project_is_runnable() -> None:
+@pytest.mark.parametrize(
+    "model,dataset,trainer",
+    [
+        ("basic-transformer", "string-reverse", "decoder-trainer"),
+        ("rope-transformer", "string-reverse", "decoder-trainer"),
+        ("basic-transformer", "counting", "decoder-trainer"),
+        ("rope-transformer", "counting", "decoder-trainer"),
+    ],
+)
+def test_generated_project_is_runnable(model: str, dataset: str, trainer: str) -> None:
     """
-    Test that the generated project can actually be run for a few steps.
+    Test that the generated project can actually be run for a few steps across all valid combinations.
     """
     with tempfile.TemporaryDirectory() as temp_dir:
         project_dir = Path(temp_dir) / "runnable-project"
@@ -107,12 +116,11 @@ def test_generated_string_reversal_project_is_runnable() -> None:
                 "trainite.cli",
                 "init",
                 "--model",
-                "rope-transformer",
-                "basic-transformer",
+                model,
                 "--dataset",
-                "string-reverse",
+                dataset,
                 "--trainer",
-                "decoder-trainer",
+                trainer,
                 str(project_dir),
             ],
             check=True,
@@ -120,79 +128,21 @@ def test_generated_string_reversal_project_is_runnable() -> None:
 
         # 2. Modify config.yaml to run for only 1 step/epoch to keep test fast
         config_path = project_dir / "config.yaml"
-
         with open(config_path, "r") as f:
             config = yaml.safe_load(f)
 
+        # Base overrides for speed
         config["trainer"]["epochs"] = 1
         config["trainer"]["log_every_steps"] = 1
         config["model"]["num_layers"] = 1
         config["model"]["hidden_size"] = 16
         config["model"]["feedforward_dim"] = 32
-        config["model"]["num_heads"] = 2
-        config["data"]["dataset"]["per_seq_size"] = 16
 
-        with open(config_path, "w") as f:
-            yaml.safe_dump(config, f)
-
-        # 3. Run the generated main.py
-
-        try:
-            subprocess.run(
-                [sys.executable, "main.py", "config.yaml"],
-                cwd=project_dir,
-                check=True,
-                timeout=300,
-                capture_output=True,
-                text=True,
-            )
-        except subprocess.CalledProcessError as e:
-            pytest.fail(f"Generated project failed to run:\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}")
-        except subprocess.TimeoutExpired:
-            pytest.fail("Generated project timed out")
-
-        finally:
-            logging.shutdown()  # Ensure all logging output is flushed before the temporary directory is cleaned up
-
-
-def test_generated_counting_project_is_runnable() -> None:
-    """
-    Test that the generated project with counting dataset can actually be run for a few steps.
-    """
-    with tempfile.TemporaryDirectory() as temp_dir:
-        project_dir = Path(temp_dir) / "runnable-counting-project"
-
-        # 1. Generate project
-        subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "trainite.cli",
-                "init",
-                "--model",
-                "transformer",
-                "--dataset",
-                "counting",
-                "--trainer",
-                "decoder-trainer",
-                str(project_dir),
-            ],
-            check=True,
-        )
-
-        # 2. Modify config.yaml to run for only 1 step/epoch to keep test fast
-        config_path = project_dir / "config.yaml"
-
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f)
-
-        config["trainer"]["epochs"] = 1
-        config["trainer"]["log_every_steps"] = 1
-        config["model"]["num_layers"] = 1
-        config["model"]["hidden_size"] = 16
-        config["model"]["feedforward_dim"] = 32
-        config["model"]["num_heads"] = 2
-        config["data"]["dataset"]["total_size"] = 16
+        # Dataset-specific overrides to keep sequences small
+        if dataset == "string-reverse":
+            config["data"]["dataset"]["per_seq_size"] = 16
+        elif dataset == "counting":
+            config["data"]["dataset"]["total_size"] = 16
 
         with open(config_path, "w") as f:
             yaml.safe_dump(config, f)
@@ -208,10 +158,11 @@ def test_generated_counting_project_is_runnable() -> None:
                 text=True,
             )
         except subprocess.CalledProcessError as e:
-            pytest.fail(f"Generated project failed to run:\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}")
+            pytest.fail(
+                f"Generated project failed to run ({model} + {dataset}):\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}"
+            )
         except subprocess.TimeoutExpired:
-            pytest.fail("Generated project timed out")
-
+            pytest.fail(f"Generated project timed out ({model} + {dataset})")
         finally:
             logging.shutdown()
 
