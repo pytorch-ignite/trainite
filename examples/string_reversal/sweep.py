@@ -5,11 +5,11 @@ import time
 from pathlib import Path
 
 
-DEFAULT_SEQ_LENS = [8, 16, 32, 64, 96, 128, 160, 192, 224]
+DEFAULT_SEQ_LENS = [8, 16, 32, 64, 96, 128, 160, 192]
 DEFAULT_SEEDS = [42, 123, 456]
 
 
-DEPTH_LAYERS = [4, 6, 8]
+DEPTH_LAYERS = [6, 8]
 DEPTH_FIXED_HIDDEN = [32]
 DEPTH_FIXED_HEADS = [2]
 
