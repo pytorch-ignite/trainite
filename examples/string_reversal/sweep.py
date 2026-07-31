@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 
 
-DEFAULT_SEQ_LENS = [8, 16, 32, 64, 96, 128, 160, 192]
+DEFAULT_SEQ_LENS = [8, 16, 32, 64, 96, 128, 160, 192, 224]
 DEFAULT_SEEDS = [42, 123, 456]
 
 
