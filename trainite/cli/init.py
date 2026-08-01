@@ -221,7 +221,10 @@ def _build_templates(
     for spec in specs:
         if spec is not None:
             spec_deps.update(spec.dependencies)
-    required_deps, other_deps = parse_dependencies(PROJECT_ROOT / "pyproject.toml")
+    toml_path = PACKAGE_ROOT / "pyproject.toml"
+    if not toml_path.exists():
+        toml_path = PROJECT_ROOT / "pyproject.toml"
+    required_deps, other_deps = parse_dependencies(toml_path)
     final_deps = set(required_deps.values())
     for dep in spec_deps:
         if dep not in required_deps and dep not in other_deps:

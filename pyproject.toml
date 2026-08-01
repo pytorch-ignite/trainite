@@ -43,6 +43,9 @@ artifacts = [
   "*.typed",
 ]
 
+[tool.hatch.build.targets.wheel.force-include]
+"pyproject.toml" = "trainite/pyproject.toml"
+
 [tool.uv]
 package = true
 default-groups = []
