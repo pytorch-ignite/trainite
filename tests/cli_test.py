@@ -167,13 +167,17 @@ def test_generated_project_is_runnable(model: str, dataset: str, trainer: str) -
             logging.shutdown()
 
 
-def test_cli_main_routing():
+def test_cli_main_routing(capsys):
     from trainite.cli.main import main
     from unittest import mock
 
     with pytest.raises(SystemExit) as exc_info:
         main(argv=[])
     assert exc_info.value.code == 1
+
+    main(argv=["--version"])
+    output = capsys.readouterr()
+    assert output.out.startswith("Trainite, https://github.com/pytorch-ignite/trainite/\nVersion: ")
 
     with mock.patch("trainite.cli.main.run_interactive_mode") as mock_interactive:
         main(argv=["init"])
