@@ -3,7 +3,7 @@ requires = ["hatchling>=1.24.2"]
 build-backend = "hatchling.build"
 
 [project]
-name = "trainite-taha-test123"
+name = "trainite"
 authors = [
     {name = "PyTorch-Ignite Team", email = "contact@pytorch-ignite.ai"},
 ]
