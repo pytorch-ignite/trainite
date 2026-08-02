@@ -243,7 +243,7 @@ Working examples are in the [`examples/`](examples/) directory:
 
 | Example                                      | Description                                                                                                                                        |
 | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`string_reverse`](examples/string_reversal/) | Train a decoder-only transformer to reverse strings. Demonstrates the full pipeline: data generation, training, evaluation, and inference logging. |
+| [`string_reversal`](examples/string_reversal/) | Train a decoder-only transformer to reverse strings. Demonstrates the full pipeline: data generation, training, evaluation, and inference logging. |
 | [`counting`](examples/counting/)            | Train a decoder-only transformer to count the number of occurrences of a target token in a sequence. |
 
 Each example is a standalone project — `cd` into it, install dependencies, and run `python main.py config.yaml`.
