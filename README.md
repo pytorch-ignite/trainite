@@ -44,6 +44,7 @@ optimizer:
 
 ## Table of Contents
 
+- [Installation](#installation)
 - [Quickstart](#quickstart)
 - [Usage](#usage)
   - [Initialize a Project](#initialize-a-project)
@@ -56,38 +57,48 @@ optimizer:
 
 ---
 
-## Quickstart
+## Installation
 
 Requires Python >= 3.10.
 
-**Option 1 — uv (recommended):**
+From [pip](https://pypi.org/project/trainite/):
+
+```bash
+pip install trainite
+```
+
+From source (using `uv`):
 
 ```bash
 git clone https://github.com/pytorch-ignite/trainite.git
 cd trainite
 uv sync
 source .venv/bin/activate
-
-# Initialize the project in any workspace
-cd ..
-trainite init my-experiment --model rope-transformer --dataset string-reverse
-cd my-experiment
-uv sync
-uv run python main.py config.yaml
 ```
 
-**Option 2 — pip:**
+From source (using `pip`):
 
 ```bash
 git clone https://github.com/pytorch-ignite/trainite.git
 cd trainite
 pip install -e .
+```
 
-# Initialize the project in any workspace
-cd ..
+---
+
+## Quickstart
+
+Once Trainite is installed, generate and run your first experiment project:
+
+```bash
+# 1. Initialize a starter project
 trainite init my-experiment --model rope-transformer --dataset string-reverse
+
+# 2. Navigate into the project and install dependencies
 cd my-experiment
 pip install -e .
+
+# 3. Run training
 python main.py config.yaml
 ```
 
@@ -243,7 +254,7 @@ Working examples are in the [`examples/`](examples/) directory:
 
 | Example                                      | Description                                                                                                                                        |
 | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`string_reverse`](examples/string_reverse/) | Train a decoder-only transformer to reverse strings. Demonstrates the full pipeline: data generation, training, evaluation, and inference logging. |
+| [`string_reversal`](examples/string_reversal/) | Train a decoder-only transformer to reverse strings. Demonstrates the full pipeline: data generation, training, evaluation, and inference logging. |
 | [`counting`](examples/counting/)            | Train a decoder-only transformer to count the number of occurrences of a target token in a sequence. |
 
 Each example is a standalone project — `cd` into it, install dependencies, and run `python main.py config.yaml`.
