@@ -1,4 +1,4 @@
-# String Reversal
+# String Reversal Example: Exploring Small Transformers with Trainite
 
 A small decoder-only Transformer experiment that learns to reverse character strings:
 
