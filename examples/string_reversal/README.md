@@ -9,21 +9,10 @@ target: 321cba
 
 The example is designed for studying how sequence length, model depth, and model width affect exact string reversal.
 
-## Run the example
-
-From this directory:
+The base tranite project which was used and modified here for the use case was generated using `trainite==0.1.0` with command
 
 ```bash
-uv sync
-uv run python main.py config.yaml
-```
-
-Training outputs are written below `outputs/<run_name>/<timestamp>/`. Each run contains its resolved configuration, console log, TensorBoard data, and model checkpoints.
-
-View TensorBoard metrics with:
-
-```bash
-uv run tensorboard --logdir outputs
+trainite init string_reversal --dataset string-reverse
 ```
 
 ## Task and data
@@ -103,6 +92,23 @@ trainer:
   stop_on_perfect_acc: true
   stop_on_lr_floor: true
   early_stopping_patience: null
+```
+
+## Run the example
+
+From this directory:
+
+```bash
+uv sync
+uv run python main.py config.yaml
+```
+
+Training outputs are written below `outputs/<run_name>/<timestamp>/`. Each run contains its resolved configuration, console log, TensorBoard data, and model checkpoints.
+
+View TensorBoard metrics with:
+
+```bash
+uv run tensorboard --logdir outputs
 ```
 
 ## Run sweeps
