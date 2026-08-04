@@ -201,6 +201,7 @@ def temp_run_dir():
 @pytest.fixture
 def project_config(temp_run_dir):
     return ProjectConfig(
+        project_name="test_project",
         preprocessor=cc("tests.trainers.decoder_trainer_test.DummyTokenizer"),
         model=cc(
             "tests.trainers.decoder_trainer_test.SimpleModel",
@@ -399,6 +400,17 @@ def test_clearml_saver_is_used(
 
     trainer = create_trainer_from_config(project_config)
 
+    mock_setup_logging.assert_called_once_with(
+        trainer=trainer.trainer,
+        optimizers=trainer.optimizer,
+        evaluators=mock.ANY,
+        log_every_iters=project_config.trainer.log_every_steps,
+        trainer_metric_names=["batch_loss"],
+        evaluator_metric_names=["loss", "token_accuracy"],
+        project_name="test_project",
+        task_name=trainer.run_dir.name,
+    )
+
     # Assert ClearMLSaver was initialized with the exp_logger
     mock_clearml_saver.assert_called_once_with(
         logger=mock_logger,
@@ -499,6 +511,7 @@ def test_decoder_trainer_explicit_split_shuffle(project_config):
 
 def test_decoder_trainer_builds_train_and_val_loaders_from_ratios(tmp_path):
     config = ProjectConfig(
+        project_name="test_project",
         preprocessor=cc("tests.trainers.decoder_trainer_test.DummyTokenizer"),
         model=cc(
             "tests.trainers.decoder_trainer_test.SimpleModel",
@@ -532,6 +545,7 @@ def test_decoder_trainer_builds_train_and_val_loaders_from_ratios(tmp_path):
 
 def test_decoder_trainer_builds_train_val_and_test_loaders_from_ratios(tmp_path):
     config = ProjectConfig(
+        project_name="test_project",
         preprocessor=cc("tests.trainers.decoder_trainer_test.DummyTokenizer"),
         model=cc(
             "tests.trainers.decoder_trainer_test.SimpleModel",

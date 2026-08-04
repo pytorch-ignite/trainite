@@ -361,6 +361,7 @@ def init_project(config: Init) -> None:
     preprocessor_component = preprocessor_spec.config_cls() if preprocessor_spec else None
 
     starter_config = ProjectConfig(
+        project_name=resolved_project_dir.name,
         preprocessor=preprocessor_component,
         model=model_component,
         data=data_config,
