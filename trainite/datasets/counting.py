@@ -152,6 +152,20 @@ class DatapointModel(BaseModel):
 
 
 class CountingTransform:
+    """Converts a raw ``CountingDataset`` sample into training tensors.
+
+    The counting task is a classification task: given an alternating-character
+    string (e.g. ``"aaabbb"``), predict at each position whether the sequence has
+    completed its last transition (``'1'``) or not (``'0'``).
+
+    Token layout (input_ids / label_ids):
+        [BOS] s_0 s_1 ... s_{n-1}
+         y_0  y_1 y_2 ... y_{n}      (shifted left by 1 relative to inputs)
+
+    A ``<BOS>`` token is prepended to the source so the model has a clean start
+    token.  The BOS position is given label ``0`` (the default "not ended" class).
+    """
+
     def __init__(self, tokenizer: Any, ignore_index: int = -100) -> None:
         self.tokenizer = tokenizer
         self.ignore_index = ignore_index

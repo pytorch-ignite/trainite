@@ -32,20 +32,68 @@ from trainite.shared.utils import (
 
 
 def _flatten(output: dict[str, torch.Tensor], ignore_index: int = -100) -> tuple[torch.Tensor, torch.Tensor]:
+    """Reshape model output from (B, S, vocab) -> (B*S, vocab) and apply the ignore mask.
+
+    PyTorch's ``CrossEntropyLoss`` and Ignite's ``Loss``/``Accuracy`` metrics
+    expect a flat prediction tensor of shape (N, C) and a flat target tensor of
+    shape (N,).  This helper:
+
+    1. Flattens the logits and targets across the batch and sequence dimensions.
+    2. Filters out positions where the target equals ``ignore_index`` (i.e. padding
+       and prompt positions that should not contribute to the loss).
+
+    Args:
+        output: Dictionary with keys ``"logits"`` (B, S, vocab_size) and
+                ``"targets"`` (B, S).
+        ignore_index: Label value to exclude from metrics (default: -100, which
+                      is PyTorch's default ``CrossEntropyLoss.ignore_index``).
+
+    Returns:
+        Tuple of (filtered_logits, filtered_targets) ready for loss/accuracy metrics.
+    """
     logits = output["logits"].reshape(-1, output["logits"].size(-1))
     targets = output["targets"].reshape(-1)
+    # Build a boolean mask that is True for every non-ignored position
     mask = targets != ignore_index
     return logits[mask], targets[mask]
 
 
 class Trainer:
+    """High-level training orchestrator for decoder-only language models.
+
+    This class wires together all PyTorch-Ignite components needed for a full
+    training run:
+
+    * **Engines** – ``self.trainer`` runs the training loop; ``self.train_evaluator``,
+      ``self.val_evaluator``, and ``self.test_evaluator`` run evaluation.
+    * **Metrics** – loss and token-accuracy are attached to each evaluator.
+    * **Learning-rate schedule** – linear warm-up + linear decay.
+    * **Checkpointing** – last and best-model checkpoints saved to ``run_dir``.
+    * **Early stopping** – halts training when validation loss stagnates.
+    * **Experiment logging** – TensorBoard or ClearML depending on ``config.logger``.
+    * **Inference logging** – optional qualitative sample generation every N epochs.
+
+    Typical usage::
+
+        config = load_config("config.yaml", ProjectConfig)
+        trainer = Trainer(config)
+        trainer.run()
+
+    See the PyTorch-Ignite docs for more details on Engines and Events:
+    https://pytorch.org/ignite/concepts.html
+    """
+
     def __init__(self, config: ProjectConfig) -> None:
         self.logger: logging.Logger = setup_logger("trainer", level=logging.INFO)
+        # Fix randomness for reproducibility across runs with the same seed
         torch.manual_seed(config.seed)
         self.config: ProjectConfig = config
         self.trainer_config: TrainerConfig = config.trainer
+        # Use distributed device if available, otherwise fall back to config value
         self.device: str | torch.device = idist.device() if config.device is None else config.device
+        # Build tokenizer from config (e.g. CharTokenizer)
         self.tokenizer = instantiate(config.preprocessor)
+        # Build train/val/test DataLoaders from the data config
         self.train_loader, self.val_loader, self.test_loader = build_dataloaders(
             config.data,
             self.tokenizer,
@@ -239,10 +287,27 @@ class Trainer:
         )
 
     def _attach_metrics(self) -> dict[str, Metric]:
+        """Create and attach Ignite metrics to the trainer and evaluator engines.
+
+        Metrics are attached once and updated automatically by Ignite after each
+        iteration/epoch.  Three evaluators share the same metric definitions so
+        results are stored under separate keys (``train_*``, ``val_*``, ``test_*``).
+
+        ``RunningAverage`` computes a smoothed per-iteration loss for the training
+        engine so that fluctuations between batches are dampened in the logs.
+
+        ``Loss`` and ``Accuracy`` are epoch-level metrics computed over the full
+        evaluation set.  Both use ``_flatten`` as their ``output_transform`` so they
+        see only the non-ignored token positions.
+
+        See: https://pytorch.org/ignite/metrics.html
+        """
+        # Running average loss tracked per training iteration (logged in console)
         RunningAverage(output_transform=lambda output: output["loss"]).attach(self.trainer, "batch_loss")
 
         ignore_index = self.criterion.ignore_index
 
+        # Shared transform: flatten and filter out ignored positions for both metrics
         def transform_fn(output):
             return _flatten(output, ignore_index=ignore_index)
 
