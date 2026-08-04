@@ -144,6 +144,24 @@ class DatapointModel(BaseModel):
 
 
 class PromptCompletionTransform:
+    """Converts a raw ``StringReverseDataset`` sample into training tensors.
+
+    The string-reversal task is a sequence-to-sequence (seq2seq) task framed as
+    causal language modelling (CLM): the model receives a prompt consisting of the
+    source string and is trained to generate the target (reversed) string.
+
+    Token layout:
+        input_ids : [BOS] source [SEP] target[:-1]
+        labels    : ignore ... ignore  target[1:]  [EOS]
+
+    The prompt portion of the labels (everything before the first target token) is
+    set to ``ignore_index`` so the cross-entropy loss only back-propagates through
+    the target prediction positions.
+
+    During evaluation (inference) only the prompt is fed to the model:
+        eval_input_ids : [BOS] source [SEP]
+    """
+
     def __init__(self, tokenizer: Any, ignore_index: int = -100) -> None:
         self.tokenizer = tokenizer
         self.ignore_index = ignore_index
@@ -164,9 +182,12 @@ class PromptCompletionTransform:
         prompt_ids = self.build_prompt(sample)
         target_tokens = self.tokenizer(target, add_special_tokens=False)["input_ids"]
 
+        # Full sequence: prompt + target tokens + EOS
         combined_input_ids = prompt_ids + target_tokens + [eos]
 
+        # input_ids is the sequence shifted right by 1 (teacher-forcing style)
         input_ids = torch.tensor(combined_input_ids[:-1], dtype=torch.long)
+        # labels is the sequence shifted left by 1 (next-token prediction targets)
         labels = torch.tensor(combined_input_ids[1:], dtype=torch.long)
 
         # Mask the prompt portion of the (shifted) labels. labels = combined[1:],

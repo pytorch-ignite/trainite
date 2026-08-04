@@ -231,6 +231,19 @@ def attach_lr_scheduler(
     total_iters: int,
     peak_lr: float,
 ) -> None:
+    """Attach a linear warm-up + linear decay learning-rate schedule to the engine.
+
+    The schedule has two phases:
+    1. **Warm-up** (first 10 % of iterations): LR ramps linearly from 0 to `peak_lr`.
+    2. **Decay** (remaining iterations): LR decays linearly from `peak_lr` to 0.
+
+    This is a common schedule for Transformer training.  The ``create_lr_scheduler_with_warmup``
+    helper from PyTorch-Ignite wraps a standard ``torch.optim.lr_scheduler`` and
+    fires after every iteration via ``Events.ITERATION_COMPLETED``.
+
+    See: https://pytorch.org/ignite/generated/ignite.handlers.param_scheduler.create_lr_scheduler_with_warmup.html
+    """
+    # Reserve at least 2 iterations for warm-up even for very short training runs
     warmup_iters = max(2, int(0.1 * total_iters))
     linear_decay = LinearLR(
         optimizer,
@@ -252,6 +265,19 @@ def attach_early_stopping(
     trainer_engine: Engine,
     patience: int,
 ) -> None:
+    """Stop training early when validation loss stops improving.
+
+    ``EarlyStopping`` from PyTorch-Ignite monitors a score function after each
+    validation run.  If the score does not improve for `patience` consecutive
+    validation epochs, it sends a termination signal to the trainer engine so
+    training stops gracefully without wasting compute.
+
+    Here the score function returns *negative* loss so that higher is better
+    (EarlyStopping maximises the score by convention), while ``mode='min'``
+    internally minimises the raw loss value.
+
+    See: https://pytorch.org/ignite/generated/ignite.handlers.early_stopping.EarlyStopping.html
+    """
     early_stopping = EarlyStopping(
         patience=patience,
         score_function=lambda engine: engine.state.metrics["loss"],
@@ -267,6 +293,16 @@ def setup_training_checkpointing(
     to_save: dict[str, Any],
     save_handler: DiskSaver | ClearMLSaver,
 ) -> Checkpoint:
+    """Save the latest model and optimizer state at the end of every epoch.
+
+    Keeps only the single most recent checkpoint (``n_saved=1``) so disk usage
+    stays bounded.  The checkpoint can be used to resume training after an
+    interruption.
+
+    The filename pattern is ``last.pt`` (prefix=``last``, no score suffix).
+
+    See: https://pytorch.org/ignite/generated/ignite.handlers.checkpoint.Checkpoint.html
+    """
     last_checkpoint = Checkpoint(
         to_save=to_save,
         save_handler=save_handler,
@@ -287,6 +323,16 @@ def setup_best_model_checkpoint(
     score_function: Callable,
     score_name: str,
 ) -> Checkpoint:
+    """Save the model that achieves the best validation score during training.
+
+    ``Checkpoint`` from PyTorch-Ignite compares the `score_function` result after
+    each validation run and overwrites the file only when the score improves, so
+    the saved file always contains the best weights seen so far.
+
+    Setting ``n_saved=1`` means at most one "best" checkpoint is kept on disk.
+
+    See: https://pytorch.org/ignite/generated/ignite.handlers.checkpoint.Checkpoint.html
+    """
     checkpoint = Checkpoint(
         to_save=to_save,
         save_handler=save_handler,
@@ -307,6 +353,17 @@ def setup_console_logger(
     log_every_steps: int,
     optimizer: Any,
 ) -> logging.Logger:
+    """Attach a console (and file) logger to the training engine.
+
+    Uses ``FBResearchLogger`` from PyTorch-Ignite which prints training progress
+    in a compact, human-readable format every `log_every_steps` iterations, similar
+    to the style used in Facebook Research's training scripts.
+
+    A ``logging.Logger`` writing to both stdout and ``<run_dir>/output.log`` is
+    returned so other parts of the code can reuse the same logger instance.
+
+    See: https://pytorch.org/ignite/generated/ignite.handlers.fbresearch_logger.FBResearchLogger.html
+    """
     logger = setup_logger(
         "trainer",
         level=logging.INFO,
