@@ -56,3 +56,59 @@ class StringReverseDataConfig(DataWithAutoSplit):
             shuffle=True,
         )
     )
+
+
+class CountingTransformConfig(TransformConfig):
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
+    target: Literal[
+        "trainite.datasets.counting.CountingTransform",
+        "datasets.counting.CountingTransform",
+    ] = Field(
+        default="trainite.datasets.counting.CountingTransform",
+        alias="_target_",
+    )
+    ignore_index: int = -100
+
+
+class CountingDatasetConfig(DatasetConfig):
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
+    target: Literal[
+        "trainite.datasets.counting.CountingDataset",
+        "datasets.counting.CountingDataset",
+    ] = Field(
+        default="trainite.datasets.counting.CountingDataset",
+        alias="_target_",
+    )
+    total_size: int = Field(default=100, gt=0)
+    k: int = Field(default=3, gt=0)
+    min_seq_len: int | None = Field(default=10, gt=0)
+    max_seq_len: int | None = Field(default=20, gt=0)
+    seq_len: int | None = Field(default=None, gt=0)
+    seed: int = 42
+
+    @model_validator(mode="after")
+    def validate_lengths(self) -> Self:
+        if self.seq_len is not None and (self.min_seq_len is not None or self.max_seq_len is not None):
+            raise ValueError("Cannot specify both seq_len and min_seq_len/max_seq_len.")
+
+        if self.seq_len is None:
+            if self.min_seq_len is None or self.max_seq_len is None:
+                raise ValueError("Must specify either seq_len or both min_seq_len and max_seq_len.")
+            if self.min_seq_len > self.max_seq_len:
+                raise ValueError("min_seq_len must be less than or equal to max_seq_len.")
+        return self
+
+
+class CountingDataConfig(DataWithAutoSplit):
+    dataset: CountingDatasetConfig | None = Field(  # type: ignore[assignment]
+        default_factory=CountingDatasetConfig
+    )
+    transform: CountingTransformConfig | None = Field(default_factory=CountingTransformConfig)
+    test_ratio: float = 0.1
+    val_ratio: float = 0.1
+    dataloader: DataLoaderConfig = Field(
+        default_factory=lambda: DataLoaderConfig(
+            batch_size=32,
+            shuffle=True,
+        )
+    )

@@ -1,17 +1,41 @@
+import string
+
+import pytest
 import torch
 from trainite.preprocessors import CharTokenizer, CharTokenizerConfig
-import string
 
 
 def test_char_tokenizer_vocab_size():
     tokenizer = CharTokenizer()
-    assert tokenizer.vocab_size == len(string.printable) + len(tokenizer.special_tokens)
+    printable_ascii = string.ascii_letters + string.digits + string.punctuation + " "
+    assert tokenizer.vocab_size == len(printable_ascii) + len(tokenizer.special_tokens)
+
+
+def test_char_tokenizer_charset_preset():
+    tokenizer = CharTokenizer(charset="@alphanumeric")
+    assert tokenizer.vocab_size == len(string.ascii_letters + string.digits) + len(tokenizer.special_tokens)
+    assert tokenizer.encode("!") == [tokenizer.unk_token_id]
+
+
+def test_char_tokenizer_custom_charset():
+    tokenizer = CharTokenizer(charset="abc")
+    assert tokenizer.vocab_size == 8
+    assert tokenizer.encode("abcx") == [5, 6, 7, tokenizer.unk_token_id]
+
+
+@pytest.mark.parametrize(
+    ("charset", "message"),
+    [("@unknown", "Unknown charset preset"), ("aab", "duplicate characters"), ("", "cannot be empty")],
+)
+def test_char_tokenizer_rejects_invalid_charset(charset: str, message: str):
+    with pytest.raises(ValueError, match=message):
+        CharTokenizer(charset=charset)
 
 
 def test_char_tokenizer_encode():
     tokenizer = CharTokenizer()
     encoded = tokenizer.encode("abc")
-    assert encoded == [15, 16, 17]
+    assert encoded == [5, 6, 7]
 
 
 def test_char_tokenizer_decode():
@@ -81,7 +105,7 @@ def test_char_tokenizer_call_no_special_tokens():
     tokenizer = CharTokenizer()
     result = tokenizer("abc", add_special_tokens=False)
     assert len(result["input_ids"]) == 3
-    assert result["input_ids"] == [15, 16, 17]
+    assert result["input_ids"] == [5, 6, 7]
 
 
 def test_char_tokenizer_call_max_length_padding():
@@ -97,3 +121,4 @@ def test_char_tokenizer_call_max_length_padding():
 def test_char_tokenizer_config():
     config = CharTokenizerConfig()
     assert config.target == "trainite.preprocessors.char_tokenizer.CharTokenizer"
+    assert config.charset == "@universal"

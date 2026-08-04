@@ -9,6 +9,9 @@ from ignite.utils import setup_logger
 from torch import nn
 from torch.utils.data import DataLoader
 
+from ignite.handlers import DiskSaver
+from ignite.handlers.clearml_logger import ClearMLSaver
+
 from config import (
     ProjectConfig,
     TrainerConfig,
@@ -26,7 +29,6 @@ from utils import (
     setup_console_logger,
     setup_experiment_tracking,
     setup_training_checkpointing,
-    setup_wandb_checkpoint_uploads,
 )
 
 
@@ -78,7 +80,8 @@ class Trainer:
         )
 
         # Attach learning rate scheduler
-        attach_lr_scheduler(self.trainer, self.optimizer, self.total_iters, config.optimizer.lr)
+        if self.trainer_config.use_lr_scheduler:
+            attach_lr_scheduler(self.trainer, self.optimizer, self.total_iters, config.optimizer.lr)
 
         # Attach early stopping
         if self.trainer_config.early_stopping_patience is not None:
@@ -89,23 +92,7 @@ class Trainer:
             loss = engine_val.state.metrics["loss"]
             return -loss
 
-        # Attach checkpointing
-        self.checkpointers = {}
-        self.checkpointers["checkpoint_best"] = setup_best_model_checkpoint(
-            self.trainer,
-            self.val_evaluator,
-            {"model": self.model, "optimizer": self.optimizer},
-            self.run_dir,
-            score_function=score_function,
-            score_name="val_loss",
-        )
-        self.checkpointers["checkpoint_last"] = setup_training_checkpointing(
-            self.trainer,
-            {"model": self.model, "optimizer": self.optimizer},
-            self.run_dir,
-        )
-
-        # Attach experiment logger (TensorBoard or Weights & Biases)
+        # Attach experiment logger (TensorBoard or ClearML)
         self.exp_logger = setup_experiment_tracking(
             config.logger,
             self.trainer,
@@ -114,24 +101,49 @@ class Trainer:
             self.test_evaluator,
             self.optimizer,
             self.run_dir,
-            ["loss", "token_accuracy"],
+            ["loss", "sequence_accuracy"],
             bool(self.test_loader),
             config.output.run_name,
+            getattr(config.output, "clearml_project", None),
         )
 
-        # Real-time W&B uploads
-        if config.logger == "wandb":
-            setup_wandb_checkpoint_uploads(
-                self.trainer,
-                self.val_evaluator,
-                self.checkpointers,
-                self.exp_logger,
-                config.output.run_name,
-                self.logger,
-            )
+        # Setup save handler
+        if config.logger == "clearml":
+            if config.logger == "clearml":
+                save_handler = ClearMLSaver(
+                    logger=self.exp_logger,
+                    dirname=str(self.run_dir),
+                    output_uri=True,
+                    require_empty=False,
+                )
+        else:
+            save_handler = DiskSaver(dirname=str(self.run_dir), require_empty=False)
+
+        # Attach checkpointing
+        self.best_checkpoint = setup_best_model_checkpoint(
+            self.trainer,
+            self.val_evaluator,
+            {"model": self.model, "optimizer": self.optimizer},
+            save_handler,
+            score_function=score_function,
+            score_name="val_loss",
+        )
+        self.last_checkpoint = setup_training_checkpointing(
+            self.trainer,
+            {"model": self.model, "optimizer": self.optimizer},
+            save_handler,
+        )
         # Attach inference logger if inference logging is enabled
         if self.inference_every_epochs is not None:
             self.attach_inference_logger()
+
+        # Terminate early if sequence accuracy reaches 100%
+        @self.val_evaluator.on(Events.COMPLETED)
+        def terminate_on_perfect_accuracy(engine):
+            acc = engine.state.metrics.get("sequence_accuracy", 0.0)
+            if acc >= 1.0:
+                self.logger.info("Validation accuracy reached 100%. Terminating training early.")
+                self.trainer.terminate()
 
     def _train_step(self, engine: Engine, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         self.model.train()
@@ -178,22 +190,23 @@ class Trainer:
         self.val_evaluator.run(self.val_loader)
         val_metrics = self.val_evaluator.state.metrics
         self.logger.info(
-            "epoch=%s train_loss=%.4f train_token_acc=%.4f val_loss=%.4f val_token_acc=%.4f",
+            "epoch=%s train_loss=%.4f train_sequence_acc=%.4f val_loss=%.4f val_sequence_acc=%.4f",
             epoch,
             train_metrics["loss"],
-            train_metrics["token_accuracy"],
+            train_metrics["sequence_accuracy"],
             val_metrics["loss"],
-            val_metrics["token_accuracy"],
+            val_metrics["sequence_accuracy"],
         )
 
-    def run(self) -> None:
+    def run(self, close_logger: bool = True) -> None:
         self.logger.info("starting run in %s", self.run_dir)
         self.trainer.run(self.train_loader, max_epochs=self.epochs)
 
         if self.test_loader:
             self.test()
 
-        self.exp_logger.close()
+        if close_logger:
+            self.exp_logger.close()
 
     def test(self, test_loader: DataLoader | None = None) -> None:
         loader = test_loader or self.test_loader
@@ -202,7 +215,7 @@ class Trainer:
             return
 
         # Load best model if available
-        checkpoint_handler = self.checkpointers.get("checkpoint_best", None)
+        checkpoint_handler = self.best_checkpoint
         if checkpoint_handler and checkpoint_handler.last_checkpoint:
             checkpoint_path = checkpoint_handler.last_checkpoint
 
@@ -216,9 +229,9 @@ class Trainer:
         self.test_evaluator.run(loader)
         metrics = self.test_evaluator.state.metrics
         self.logger.info(
-            "Test results: loss=%.4f token_acc=%.4f",
+            "Test results: loss=%.4f sequence_acc=%.4f",
             metrics["loss"],
-            metrics["token_accuracy"],
+            metrics["sequence_accuracy"],
         )
 
     def _attach_metrics(self) -> dict[str, Metric]:
@@ -229,6 +242,22 @@ class Trainer:
         def transform_fn(output):
             return _flatten(output, ignore_index=ignore_index)
 
+        def sequence_accuracy_transform(output) -> tuple[torch.Tensor, torch.Tensor]:
+            logits, targets = output["logits"], output["targets"]  # (B, S, C), (B, S)
+            preds = torch.argmax(logits, dim=-1)
+
+            # Identify non-ignored positions
+            mask = targets != ignore_index
+
+            # Sequence is correct if all non-ignored positions match
+            correct_mask = (~mask) | (preds == targets)
+            seq_correct = correct_mask.all(dim=-1).long()  # (B,) containing 0 or 1
+
+            # Compare against a target of all 1s (representing "fully correct sequence")
+            seq_targets = torch.ones_like(seq_correct)
+
+            return seq_correct, seq_targets
+
         metrics = {}
         for prefix, evaluator in [
             ("train", self.train_evaluator),
@@ -236,13 +265,13 @@ class Trainer:
             ("test", self.test_evaluator),
         ]:
             loss = Loss(self.criterion, output_transform=transform_fn)
-            token_acc = Accuracy(output_transform=transform_fn)
+            token_acc = Accuracy(output_transform=sequence_accuracy_transform)
 
             loss.attach(evaluator, "loss")
-            token_acc.attach(evaluator, "token_accuracy")
+            token_acc.attach(evaluator, "sequence_accuracy")
 
             metrics[f"{prefix}_loss"] = loss
-            metrics[f"{prefix}_token_accuracy"] = token_acc
+            metrics[f"{prefix}_sequence_accuracy"] = token_acc
 
         return metrics
 
@@ -262,9 +291,9 @@ class Trainer:
         )
 
     def _log_text(self, tag: str, text: str, step: int) -> None:
-        # Both backends escape HTML in the caller; wandb renders it, TB uses markdown.
-        if self.config.logger == "wandb":
-            self.exp_logger.log({tag: self.exp_logger.Html(f"<pre>{text}</pre>")}, step=step)
+        # Both backends escape HTML/text in the caller; clearml uses report_text, TB uses markdown.
+        if self.config.logger == "clearml":
+            self.exp_logger.report_text(f"[{tag}] Step {step}:\n{text}")
         else:
             self.exp_logger.writer.add_text(tag, text, global_step=step)
 
@@ -277,7 +306,6 @@ class Trainer:
         total_samples = len(dataset)  # type: ignore
         num_samples = min(self.inference_num_samples, total_samples)
 
-        # Read generation prompts straight off the DatapointModel contract.
         prompt_ids_list: list[torch.Tensor] = []
         prompt_attn_list: list[torch.Tensor] = []
         targets: list[str] = []
@@ -288,7 +316,7 @@ class Trainer:
             target = item.target
 
             input_ids = item.eval_input_ids
-            attention_mask = torch.ones_like(input_ids, dtype=torch.long)
+            attention_mask = item.attention_mask
 
             prompt_ids_list.append(input_ids)
             prompt_attn_list.append(attention_mask)
@@ -296,18 +324,7 @@ class Trainer:
             sources.append(source)
         self.model.eval()
 
-        # Left-pad the prompts (reverse -> pad_sequence -> reverse) so every
-        # sequence in the batch ends at the same position and the newly
-        # generated tokens line up in a single column.
-        #
-        # NOTE: this is safe for the default model because it uses rotary
-        # (relative) positions, where shifting the whole prompt right by the
-        # pad width preserves the distances between real tokens and the padding
-        # is masked out of attention. If you swap in a model with absolute or
-        # sinusoidal position embeddings indexed by slot, left-padding will
-        # offset every real token's position and silently degrade generation --
-        # you would then need to right-pad, or derive position_ids from the
-        # attention mask instead of using the raw slot index.
+        # Left-pad sequences to batch together
         batch_input_ids = (
             torch.nn.utils.rnn.pad_sequence(
                 [t.flip(0) for t in prompt_ids_list], batch_first=True, padding_value=pad_token_id
@@ -320,23 +337,22 @@ class Trainer:
             .flip(1)
             .to(self.device)
         )
-        sequences = self.generate(
-            input_ids=batch_input_ids,
-            max_new_tokens=self.max_inference_new_tokens,
-            attention_mask=batch_attention_mask,
-        )
-        new_tokens = sequences[:, batch_input_ids.shape[1] :]
-        decoded_strs = [
-            self.tokenizer.decode(
-                tokens.tolist(),
-                skip_special_tokens=True,
-            )
-            for tokens in new_tokens
-        ]
+
+        with torch.no_grad():
+            logits = self.model(batch_input_ids, attention_mask=batch_attention_mask)
+            preds = torch.argmax(logits, dim=-1)
+
+        decoded_strs = []
+        for idx in range(num_samples):
+            seq_len = prompt_ids_list[idx].shape[0]
+            # Extract prediction excluding the BOS prefix
+            seq_preds = preds[idx, -seq_len:][1:]
+            pred_str = "".join(str(p.item()) for p in seq_preds)
+            decoded_strs.append(pred_str)
 
         for idx in range(num_samples):
             self.logger.info(
-                "    Sample %d | Prompt: %r | Target: %r | Prediction: %r",
+                "    Sample %d | Input: %s | Target: %s | Prediction: %s",
                 idx + 1,
                 sources[idx],
                 targets[idx],
@@ -349,8 +365,7 @@ class Trainer:
             prompt = sources[idx].strip() or "(empty)"
             target = targets[idx].strip() or "(empty)"
             pred = decoded_strs[idx].strip() or "(empty)"
-            for key, val in [("Prompt", prompt), ("Target", target), ("Prediction", pred)]:
-                # Escape markup so TB markdown / wandb HTML don't swallow <, >, & in outputs.
+            for key, val in [("Input", prompt), ("Target", target), ("Prediction", pred)]:
                 val = val.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 lines.append(f"  {key}:     {val}")
             lines.append("")

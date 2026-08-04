@@ -3,6 +3,7 @@ from typing import Sequence
 
 import tyro
 
+from trainite import __version__
 from trainite.cli.init import Init, init_project, run_interactive_mode
 
 
@@ -12,6 +13,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     commands = {
         "init": "Initialize a new trainite project",
     }
+
+    if args_list and args_list[0] in ("--version", "-V"):
+        print("Trainite, https://github.com/pytorch-ignite/trainite/")
+        print(f"Version: {__version__}")
+        return
 
     if not args_list or args_list[0] not in commands:
         print("Usage: trainite <subcommand> [options]", file=sys.stderr)

@@ -1,6 +1,8 @@
 # Trainite
 
-**Trainite** gives you a complete, working training project as your starting point. Built on [PyTorch-Ignite](https://github.com/pytorch/ignite), the generated code is yours — read it, modify it, extend it however your research needs.
+**Trainite** gives you a complete, working training project as your starting point. The goal of generating a training project is to provide a clean, standalone codebase for **learning, rapid prototyping, and experimenting** without being constrained by framework abstractions. *(Note: Code generation is deterministic and template-based, not AI-based).*
+
+Built on [PyTorch-Ignite](https://github.com/pytorch/ignite), the generated code is yours — read it, modify it, extend it however your research needs.
 
 ### Concretely, Trainite generates:
 
@@ -10,6 +12,7 @@ my-experiment/
 ├── config.py       # Pydantic validation models (IDE autocomplete)
 ├── models/         # Model architecture templates
 ├── datasets/       # Dataset and tokenization templates
+├── preprocessors/  # Tokenizer and preprocessing templates
 ├── trainer.py      # Training loop built on PyTorch-Ignite
 ├── utils.py        # Config loading and instantiation helpers
 ├── main.py         # Project entrypoint (runs training)
@@ -23,7 +26,7 @@ Swap components (like models, optimizers, or datasets) dynamically via config us
 
 ```yaml
 model:
-  _target_: models.transformer.TransformerModel
+  _target_: models.rope_transformer.RoPETransformerModel
   hidden_size: 64
 
 optimizer:
@@ -41,6 +44,7 @@ optimizer:
 
 ## Table of Contents
 
+- [Installation](#installation)
 - [Quickstart](#quickstart)
 - [Usage](#usage)
   - [Initialize a Project](#initialize-a-project)
@@ -53,38 +57,48 @@ optimizer:
 
 ---
 
-## Quickstart
+## Installation
 
 Requires Python >= 3.10.
 
-**Option 1 — uv (recommended):**
+From [pip](https://pypi.org/project/trainite/):
+
+```bash
+pip install trainite
+```
+
+From source (using `uv`):
 
 ```bash
 git clone https://github.com/pytorch-ignite/trainite.git
 cd trainite
 uv sync
 source .venv/bin/activate
-
-# Initialize the project in any workspace
-cd ..
-trainite init my-experiment --model transformer --dataset string-reverse
-cd my-experiment
-uv sync
-uv run python main.py config.yaml
 ```
 
-**Option 2 — pip:**
+From source (using `pip`):
 
 ```bash
 git clone https://github.com/pytorch-ignite/trainite.git
 cd trainite
 pip install -e .
+```
 
-# Initialize the project in any workspace
-cd ..
-trainite init my-experiment --model transformer --dataset string-reverse
+---
+
+## Quickstart
+
+Once Trainite is installed, generate and run your first experiment project:
+
+```bash
+# 1. Initialize a starter project
+trainite init my-experiment --model rope-transformer --dataset string-reverse
+
+# 2. Navigate into the project and install dependencies
 cd my-experiment
 pip install -e .
+
+# 3. Run training
 python main.py config.yaml
 ```
 
@@ -100,7 +114,7 @@ python main.py config.yaml
 You can generate a starter project by passing configuration options as command-line flags:
 
 ```bash
-trainite init my-experiment --model transformer --dataset string-reverse
+trainite init my-experiment --model rope-transformer --dataset string-reverse
 ```
 
 Or run it interactively (Trainite will walk you through the options step-by-step):
@@ -111,23 +125,27 @@ trainite init
 
 Interactive prompt preview:
 
+*(Note: Trainite supports multi-model selection; you can select multiple models to include in your starter project.)*
+
 ```text
 ? Project directory: my-experiment
-? Model: transformer
+? Model(s): rope-transformer
 ? Dataset: string-reverse
 ? Trainer: decoder-trainer
 ? Output directory: outputs
-? Run name: transformer__string-reverse
+? Run name: rope-transformer__string-reverse
 
-✔ Generated config.yaml
-✔ Generated models/transformer.py
-✔ Generated datasets/string_reverse.py
-✔ Generated trainer.py
-✔ Generated utils.py
-✔ Generated main.py
-✔ Generated README.md
-✔ Generated config.py
-✔ Generated pyproject.toml
+ Generated config.yaml
+ Generated models/rope_transformer.py
+ Generated datasets/string_reverse.py
+ Generated datasets/transformed.py
+ Generated trainer.py
+ Generated utils.py
+ Generated main.py
+ Generated config.py
+ Generated preprocessors/char_tokenizer.py
+ Generated README.md
+ Generated pyproject.toml
 ```
 
 ### Run Training
@@ -154,7 +172,7 @@ Training outputs are organized by run:
 
 ```
 outputs/
-└── transformer__string-reverse/
+└── rope-transformer__string-reverse/
     └── 20260611_1430/
         ├── output.log          # Training logs
         ├── config.yaml         # Exact config used for this run
@@ -167,15 +185,16 @@ outputs/
 
 ### Models
 
-| Name          | Architecture             | Description                                                                |
-| ------------- | ------------------------ | -------------------------------------------------------------------------- |
-| `transformer` | Decoder-only Transformer | Causal LM with rotary position embeddings (RoPE) and multi-head attention. |
+| Name                | Architecture             | Description                                                                |
+| ------------------- | ------------------------ | -------------------------------------------------------------------------- |
+| `basic-transformer` | Decoder-only Transformer | Standard causal LM with absolute positional embeddings.                    |
+| `rope-transformer`  | Decoder-only Transformer | Standard causal LM with rotary positional embeddings (RoPE).               |
 
 ### Preprocessors
 
-| Name   | Description                                                                  |
-| ------ | ---------------------------------------------------------------------------- |
-| `char` | Character-level tokenizer mapping printable ASCII characters to integer IDs. |
+| Name   | Description                                                                                                                           |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `char` | Character-level tokenizer mapping a charset to integer IDs, with reserved special tokens (`<PAD>`, `<BOS>`, `<SEP>`, `<EOS>`, `<UNK>`). |
 
 ### Datasets
 
@@ -201,7 +220,7 @@ Components (such as models, datasets, optimizers, or collation functions) are sp
 
 ```yaml
 model:
-  _target_: models.transformer.TransformerModel
+  _target_: models.rope_transformer.RoPETransformerModel
   hidden_size: 64
 
 optimizer:
@@ -235,7 +254,8 @@ Working examples are in the [`examples/`](examples/) directory:
 
 | Example                                      | Description                                                                                                                                        |
 | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`string_reverse`](examples/string_reverse/) | Train a decoder-only transformer to reverse strings. Demonstrates the full pipeline: data generation, training, evaluation, and inference logging. |
+| [`string_reversal`](examples/string_reversal/) | Train a decoder-only transformer to reverse strings. Demonstrates the full pipeline: data generation, training, evaluation, and inference logging. |
+| [`counting`](examples/counting/)            | Train a decoder-only transformer to count the number of occurrences of a target token in a sequence. |
 
 Each example is a standalone project — `cd` into it, install dependencies, and run `python main.py config.yaml`.
 

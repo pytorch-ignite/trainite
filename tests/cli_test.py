@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from trainite.cli.init import Init
 import yaml
 
 import pytest
@@ -12,12 +13,17 @@ from trainite.config.registry import MODEL_SPECS, DATASET_SPECS, PREPROCESSOR_SP
 
 
 @pytest.mark.parametrize(
-    "model,dataset,trainer",
+    "models,dataset,trainer",
     [
-        ("transformer", "string-reverse", "decoder-trainer"),
+        (["basic-transformer"], "string-reverse", "decoder-trainer"),
+        (["rope-transformer"], "string-reverse", "decoder-trainer"),
+        (["rope-transformer", "basic-transformer"], "string-reverse", "decoder-trainer"),
+        (["basic-transformer"], "counting", "decoder-trainer"),
+        (["rope-transformer"], "counting", "decoder-trainer"),
+        (["rope-transformer", "basic-transformer"], "counting", "decoder-trainer"),
     ],
 )
-def test_init_generates_valid_project(model: str, dataset: str, trainer: str) -> None:
+def test_init_generates_valid_project(models: list[str], dataset: str, trainer: str) -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         project_dir = Path(temp_dir) / "demo-project"
         # Run trainite init
@@ -27,7 +33,7 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
             "trainite.cli",
             "init",
             "--model",
-            model,
+            *models,
             "--dataset",
             dataset,
             "--trainer",
@@ -37,7 +43,7 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
         subprocess.run(cmd, check=True, timeout=60)
 
         dataset_spec = DATASET_SPECS[dataset]
-        model_spec = MODEL_SPECS[model]
+        model_specs = [MODEL_SPECS[m] for m in models]
         trainer_spec = TRAINER_SPECS[trainer]
         preprocessor_spec = (
             PREPROCESSOR_SPECS[dataset_spec.preprocessor_spec_name] if dataset_spec.preprocessor_spec_name else None
@@ -47,7 +53,7 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
         expected_files = [
             "config.yaml",
             "config.py",
-            f"models/{model_spec.name}.py",
+            *[f"models/{spec.name}.py" for spec in model_specs],
             f"datasets/{dataset_spec.name}.py",
             "datasets/transformed.py",
             "trainer.py",
@@ -61,17 +67,20 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
             if filename is not None:
                 assert (project_dir / filename).exists(), f"{filename} missing"
 
-        # Check that targets inside config.yaml are rewritten correctly
+        # Check that target inside config.yaml is rewritten correctly and points to primary model
         with open(project_dir / "config.yaml", "r") as f:
             generated_config = yaml.safe_load(f)
         assert generated_config["project_name"] == project_dir.name
-        assert generated_config["model"]["_target_"].startswith("models.")
+        primary_spec = model_specs[0]
+        assert (
+            generated_config["model"]["_target_"] == f"models.{primary_spec.name}.{primary_spec.implementation_symbol}"
+        )
         assert generated_config["model"]["collate_fn_target"].startswith("models.")
 
         # Check if python files are parseable
         python_files = [
             "config.py",
-            f"models/{model_spec.name}.py",
+            *[f"models/{spec.name}.py" for spec in model_specs],
             f"datasets/{dataset_spec.name}.py",
             "datasets/transformed.py",
             "trainer.py",
@@ -84,9 +93,18 @@ def test_init_generates_valid_project(model: str, dataset: str, trainer: str) ->
                 py_compile.compile(str(project_dir / filename), doraise=True)
 
 
-def test_generated_string_reversal_project_is_runnable() -> None:
+@pytest.mark.parametrize(
+    "model,dataset,trainer",
+    [
+        ("basic-transformer", "string-reverse", "decoder-trainer"),
+        ("rope-transformer", "string-reverse", "decoder-trainer"),
+        ("basic-transformer", "counting", "decoder-trainer"),
+        ("rope-transformer", "counting", "decoder-trainer"),
+    ],
+)
+def test_generated_project_is_runnable(model: str, dataset: str, trainer: str) -> None:
     """
-    Test that the generated project can actually be run for a few steps.
+    Test that the generated project can actually be run for a few steps across all valid combinations.
     """
     with tempfile.TemporaryDirectory() as temp_dir:
         project_dir = Path(temp_dir) / "runnable-project"
@@ -99,11 +117,11 @@ def test_generated_string_reversal_project_is_runnable() -> None:
                 "trainite.cli",
                 "init",
                 "--model",
-                "transformer",
+                model,
                 "--dataset",
-                "string-reverse",
+                dataset,
                 "--trainer",
-                "decoder-trainer",
+                trainer,
                 str(project_dir),
             ],
             check=True,
@@ -111,23 +129,26 @@ def test_generated_string_reversal_project_is_runnable() -> None:
 
         # 2. Modify config.yaml to run for only 1 step/epoch to keep test fast
         config_path = project_dir / "config.yaml"
-
         with open(config_path, "r") as f:
             config = yaml.safe_load(f)
 
+        # Base overrides for speed
         config["trainer"]["epochs"] = 1
         config["trainer"]["log_every_steps"] = 1
         config["model"]["num_layers"] = 1
         config["model"]["hidden_size"] = 16
         config["model"]["feedforward_dim"] = 32
-        config["model"]["num_heads"] = 2
-        config["data"]["dataset"]["per_seq_size"] = 16
+
+        # Dataset-specific overrides to keep sequences small
+        if dataset == "string-reverse":
+            config["data"]["dataset"]["per_seq_size"] = 16
+        elif dataset == "counting":
+            config["data"]["dataset"]["total_size"] = 16
 
         with open(config_path, "w") as f:
             yaml.safe_dump(config, f)
 
         # 3. Run the generated main.py
-
         try:
             subprocess.run(
                 [sys.executable, "main.py", "config.yaml"],
@@ -138,21 +159,26 @@ def test_generated_string_reversal_project_is_runnable() -> None:
                 text=True,
             )
         except subprocess.CalledProcessError as e:
-            pytest.fail(f"Generated project failed to run:\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}")
+            pytest.fail(
+                f"Generated project failed to run ({model} + {dataset}):\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}"
+            )
         except subprocess.TimeoutExpired:
-            pytest.fail("Generated project timed out")
-
+            pytest.fail(f"Generated project timed out ({model} + {dataset})")
         finally:
-            logging.shutdown()  # Ensure all logging output is flushed before the temporary directory is cleaned up
+            logging.shutdown()
 
 
-def test_cli_main_routing():
+def test_cli_main_routing(capsys):
     from trainite.cli.main import main
     from unittest import mock
 
     with pytest.raises(SystemExit) as exc_info:
         main(argv=[])
     assert exc_info.value.code == 1
+
+    main(argv=["--version"])
+    output = capsys.readouterr()
+    assert output.out.startswith("Trainite, https://github.com/pytorch-ignite/trainite/\nVersion: ")
 
     with mock.patch("trainite.cli.main.run_interactive_mode") as mock_interactive:
         main(argv=["init"])
@@ -163,7 +189,8 @@ def test_cli_main_routing():
             argv=[
                 "init",
                 "--model",
-                "transformer",
+                "rope-transformer",
+                "basic-transformer",
                 "--dataset",
                 "string-reverse",
                 "--trainer",
@@ -198,3 +225,8 @@ def test_import_without_dependencies() -> None:
         text=True,
     )
     assert "is not a Python type" not in result.stderr
+
+
+def test_duplicate_models_raises_error():
+    with pytest.raises(ValueError, match="Duplicate model entries are not allowed"):
+        Init(model=("rope-transformer", "rope-transformer"))

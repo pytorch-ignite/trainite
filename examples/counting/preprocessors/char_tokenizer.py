@@ -1,25 +1,17 @@
 import string
+
 import torch
 
 
-CHARSET_PRESETS = {
-    "@universal": string.ascii_letters + string.digits + string.punctuation + " ",
-    "@alpha": string.ascii_letters,
-    "@alpha_lowercase": string.ascii_lowercase,
-    "@alpha_uppercase": string.ascii_uppercase,
-    "@digits": string.digits,
-    "@alphanumeric": string.ascii_letters + string.digits,
-    "@punctuation": string.punctuation,
-    "@alphanumeric_lowercase": string.ascii_lowercase + string.digits,
-    "@alphanumeric_uppercase": string.ascii_uppercase + string.digits,
-}
+# Hardcoded universal vocabulary: all printable ASCII characters
+UNIVERSAL_VOCAB = string.ascii_letters + string.digits + string.punctuation + " "
 
 
 class CharTokenizer:
     """A simple character-level tokenizer with a hardcoded universal vocabulary.
     Consists of all printable ASCII characters, plus special tokens for padding, beginning of sequence, separator, end of sequence, and unknown characters.
 
-    The vocabulary can be a charset preset such as ``@alphanumeric`` or a literal string.
+    Maps each character in UNIVERSAL_VOCAB to a unique integer ID.
     ID 0 is reserved as the <PAD> token.
     ID 1 is reserved as the <BOS> token.
     ID 2 is reserved as the <SEP> token.
@@ -27,28 +19,15 @@ class CharTokenizer:
     ID 4 is reserved as the <UNK> token.
     """
 
-    def __init__(self, charset: str = "@universal") -> None:
-        if charset in CHARSET_PRESETS:
-            chars = CHARSET_PRESETS[charset]
-        elif charset.startswith("@"):
-            raise ValueError(f"Unknown charset preset: {charset}")
-        else:
-            chars = charset
-
-        if not chars:
-            raise ValueError("Charset cannot be empty.")
-        if len(set(chars)) != len(chars):
-            raise ValueError("Charset must not contain duplicate characters.")
-
-        self.chars = chars
+    def __init__(self) -> None:
         self.pad_token_id = 0
         self.bos_token_id = 1
         self.sep_token_id = 2
         self.eos_token_id = 3
         self.unk_token_id = 4
 
-        self.char_to_id: dict[str, int] = {c: i + 5 for i, c in enumerate(self.chars)}
-        self.id_to_char: dict[int, str] = {i + 5: c for i, c in enumerate(self.chars)}
+        self.char_to_id: dict[str, int] = {c: i + 5 for i, c in enumerate(UNIVERSAL_VOCAB)}
+        self.id_to_char: dict[int, str] = {i + 5: c for i, c in enumerate(UNIVERSAL_VOCAB)}
 
         self.special_tokens: dict[int, str] = {
             self.pad_token_id: "<PAD>",
@@ -64,7 +43,7 @@ class CharTokenizer:
     @property
     def vocab_size(self) -> int:
         """Number of unique tokens in the vocabulary (includes special tokens)."""
-        return len(self.chars) + len(self.special_tokens)
+        return len(UNIVERSAL_VOCAB) + len(self.special_tokens)
 
     def encode(self, text: str) -> list[int]:
         """Convert a string to a list of token IDs, mapping unrecognized characters to UNK."""

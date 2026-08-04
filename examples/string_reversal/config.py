@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class ModelConfig(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: str = Field(alias="_target_")
+    collate_fn_target: str | None = None
 
 
 class PreprocessorConfig(BaseModel):
@@ -22,15 +23,11 @@ class TransformConfig(BaseModel):
     target: str = Field(alias="_target_")
 
 
-class CollateFnConfig(BaseModel):
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
-    target: str = Field(alias="_target_")
-
-
 class OutputConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
     root: str
     run_name: str
+    project: str | None = None
 
 
 class OptimizerConfig(BaseModel):
@@ -39,12 +36,19 @@ class OptimizerConfig(BaseModel):
     lr: float = Field(default=1e-3, gt=0.0)
 
 
+class SchedulerConfig(BaseModel):
+    metric_name: str = "loss"
+    mode: Literal["min", "max"] = "min"
+    patience: int = Field(default=3, ge=0)
+    factor: float = Field(default=0.5, gt=0.0, lt=1.0)
+    min_lr: float = Field(default=1e-6, ge=0.0)
+
+
 class DataLoaderConfig(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     batch_size: int = Field(default=32, gt=0)
     shuffle: bool = False
     num_workers: int = Field(default=2, ge=0)
-    collate_fn: CollateFnConfig | None = None
 
 
 class SplitConfig(BaseModel):
@@ -88,6 +92,9 @@ class TrainerConfig(BaseModel):
     inference_num_samples: int = Field(default=5, gt=0)
     max_inference_new_tokens: int = Field(default=16, gt=0)
     grad_clip_norm: float | None = Field(default=None, gt=0.0)
+    checkpoint_every_epochs: int = Field(default=10, gt=0)
+    stop_on_perfect_acc: bool = False
+    stop_on_lr_floor: bool = False
 
 
 class ProjectConfig(BaseModel):
@@ -95,9 +102,10 @@ class ProjectConfig(BaseModel):
     preprocessor: PreprocessorConfig
     model: ModelConfig
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
+    scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     data: DataConfigBase | DataWithAutoSplit
     trainer: TrainerConfig = Field(default_factory=TrainerConfig)
     output: OutputConfig
-    logger: Literal["tensorboard", "wandb"] = "tensorboard"
+    logger: Literal["tensorboard", "clearml"] = "tensorboard"
     seed: int = 42
     device: str | None = None
