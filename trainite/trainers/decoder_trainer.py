@@ -108,7 +108,7 @@ class Trainer:
         if config.logger == "clearml":
             self.exp_logger = setup_clearml_logging(
                 **logging_kwargs,
-                project_name=config.output.run_name,
+                project_name=config.project_name,
                 task_name=self.run_dir.name,
             )
             self.exp_logger.get_task().upload_artifact(

@@ -70,6 +70,7 @@ def test_init_generates_valid_project(models: list[str], dataset: str, trainer: 
         # Check that target inside config.yaml is rewritten correctly and points to primary model
         with open(project_dir / "config.yaml", "r") as f:
             generated_config = yaml.safe_load(f)
+        assert generated_config["project_name"] == project_dir.name
         primary_spec = model_specs[0]
         assert (
             generated_config["model"]["_target_"] == f"models.{primary_spec.name}.{primary_spec.implementation_symbol}"
