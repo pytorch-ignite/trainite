@@ -71,7 +71,7 @@ def test_init_generates_valid_project(models: list[str], dataset: str, trainer: 
         with open(project_dir / "config.yaml", "r") as f:
             generated_config = yaml.safe_load(f)
         assert generated_config["project_name"] == project_dir.name
-        assert generated_config["output"]["run_name"] == "transformer__string_reverse"
+        assert generated_config["output"]["run_name"] == f"{models[0]}__{dataset}".replace("-", "_")
         assert generated_config["model"]["_target_"].startswith("models.")
         assert generated_config["model"]["collate_fn_target"].startswith("models.")
 
