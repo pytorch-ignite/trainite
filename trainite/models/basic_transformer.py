@@ -15,7 +15,6 @@ class SinusoidalPositionalEncoding(nn.Module):
     so the model can learn to distinguish token order.
 
     See "Attention Is All You Need" (Vaswani et al., 2017) for the original formulation.
-    Docs: https://pytorch.org/ignite/generated/ignite.handlers.html
     """
 
     def __init__(self, d_model: int, max_seq_len: int = 512, dropout: float = 0.1) -> None:
@@ -169,7 +168,6 @@ class BasicTransformerModel(nn.Module):
     left-padding shifts real-token positions and can silently hurt quality -- prefer
     the RoPETransformerModel when you need robust left-padding support.
 
-    Docs: https://pytorch-ignite.ai/
     """
 
     def __init__(

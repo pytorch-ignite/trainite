@@ -80,7 +80,7 @@ class Trainer:
         trainer.run()
 
     See the PyTorch-Ignite docs for more details on Engines and Events:
-    https://pytorch.org/ignite/concepts.html
+    https://pytorch-ignite.ai/concepts/
     """
 
     def __init__(self, config: ProjectConfig) -> None:

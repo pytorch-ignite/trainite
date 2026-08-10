@@ -211,7 +211,6 @@ class RoPETransformerModel(nn.Module):
     because RoPE encodes *relative* distances, so the absolute slot position of a
     padding token does not affect real-token representations.
 
-    Docs: https://pytorch-ignite.ai/
     """
 
     def __init__(
