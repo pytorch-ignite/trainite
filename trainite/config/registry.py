@@ -36,14 +36,23 @@ class DatasetSpec(ComponentSpec):
 
 
 MODEL_SPECS = {
-    "transformer": ModelSpec(
-        name="transformer",
-        implementation_path=Path("trainite/models/transformer.py"),
-        config_cls_path="trainite.config.models.TransformerModelConfig",
-        implementation_symbol="TransformerModel",
-        builder_symbol="TransformerModel",
-        collate_fn_target="trainite.models.transformer.CausalLMCollateFn",
-        readme_template_path=Path("trainite/templates/components/models/transformer.md"),
+    "basic-transformer": ModelSpec(
+        name="basic_transformer",
+        implementation_path=Path("trainite/models/basic_transformer.py"),
+        config_cls_path="trainite.config.models.BasicTransformerModelConfig",
+        implementation_symbol="BasicTransformerModel",
+        builder_symbol="BasicTransformerModel",
+        collate_fn_target="trainite.models.basic_transformer.CausalLMCollateFn",
+        readme_template_path=Path("trainite/templates/components/models/basic_transformer.md"),
+    ),
+    "rope-transformer": ModelSpec(
+        name="rope_transformer",
+        implementation_path=Path("trainite/models/rope_transformer.py"),
+        config_cls_path="trainite.config.models.RoPETransformerModelConfig",
+        implementation_symbol="RoPETransformerModel",
+        builder_symbol="RoPETransformerModel",
+        collate_fn_target="trainite.models.rope_transformer.CausalLMCollateFn",
+        readme_template_path=Path("trainite/templates/components/models/rope_transformer.md"),
     ),
 }
 
@@ -56,6 +65,16 @@ DATASET_SPECS = {
         implementation_symbol="StringReverseDataset",
         builder_symbol="StringReverseDataset",
         readme_template_path=Path("trainite/templates/components/datasets/string_reverse.md"),
+        preprocessor_spec_name="char",
+    ),
+    "counting": DatasetSpec(
+        name="counting",
+        implementation_path=Path("trainite/datasets/counting.py"),
+        config_cls_path="trainite.config.datasets.CountingDataConfig",
+        dataset_config_cls_path="trainite.config.datasets.CountingDatasetConfig",
+        implementation_symbol="CountingDataset",
+        builder_symbol="CountingDataset",
+        readme_template_path=Path("trainite/templates/components/datasets/counting.md"),
         preprocessor_spec_name="char",
     ),
 }

@@ -1,0 +1,57 @@
+preprocessor:
+  _target_: preprocessors.char_tokenizer.CharTokenizer
+  charset: "@alphanumeric"
+model:
+  _target_: models.transformer.TransformerModel
+  collate_fn_target: models.transformer.CausalLMCollateFn
+  hidden_size: 64
+  num_layers: 2
+  num_heads: 2
+  feedforward_dim: 128
+  dropout: 0.1
+  max_seq_len: 128
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 0.0003
+scheduler:
+  metric_name: loss
+  mode: min
+  patience: 3
+  factor: 0.5
+  min_lr: 0.000001
+data:
+  dataset:
+    _target_: datasets.string_reverse.StringReverseDataset
+    per_seq_size: 10000
+    charset: "@alphanumeric"
+    min_seq_len: 1
+    max_seq_len: 16
+    seq_len: null
+    seed: 42
+  transform:
+    _target_: datasets.string_reverse.PromptCompletionTransform
+    ignore_index: -100
+  dataloader:
+    batch_size: 128
+    shuffle: true
+    num_workers: 2
+  test_ratio: 0.1
+  val_ratio: 0.1
+trainer:
+  epochs: 3
+  log_every_steps: 50
+  early_stopping_patience: null
+  stop_on_perfect_acc: true
+  stop_on_lr_floor: true
+  inference_every_epochs: 10
+  inference_num_samples: 1
+  max_inference_new_tokens: 16
+  grad_clip_norm: null
+  checkpoint_every_epochs: 10
+output:
+  root: outputs
+  run_name: transformer_string_reversal
+  project: string-reversal
+logger: tensorboard
+seed: 42
+device: null
