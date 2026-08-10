@@ -86,9 +86,10 @@ def apply_rotary_pos_emb(
 class Attention(nn.Module):
     """Causal multi-head self-attention with Rotary Position Embeddings (RoPE).
 
-    Identical to the BasicTransformer Attention except that positional information
-    is injected by rotating Q and K with the precomputed cos/sin tables rather than
-    via an additive sinusoidal encoding on the token embeddings.
+    Multiple attention heads capture different relationships between tokens. Before
+    computing attention scores, RoPE encodes relative positions by rotating the query
+    and key vectors using precomputed cosine and sine values. Causal masking prevents
+    each position from attending to future tokens.
     """
 
     def __init__(self, embed_dim: int, num_heads: int, dropout: float = 0.1):
