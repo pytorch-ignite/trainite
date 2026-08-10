@@ -336,7 +336,7 @@ def init_project(config: Init) -> None:
     run_name = config.run_name
     force = config.force
 
-    resolved_run_name = run_name or f"{model}__{dataset}"
+    resolved_run_name = run_name or f"{model}__{dataset}".replace("-", "_")
     resolved_project_dir = _project_directory(project_dir, force)
 
     output_config = OutputConfig(root=output_root, run_name=resolved_run_name)
