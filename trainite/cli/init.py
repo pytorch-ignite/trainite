@@ -319,7 +319,7 @@ def run_interactive_mode() -> None:
     output_root = _prompt_text("Output directory:", "outputs", "Output directory for generated files \n")
     run_name = _prompt_text(
         "Run name:",
-        f"{models[0]}_{dataset}".replace("-", "_"),
+        f"{models[0]}__{dataset}".replace("-", "_"),
         "Run name for generated config (used in output paths and logging) \n",
     )
 
@@ -404,7 +404,7 @@ def init_project(config: Init) -> None:
     run_name = config.run_name
     force = config.force
 
-    resolved_run_name = run_name or f"{models[0]}_{dataset}".replace("-", "_")
+    resolved_run_name = run_name or f"{models[0]}__{dataset}".replace("-", "_")
     resolved_project_dir = _project_directory(project_dir, force)
 
     output_config = OutputConfig(root=output_root, run_name=resolved_run_name)
