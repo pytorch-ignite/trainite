@@ -87,6 +87,7 @@ class TrainerConfig(BaseModel):
 
 class ProjectConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
+    project_name: str
     preprocessor: PreprocessorConfig
     model: ModelConfig
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)

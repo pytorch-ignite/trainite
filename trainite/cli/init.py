@@ -1,6 +1,6 @@
 import re
 from pathlib import Path
-from typing import Any, Iterable, Literal, Sequence
+from typing import Any, Iterable, Literal, Sequence, TypeAlias
 
 import questionary
 import tomlkit
@@ -34,9 +34,9 @@ DATASET_CHOICES = tuple(REGISTRY["datasets"].keys())
 TRAINER_CHOICES = tuple(REGISTRY["trainers"].keys())
 
 
-ModelType = Literal[MODEL_CHOICES]  # type: ignore
-DatasetType = Literal[DATASET_CHOICES]  # type: ignore
-TrainerType = Literal[TRAINER_CHOICES]  # type: ignore
+ModelType: TypeAlias = Literal[MODEL_CHOICES]  # type: ignore
+DatasetType: TypeAlias = Literal[DATASET_CHOICES]  # type: ignore
+TrainerType: TypeAlias = Literal[TRAINER_CHOICES]  # type: ignore
 
 
 def _replace_many(text: str, replacements: Iterable[tuple[str, str]]) -> str:
@@ -319,7 +319,7 @@ def run_interactive_mode() -> None:
     output_root = _prompt_text("Output directory:", "outputs", "Output directory for generated files \n")
     run_name = _prompt_text(
         "Run name:",
-        f"{models[0]}__{dataset}",
+        f"{models[0]}__{dataset}".replace("-", "_"),
         "Run name for generated config (used in output paths and logging) \n",
     )
 
@@ -404,8 +404,7 @@ def init_project(config: Init) -> None:
     run_name = config.run_name
     force = config.force
 
-    primary_model = models[0]
-    resolved_run_name = run_name or f"{primary_model}__{dataset}"
+    resolved_run_name = run_name or f"{models[0]}__{dataset}".replace("-", "_")
     resolved_project_dir = _project_directory(project_dir, force)
 
     output_config = OutputConfig(root=output_root, run_name=resolved_run_name)
@@ -433,6 +432,7 @@ def init_project(config: Init) -> None:
     preprocessor_component = preprocessor_spec.config_cls() if preprocessor_spec else None
 
     starter_config = ProjectConfig(
+        project_name=resolved_project_dir.name,
         preprocessor=preprocessor_component,
         model=model_component,
         data=data_config,
