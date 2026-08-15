@@ -272,9 +272,9 @@ def attach_early_stopping(
     validation epochs, it sends a termination signal to the trainer engine so
     training stops gracefully without wasting compute.
 
-    Here the score function returns *negative* loss so that higher is better
-    (EarlyStopping maximises the score by convention), while ``mode='min'``
-    internally minimises the raw loss value.
+    The score function here returns the raw validation loss (positive value).
+    ``mode='min'`` tells ``EarlyStopping`` to treat *lower* scores as better,
+    so training stops when the loss stops decreasing.
 
     See: https://docs.pytorch.org/ignite/generated/ignite.handlers.EarlyStopping.html#ignite.handlers.EarlyStopping
     """

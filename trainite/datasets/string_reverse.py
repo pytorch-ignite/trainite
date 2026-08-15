@@ -150,13 +150,16 @@ class PromptCompletionTransform:
     causal language modelling (CLM): the model receives a prompt consisting of the
     source string and is trained to generate the target (reversed) string.
 
-    Token layout:
-        input_ids : [BOS] source [SEP] target[:-1]
-        labels    : ignore ... ignore  target[1:]  [EOS]
+    Token layout (combined = [BOS] source [SEP] target [EOS]):
 
-    The prompt portion of the labels (everything before the first target token) is
-    set to ``ignore_index`` so the cross-entropy loss only back-propagates through
-    the target prediction positions.
+        input_ids : [BOS] source [SEP] target
+                    (= combined[:-1])
+        labels    :  -100  ...  -100   target [EOS]
+                    (= combined[1:], with [BOS]+source+[SEP] masked to ignore_index)
+
+    The model is trained to predict the full target string followed by EOS,
+    given the prompt [BOS] source [SEP].  All prompt positions — including the
+    trailing SEP — are masked so the loss only covers the target tokens.
 
     During evaluation (inference) only the prompt is fed to the model:
         eval_input_ids : [BOS] source [SEP]

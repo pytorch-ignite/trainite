@@ -208,9 +208,9 @@ class RoPETransformerModel(nn.Module):
                   -> LayerNorm
                   -> linear projection to vocab logits
 
-    Compared to the BasicTransformerModel, this model is *robust to left-padding*
-    because RoPE encodes *relative* distances, so the absolute slot position of a
-    padding token does not affect real-token representations.
+    Unlike sinusoidal absolute position encodings, RoPE is robust to left-padding:
+    it preserves relative distances between real tokens regardless of padding width,
+    and the attention mask ensures padding positions are excluded from attention.
 
     """
 
