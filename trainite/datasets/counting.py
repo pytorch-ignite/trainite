@@ -11,9 +11,15 @@ from torch.utils.data import Dataset
 class CountingDataset(Dataset):
     """Generates unique alternating strings in L_k and their prefix-classification targets.
 
+    This dataset is designed to probe transformer counting limitations. L_k consists of strings over {a, b} with exactly k alternations (e.g. ``"aaabbb"`` has 1 alternation; ``"aabba"`` has 2).  A model that can solve this task must implicitly count the number of character transitions.
+
     Each sample is returned as a dictionary containing:
-        - 'source': the generated string of 'a's and 'b's (e.g., 'aaabbb')
-        - 'target': the target string of '0's and '1's (e.g., '000111')
+        - 'source': the generated string of 'a's and 'b's (e.g., ``'aaabbb'``)
+        - 'target': the target string of '0's and '1's (e.g., ``'000111'``)
+
+    The target marks positions *after* the last transition with '1' and all earlier
+    positions with '0', so predicting the target requires detecting when the final
+    alternation has occurred.
     """
 
     def __init__(

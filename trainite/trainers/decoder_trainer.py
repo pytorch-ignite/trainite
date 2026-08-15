@@ -199,6 +199,20 @@ class Trainer:
             self.attach_inference_logger()
 
     def _train_step(self, engine: Engine, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Run a single training iteration: forward pass, loss, backward, optimizer step.
+
+        This is the function passed to the Ignite training ``Engine``.  Ignite calls it
+        once per batch and stores the returned dict as ``engine.state.output``, which
+        the attached metrics and loggers then read.
+
+        ``set_to_none=True`` in ``zero_grad`` frees gradient memory instead of filling
+        it with zeros, which is slightly faster and uses less memory.
+
+        The tensors in the returned dict are ``detach()``-ed so that the compute graph
+        is released before they are consumed by metrics or loggers.
+
+        See: https://docs.pytorch.org/ignite/generated/ignite.engine.engine.Engine.html
+        """
         self.model.train()
         inputs = batch["input_ids"].to(self.device)
         targets = batch["labels"].to(self.device)
@@ -223,6 +237,18 @@ class Trainer:
 
     @torch.no_grad()
     def _eval_step(self, engine: Engine, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Run a single evaluation iteration: forward pass only, no gradient tracking.
+
+        ``@torch.no_grad()`` disables gradient computation for the duration of this
+        call, reducing memory usage and speeding up evaluation.
+
+        ``loss`` is intentionally absent from the returned dict: the Ignite ``Loss``
+        metric recomputes it internally via its ``output_transform`` (``_flatten``),
+        ensuring the metric accumulates correctly over the full evaluation set rather
+        than averaging pre-computed batch losses.
+
+        See: https://docs.pytorch.org/ignite/generated/ignite.engine.engine.Engine.html
+        """
         self.model.eval()
         inputs = batch["input_ids"].to(self.device)
         targets = batch["labels"].to(self.device)
@@ -233,6 +259,15 @@ class Trainer:
         return {"logits": logits, "targets": targets}
 
     def _run_evaluations(self, engine: Engine) -> None:
+        """Evaluate on the training and validation sets at the end of each epoch.
+
+        Triggered by ``Events.EPOCH_COMPLETED`` on the training engine.
+
+        The train evaluator is run with ``epoch_length=min(train, val)`` so that
+        the number of batches evaluated matches the validation set size.  This keeps
+        train and validation metrics comparable without running a full pass over the
+        (potentially much larger) training set every epoch.
+        """
         self.logger.info("Evaluating on training set...")
         self.train_evaluator.run(self.train_loader, epoch_length=min(len(self.train_loader), len(self.val_loader)))
         train_metrics = self.train_evaluator.state.metrics
@@ -329,6 +364,13 @@ class Trainer:
         return metrics
 
     def attach_inference_logger(self) -> None:
+        """Register the qualitative inference handler to run every N epochs.
+
+        ``Events.EPOCH_COMPLETED(every=N)`` is Ignite's event-filter syntax: it fires
+        the handler only on epochs that are a multiple of N, rather than every epoch.
+        The handler runs ``_log_inference`` on both the training and validation loaders
+        so you can compare model outputs on seen and unseen samples side by side.
+        """
         for loader, name in ((self.train_loader, "Train"), (self.val_loader, "Val")):
             self.trainer.add_event_handler(
                 Events.EPOCH_COMPLETED(every=self.inference_every_epochs),
@@ -460,13 +502,18 @@ class Trainer:
 
         for _ in range(max_new_tokens):
             logits = self.model(generated, attention_mask=attention_mask)
+            # Take the logits at the last position — this is the prediction for the next token
             next_token_logits = logits[:, -1, :]
+            # Greedy decoding: pick the highest-probability token at each step
             next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
             if eos_id is not None:
+                # If a sequence already ended (last token is EOS), keep emitting EOS
+                # so the sequence stays frozen while other sequences in the batch finish
                 eos_mask = generated[:, -1:].eq(eos_id)
                 next_token = torch.where(eos_mask, torch.tensor(eos_id, device=device), next_token)
             generated = torch.cat([generated, next_token], dim=-1)
 
+            # Extend the attention mask by one column for the newly appended token
             next_mask = torch.ones(
                 (attention_mask.shape[0], 1),
                 dtype=attention_mask.dtype,
@@ -484,6 +531,7 @@ class Trainer:
             )
             attention_mask = torch.cat([attention_mask, next_mask], dim=-1)
 
+            # Stop early if every sequence in the batch has produced EOS
             if generated[:, -1].eq(eos_id).all():
                 break
 
