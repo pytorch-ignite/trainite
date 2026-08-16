@@ -53,7 +53,7 @@ Controls dataset generation so runs are repeatable.
 data:
   train:
     dataset:
-      _target_: datasets.string_reverse.StringReverseDataset
+      _target_: data.string_reverse.StringReverseDataset
       per_seq_size: 512
       charset: "@alpha"
       min_seq_len: 2
@@ -62,7 +62,7 @@ data:
 
 ## When to change this file
 
-Edit `datasets/string_reverse.py` if you want to:
+Edit `data/string_reverse.py` if you want to:
 
 - change the tokenization rules
 - add or remove allowed characters

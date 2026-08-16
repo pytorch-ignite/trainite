@@ -11,7 +11,7 @@ my-experiment/
 ├── config.yaml     # YAML configuration (edit hyperparameters here)
 ├── config.py       # Pydantic validation models (IDE autocomplete)
 ├── models/         # Model architecture templates
-├── datasets/       # Dataset and tokenization templates
+├── data/           # Dataset and tokenization templates
 ├── preprocessors/  # Tokenizer and preprocessing templates
 ├── trainer.py      # Training loop built on PyTorch-Ignite
 ├── utils.py        # Config loading and instantiation helpers
@@ -137,8 +137,8 @@ Interactive prompt preview:
 
  Generated config.yaml
  Generated models/rope_transformer.py
- Generated datasets/string_reverse.py
- Generated datasets/transformed.py
+ Generated data/string_reverse.py
+ Generated data/transformed.py
  Generated trainer.py
  Generated utils.py
  Generated main.py
@@ -201,6 +201,7 @@ outputs/
 | Name             | Task                    | Description                                        |
 | ---------------- | ----------------------- | -------------------------------------------------- |
 | `string-reverse` | Reverse a random string | Synthetic, CPU-generatable. No downloads required. |
+| `hugging-face`   | User-defined             | Loads a Hub dataset and leaves the task-specific transform for you. |
 
 ### Trainers
 
@@ -239,7 +240,7 @@ Since the generated code is yours, you can override at any layer without touchin
 | What to change     | How                                                                                      |
 | ------------------ | ---------------------------------------------------------------------------------------- |
 | Model architecture | Edit `models/<model_name>.py`, or add a new file and update `_target_` in config         |
-| Dataset            | Edit `datasets/<dataset_name>.py`, or add a new file and update `_target_` in config     |
+| Dataset            | Edit `data/<dataset_name>.py`, or add a new file and update `_target_` in config         |
 | Train step         | Override `_train_step()` in `trainer.py`                                                 |
 | Eval step          | Override `_eval_step()` in `trainer.py`                                                  |
 | Metrics            | Add Ignite metrics in `_attach_metrics()` in `trainer.py`                                |

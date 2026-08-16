@@ -21,6 +21,7 @@ from trainite.config.registry import MODEL_SPECS, DATASET_SPECS, PREPROCESSOR_SP
         (["basic-transformer"], "counting", "decoder-trainer"),
         (["rope-transformer"], "counting", "decoder-trainer"),
         (["rope-transformer", "basic-transformer"], "counting", "decoder-trainer"),
+        (["rope-transformer"], "hugging-face", "decoder-trainer"),
     ],
 )
 def test_init_generates_valid_project(models: list[str], dataset: str, trainer: str) -> None:
@@ -54,8 +55,8 @@ def test_init_generates_valid_project(models: list[str], dataset: str, trainer: 
             "config.yaml",
             "config.py",
             *[f"models/{spec.name}.py" for spec in model_specs],
-            f"datasets/{dataset_spec.name}.py",
-            "datasets/transformed.py",
+            f"data/{dataset_spec.name}.py",
+            "data/transformed.py",
             "trainer.py",
             "utils.py",
             "main.py",
@@ -79,8 +80,8 @@ def test_init_generates_valid_project(models: list[str], dataset: str, trainer: 
         python_files = [
             "config.py",
             *[f"models/{spec.name}.py" for spec in model_specs],
-            f"datasets/{dataset_spec.name}.py",
-            "datasets/transformed.py",
+            f"data/{dataset_spec.name}.py",
+            "data/transformed.py",
             "trainer.py",
             "utils.py",
             "main.py",
@@ -89,6 +90,13 @@ def test_init_generates_valid_project(models: list[str], dataset: str, trainer: 
         for filename in python_files:
             if filename is not None:
                 py_compile.compile(str(project_dir / filename), doraise=True)
+
+        if dataset == "hugging-face":
+            assert generated_config["data"]["dataset"]["_target_"] == "datasets.load_dataset"
+            assert "datasets>=4" in (project_dir / "pyproject.toml").read_text()
+        else:
+            assert generated_config["data"]["dataset"]["_target_"].startswith("data.")
+        assert generated_config["data"]["transform"]["_target_"].startswith("data.")
 
 
 @pytest.mark.parametrize(

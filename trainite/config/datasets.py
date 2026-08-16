@@ -7,7 +7,7 @@ class PromptCompletionTransformConfig(TransformConfig):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: Literal[
         "trainite.datasets.string_reverse.PromptCompletionTransform",
-        "datasets.string_reverse.PromptCompletionTransform",
+        "data.string_reverse.PromptCompletionTransform",
     ] = Field(
         default="trainite.datasets.string_reverse.PromptCompletionTransform",
         alias="_target_",
@@ -18,7 +18,7 @@ class PromptCompletionTransformConfig(TransformConfig):
 class StringReverseDatasetConfig(DatasetConfig):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: Literal[
-        "trainite.datasets.string_reverse.StringReverseDataset", "datasets.string_reverse.StringReverseDataset"
+        "trainite.datasets.string_reverse.StringReverseDataset", "data.string_reverse.StringReverseDataset"
     ] = Field(
         default="trainite.datasets.string_reverse.StringReverseDataset",
         alias="_target_",
@@ -62,7 +62,7 @@ class CountingTransformConfig(TransformConfig):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: Literal[
         "trainite.datasets.counting.CountingTransform",
-        "datasets.counting.CountingTransform",
+        "data.counting.CountingTransform",
     ] = Field(
         default="trainite.datasets.counting.CountingTransform",
         alias="_target_",
@@ -74,7 +74,7 @@ class CountingDatasetConfig(DatasetConfig):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: Literal[
         "trainite.datasets.counting.CountingDataset",
-        "datasets.counting.CountingDataset",
+        "data.counting.CountingDataset",
     ] = Field(
         default="trainite.datasets.counting.CountingDataset",
         alias="_target_",
@@ -104,6 +104,39 @@ class CountingDataConfig(DataWithAutoSplit):
         default_factory=CountingDatasetConfig
     )
     transform: CountingTransformConfig | None = Field(default_factory=CountingTransformConfig)
+    test_ratio: float = 0.1
+    val_ratio: float = 0.1
+    dataloader: DataLoaderConfig = Field(
+        default_factory=lambda: DataLoaderConfig(
+            batch_size=32,
+            shuffle=True,
+        )
+    )
+
+
+class HuggingFaceTransformConfig(TransformConfig):
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
+    target: Literal[
+        "trainite.datasets.hugging_face.HuggingFaceTransform",
+        "data.hugging_face.HuggingFaceTransform",
+    ] = Field(
+        default="trainite.datasets.hugging_face.HuggingFaceTransform",
+        alias="_target_",
+    )
+
+
+class HuggingFaceDatasetConfig(DatasetConfig):
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
+    target: Literal["datasets.load_dataset"] = Field(default="datasets.load_dataset", alias="_target_")
+    path: str = Field(default="namespace/dataset-name", min_length=1)
+    name: str | None = None
+    split: str = Field(default="train", min_length=1)
+    revision: str | None = None
+
+
+class HuggingFaceDataConfig(DataWithAutoSplit):
+    dataset: HuggingFaceDatasetConfig = Field(default_factory=HuggingFaceDatasetConfig)  # type: ignore[assignment]
+    transform: HuggingFaceTransformConfig = Field(default_factory=HuggingFaceTransformConfig)
     test_ratio: float = 0.1
     val_ratio: float = 0.1
     dataloader: DataLoaderConfig = Field(

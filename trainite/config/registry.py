@@ -77,6 +77,17 @@ DATASET_SPECS = {
         readme_template_path=Path("trainite/templates/components/datasets/counting.md"),
         preprocessor_spec_name="char",
     ),
+    "hugging-face": DatasetSpec(
+        name="hugging_face",
+        implementation_path=Path("trainite/datasets/hugging_face.py"),
+        config_cls_path="trainite.config.datasets.HuggingFaceDataConfig",
+        dataset_config_cls_path="trainite.config.datasets.HuggingFaceDatasetConfig",
+        implementation_symbol="HuggingFaceTransform",
+        builder_symbol="datasets.load_dataset",
+        readme_template_path=Path("trainite/templates/components/datasets/hugging_face.md"),
+        preprocessor_spec_name="char",
+        dependencies=["datasets"],
+    ),
 }
 
 TRAINER_SPECS = {
