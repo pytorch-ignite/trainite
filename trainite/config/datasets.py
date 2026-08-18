@@ -123,6 +123,7 @@ class HuggingFaceTransformConfig(TransformConfig):
         default="trainite.datasets.hugging_face.HuggingFaceTransform",
         alias="_target_",
     )
+    max_length: int = Field(default=128, gt=1)
 
 
 class HuggingFaceDatasetConfig(DatasetConfig):

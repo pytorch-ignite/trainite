@@ -28,7 +28,11 @@ selects physical files for local or custom file-based datasets; it does not cont
 ## Implement the transform
 
 Edit `HuggingFaceTransform.__call__` in `data/hugging_face.py`. It receives one raw dictionary from the selected
-dataset and must return the sample shape expected by your model, collate function, and trainer.
+dataset and must return the included `DatapointModel`. The comments on that model explain every tensor and logging
+field expected by the causal-LM collate function and trainer.
+
+`data.transform.max_length` defaults to `128` and is passed to the transform constructor. Add another transform config
+field only when you also add the matching constructor parameter.
 
 The generated placeholder deliberately raises `NotImplementedError`: dataset columns and training objectives differ,
 so Trainite cannot infer a correct generic transform.

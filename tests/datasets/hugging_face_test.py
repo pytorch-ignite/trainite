@@ -3,7 +3,7 @@ from typing import cast
 
 import pytest
 
-from trainite.config.datasets import HuggingFaceDatasetConfig
+from trainite.config.datasets import HuggingFaceDatasetConfig, HuggingFaceTransformConfig
 from trainite.datasets.hugging_face import HuggingFaceTransform
 from trainite.datasets.transformed import TransformedDataset
 from trainite.shared.utils import build_dataset  # pyright: ignore[reportUnknownVariableType]
@@ -21,5 +21,11 @@ def test_load_hugging_face_dataset(tmp_path: Path) -> None:
 
 
 def test_hugging_face_transform_requires_implementation() -> None:
+    config = HuggingFaceTransformConfig()
+    assert config.max_length == 128
+
     with pytest.raises(NotImplementedError, match="data/hugging_face.py"):
-        _ = HuggingFaceTransform(tokenizer=object())({"text": "example"})
+        _ = HuggingFaceTransform(tokenizer=object(), max_length=config.max_length)({"text": "example"})
+
+    with pytest.raises(ValueError, match="at least 2"):
+        _ = HuggingFaceTransform(tokenizer=object(), max_length=1)
