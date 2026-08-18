@@ -7,7 +7,7 @@ class PromptCompletionTransformConfig(TransformConfig):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: Literal[
         "trainite.datasets.string_reverse.PromptCompletionTransform",
-        "data.string_reverse.PromptCompletionTransform",
+        "dataset_impl.string_reverse.PromptCompletionTransform",
     ] = Field(
         default="trainite.datasets.string_reverse.PromptCompletionTransform",
         alias="_target_",
@@ -18,7 +18,8 @@ class PromptCompletionTransformConfig(TransformConfig):
 class StringReverseDatasetConfig(DatasetConfig):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: Literal[
-        "trainite.datasets.string_reverse.StringReverseDataset", "data.string_reverse.StringReverseDataset"
+        "trainite.datasets.string_reverse.StringReverseDataset",
+        "dataset_impl.string_reverse.StringReverseDataset",
     ] = Field(
         default="trainite.datasets.string_reverse.StringReverseDataset",
         alias="_target_",
@@ -62,7 +63,7 @@ class CountingTransformConfig(TransformConfig):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: Literal[
         "trainite.datasets.counting.CountingTransform",
-        "data.counting.CountingTransform",
+        "dataset_impl.counting.CountingTransform",
     ] = Field(
         default="trainite.datasets.counting.CountingTransform",
         alias="_target_",
@@ -74,7 +75,7 @@ class CountingDatasetConfig(DatasetConfig):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: Literal[
         "trainite.datasets.counting.CountingDataset",
-        "data.counting.CountingDataset",
+        "dataset_impl.counting.CountingDataset",
     ] = Field(
         default="trainite.datasets.counting.CountingDataset",
         alias="_target_",
@@ -118,7 +119,7 @@ class HuggingFaceTransformConfig(TransformConfig):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: Literal[
         "trainite.datasets.hugging_face.HuggingFaceTransform",
-        "data.hugging_face.HuggingFaceTransform",
+        "dataset_impl.hugging_face.HuggingFaceTransform",
     ] = Field(
         default="trainite.datasets.hugging_face.HuggingFaceTransform",
         alias="_target_",

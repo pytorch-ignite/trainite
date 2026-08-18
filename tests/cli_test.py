@@ -55,8 +55,8 @@ def test_init_generates_valid_project(models: list[str], dataset: str, trainer: 
             "config.yaml",
             "config.py",
             *[f"models/{spec.name}.py" for spec in model_specs],
-            f"data/{dataset_spec.name}.py",
-            "data/transformed.py",
+            f"dataset_impl/{dataset_spec.name}.py",
+            "dataset_impl/transformed.py",
             "trainer.py",
             "utils.py",
             "main.py",
@@ -80,8 +80,8 @@ def test_init_generates_valid_project(models: list[str], dataset: str, trainer: 
         python_files = [
             "config.py",
             *[f"models/{spec.name}.py" for spec in model_specs],
-            f"data/{dataset_spec.name}.py",
-            "data/transformed.py",
+            f"dataset_impl/{dataset_spec.name}.py",
+            "dataset_impl/transformed.py",
             "trainer.py",
             "utils.py",
             "main.py",
@@ -98,8 +98,8 @@ def test_init_generates_valid_project(models: list[str], dataset: str, trainer: 
             assert "datasets" in generated_pyproject
             assert "transformers" in generated_pyproject
         else:
-            assert generated_config["data"]["dataset"]["_target_"].startswith("data.")
-        assert generated_config["data"]["transform"]["_target_"].startswith("data.")
+            assert generated_config["data"]["dataset"]["_target_"].startswith("dataset_impl.")
+        assert generated_config["data"]["transform"]["_target_"].startswith("dataset_impl.")
 
 
 @pytest.mark.parametrize(

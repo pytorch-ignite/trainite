@@ -239,8 +239,8 @@ def _build_templates(
 
     sources.update(
         {
-            f"data/{dataset_spec.name}.py": dataset_spec.implementation_path,
-            "data/transformed.py": Path("trainite/datasets/transformed.py"),
+            f"dataset_impl/{dataset_spec.name}.py": dataset_spec.implementation_path,
+            "dataset_impl/transformed.py": Path("trainite/datasets/transformed.py"),
             "trainer.py": trainer_spec.implementation_path,
             "utils.py": Path("trainite/shared/utils.py"),
             "main.py": Path("trainite/shared/main.py"),

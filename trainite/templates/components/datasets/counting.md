@@ -38,7 +38,7 @@ Controls dataset generation so runs are repeatable.
 data:
   train:
     dataset:
-      _target_: data.counting.CountingDataset
+      _target_: dataset_impl.counting.CountingDataset
       total_size: 1000
       k: 3
       min_seq_len: 201
@@ -47,7 +47,7 @@ data:
 
 ## When to change this file
 
-Edit `data/counting.py` if you want to:
+Edit `dataset_impl/counting.py` if you want to:
 
 * change the alternating blocks generation rules
 * change how targets/prefix boundaries are calculated

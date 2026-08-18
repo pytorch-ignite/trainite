@@ -33,5 +33,5 @@ class HuggingFaceTransform:
 
     def __call__(self, sample: dict[str, object]) -> DatapointModel:
         raise NotImplementedError(
-            "Implement HuggingFaceTransform.__call__ in data/hugging_face.py for your dataset and model"
+            "Implement HuggingFaceTransform.__call__ in dataset_impl/hugging_face.py for your dataset and model"
         )

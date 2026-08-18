@@ -24,7 +24,7 @@ def test_hugging_face_transform_requires_implementation() -> None:
     config = HuggingFaceTransformConfig()
     assert config.max_length == 128
 
-    with pytest.raises(NotImplementedError, match="data/hugging_face.py"):
+    with pytest.raises(NotImplementedError, match="dataset_impl/hugging_face.py"):
         _ = HuggingFaceTransform(tokenizer=object(), max_length=config.max_length)({"text": "example"})
 
     with pytest.raises(ValueError, match="at least 2"):
