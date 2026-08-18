@@ -335,7 +335,7 @@ class Trainer:
         evaluation set.  Both use ``_flatten`` as their ``output_transform`` so they
         see only the non-ignored token positions.
 
-        See: https://pytorch.org/ignite/metrics.html
+        See: https://docs.pytorch.org/ignite/metrics.html
         """
         # Running average loss tracked per training iteration (logged in console)
         RunningAverage(output_transform=lambda output: output["loss"]).attach(self.trainer, "batch_loss")
