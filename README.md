@@ -201,6 +201,7 @@ outputs/
 | Name             | Task                    | Description                                        |
 | ---------------- | ----------------------- | -------------------------------------------------- |
 | `string-reverse` | Reverse a random string | Synthetic, CPU-generatable. No downloads required. |
+| `counting`       | Count the number of occurrences of a target token in a sequence.           | Synthetic, CPU-generatable. No downloads required. |
 
 ### Trainers
 
