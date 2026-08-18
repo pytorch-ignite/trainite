@@ -93,7 +93,10 @@ def test_init_generates_valid_project(models: list[str], dataset: str, trainer: 
 
         if dataset == "hugging-face":
             assert generated_config["data"]["dataset"]["_target_"] == "datasets.load_dataset"
-            assert "datasets>=4" in (project_dir / "pyproject.toml").read_text()
+            assert generated_config["preprocessor"]["_target_"] == ("preprocessors.gpt2_tokenizer.load_gpt2_tokenizer")
+            generated_pyproject = (project_dir / "pyproject.toml").read_text()
+            assert "datasets" in generated_pyproject
+            assert "transformers" in generated_pyproject
         else:
             assert generated_config["data"]["dataset"]["_target_"].startswith("data.")
         assert generated_config["data"]["transform"]["_target_"].startswith("data.")
