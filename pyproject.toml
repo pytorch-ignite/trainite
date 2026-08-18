@@ -73,6 +73,7 @@ generated = [
 ]
 dev = [
     "datasets>=4",
+    "transformers",
     "torch",
     "pytorch-ignite",
     "tensorboard",
