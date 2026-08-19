@@ -1,10 +1,9 @@
 from typing import Literal, Self
-from pydantic import Field, ConfigDict, model_validator
+from pydantic import Field, model_validator
 from trainite.config.base import DatasetConfig, TransformConfig, DataWithAutoSplit, DataLoaderConfig
 
 
 class PromptCompletionTransformConfig(TransformConfig):
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: Literal[
         "trainite.datasets.string_reverse.PromptCompletionTransform",
         "datasets.string_reverse.PromptCompletionTransform",
@@ -16,7 +15,6 @@ class PromptCompletionTransformConfig(TransformConfig):
 
 
 class StringReverseDatasetConfig(DatasetConfig):
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: Literal[
         "trainite.datasets.string_reverse.StringReverseDataset", "datasets.string_reverse.StringReverseDataset"
     ] = Field(
@@ -59,7 +57,6 @@ class StringReverseDataConfig(DataWithAutoSplit):
 
 
 class CountingTransformConfig(TransformConfig):
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: Literal[
         "trainite.datasets.counting.CountingTransform",
         "datasets.counting.CountingTransform",
@@ -71,7 +68,6 @@ class CountingTransformConfig(TransformConfig):
 
 
 class CountingDatasetConfig(DatasetConfig):
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: Literal[
         "trainite.datasets.counting.CountingDataset",
         "datasets.counting.CountingDataset",
