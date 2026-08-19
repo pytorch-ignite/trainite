@@ -11,9 +11,15 @@ from torch.utils.data import Dataset
 class CountingDataset(Dataset):
     """Generates unique alternating strings in L_k and their prefix-classification targets.
 
+    This dataset is designed to probe transformer counting limitations. L_k consists of strings over {a, b} with exactly k alternations (e.g. ``"aaabbb"`` has 1 alternation; ``"aabba"`` has 2).  A model that can solve this task must implicitly count the number of character transitions.
+
     Each sample is returned as a dictionary containing:
-        - 'source': the generated string of 'a's and 'b's (e.g., 'aaabbb')
-        - 'target': the target string of '0's and '1's (e.g., '000111')
+        - 'source': the generated string of 'a's and 'b's (e.g., ``'aaabbb'``)
+        - 'target': the target string of '0's and '1's (e.g., ``'000111'``)
+
+    The target marks positions *after* the last transition with '1' and all earlier
+    positions with '0', so predicting the target requires detecting when the final
+    alternation has occurred.
     """
 
     def __init__(
@@ -152,6 +158,23 @@ class DatapointModel(BaseModel):
 
 
 class CountingTransform:
+    """Converts a raw ``CountingDataset`` sample into training tensors.
+
+    The counting task is a classification task: given an alternating-character
+    string (e.g. ``"aaabbb"``), predict at each position whether the sequence has
+    completed its last transition (``'1'``) or not (``'0'``).
+
+    Token layout — a classification task where input_ids and label_ids are the
+    same length and aligned position-for-position:
+
+        position:  0      1      2    ...   n
+        input_ids: [BOS]  s_0    s_1  ...  s_{n-1}
+        label_ids:  0     y_0    y_1  ...  y_{n-1}
+
+    A ``<BOS>`` token is prepended to the source so the model has a clean start
+    token.  The BOS position is given label ``0`` (the default "not ended" class).
+    """
+
     def __init__(self, tokenizer: Any, ignore_index: int = -100) -> None:
         self.tokenizer = tokenizer
         self.ignore_index = ignore_index

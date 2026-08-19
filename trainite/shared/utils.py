@@ -34,9 +34,13 @@ T = TypeVar("T", bound=BaseModel)
 
 
 def get_target(target_path: str) -> Any:
-    """
-    Gets a class or a function defined by a `_target_` key
-    using an OmegaConf DictConfig.
+    """Resolve a dotted import path to a Python class or function.
+
+    Trainite uses a ``_target_`` key in config files (e.g.
+    ``_target_: trainite.models.transformer.TransformerModel``) to specify which
+    class or function should be instantiated at runtime without hard-coding the
+    import.  This function performs that resolution by splitting the path on the
+    last dot, importing the module, and returning the named attribute.
     """
     if not target_path:
         raise ValueError("The '_target_' key must not be empty.")
@@ -53,8 +57,16 @@ def get_target(target_path: str) -> Any:
 
 
 def _inject_if_accepted(target_symbol: Any, *, allow_var_kwargs: bool = True, **candidates: Any) -> dict[str, Any]:
-    """Inspects the target symbol's signature and filters the candidates to
-    only include those that are accepted by the target symbol.
+    """Filter keyword arguments to only those accepted by the target's signature.
+
+    When building datasets or transforms, the caller may want to pass ``tokenizer``
+    or ``preprocessor`` to the component — but not every component declares those
+    parameters.  This function inspects the target's signature and silently drops
+    any candidates it does not accept, so components remain decoupled from the
+    calling convention.
+
+    If the target accepts ``**kwargs`` and ``allow_var_kwargs`` is true, all
+    candidates are passed through as-is.
     """
     try:
         sig = inspect.signature(target_symbol)
@@ -66,9 +78,19 @@ def _inject_if_accepted(target_symbol: Any, *, allow_var_kwargs: bool = True, **
 
 
 def instantiate(config: BaseModel, **kwargs) -> Any:
-    """
-    Instantiates a class or calls a function defined by a `_target_` key
-    using an OmegaConf DictConfig.
+    """Instantiate a class or call a function described by a Pydantic config.
+
+    The config must contain a ``_target_`` field with a dotted import path (e.g.
+    ``trainite.models.transformer.TransformerModel``).  All other fields in the
+    config are forwarded as keyword arguments to the target.
+
+    Extra ``**kwargs`` (e.g. ``vocab_size``, ``pad_token_id``) override or
+    supplement the config fields, allowing the caller to inject runtime-resolved
+    values that are not known at config-parse time.
+
+    ``_inject_if_accepted`` ensures that only parameters the target actually
+    declares are passed, so components are not required to accept every possible
+    caller keyword.
     """
     if isinstance(config, BaseModel):
         config_dict = config.model_dump(by_alias=True, polymorphic_serialization=True)
@@ -172,6 +194,13 @@ def _loaders_from_splits(
     tokenizer: Any,
     collate_fn_target: str | None = None,
 ) -> tuple[DataLoader, DataLoader, DataLoader | None]:
+    """Build DataLoaders from explicitly defined train/val/test split configs.
+
+    Each split (``data_config.train``, ``data_config.val``, ``data_config.test``)
+    specifies its own dataset, transform, and dataloader config independently.
+    The test loader is optional — if ``data_config.test`` is absent, ``None`` is returned.
+    """
+
     def _make(split_config: Any) -> DataLoader:
         ds = build_dataset(split_config.dataset, split_config.transform, tokenizer)
         return create_dataloader(ds, split_config.dataloader, tokenizer, collate_fn_target=collate_fn_target)
@@ -185,6 +214,14 @@ def _loaders_from_ratios(
     seed: int,
     collate_fn_target: str | None = None,
 ) -> tuple[DataLoader, DataLoader, DataLoader | None]:
+    """Build DataLoaders by splitting a single dataset by ratio.
+
+    A single dataset is built and then split into train/val/test subsets using
+    ``torch.utils.data.random_split`` with a fixed ``seed`` for reproducibility.
+    Split sizes are derived from ``val_ratio`` and ``test_ratio``; the remainder
+    goes to training.  The test loader is omitted (``None``) when ``test_ratio``
+    leaves zero samples for testing.
+    """
     dataset = build_dataset(data_config.dataset, data_config.transform, tokenizer)
     total_len = len(dataset)  # type: ignore
     if total_len == 0:
@@ -215,6 +252,16 @@ def build_dataloaders(
     seed: int,
     collate_fn_target: str | None = None,
 ) -> tuple[DataLoader, DataLoader, DataLoader | None]:
+    """Entry point for building train/val/test DataLoaders from a data config.
+
+    Supports two config strategies (set in ``config.yaml`` under ``data:``):
+
+    * **Explicit splits** (``DataConfigBase``): ``train``, ``val``, and optionally
+      ``test`` are each configured independently with their own dataset and
+      dataloader settings.
+    * **Auto-split** (``DataWithAutoSplit``): a single dataset is split into
+      train/val/test by ratio, sharing the same dataloader settings.
+    """
     if isinstance(data_config, DataWithAutoSplit):
         return _loaders_from_ratios(data_config, tokenizer, seed, collate_fn_target)
     return _loaders_from_splits(data_config, tokenizer, collate_fn_target)
@@ -239,6 +286,19 @@ def attach_lr_scheduler(
     total_iters: int,
     peak_lr: float,
 ) -> None:
+    """Attach a linear warm-up + linear decay learning-rate schedule to the engine.
+
+    The schedule has two phases:
+    1. **Warm-up** (first 10 % of iterations): LR ramps linearly from 0 to `peak_lr`.
+    2. **Decay** (remaining iterations): LR decays linearly from `peak_lr` to 0.
+
+    This is a common schedule for Transformer training.  The ``create_lr_scheduler_with_warmup``
+    helper from PyTorch-Ignite wraps a standard ``torch.optim.lr_scheduler`` and
+    fires after every iteration via ``Events.ITERATION_COMPLETED``.
+
+    See: https://docs.pytorch.org/ignite/generated/ignite.handlers.param_scheduler.create_lr_scheduler_with_warmup.html
+    """
+    # Reserve at least 2 iterations for warm-up even for very short training runs
     warmup_iters = max(2, int(0.1 * total_iters))
     linear_decay = LinearLR(
         optimizer,
@@ -260,6 +320,19 @@ def attach_early_stopping(
     trainer_engine: Engine,
     patience: int,
 ) -> None:
+    """Stop training early when validation loss stops improving.
+
+    ``EarlyStopping`` from PyTorch-Ignite monitors a score function after each
+    validation run.  If the score does not improve for `patience` consecutive
+    validation epochs, it sends a termination signal to the trainer engine so
+    training stops gracefully without wasting compute.
+
+    The score function here returns the raw validation loss (positive value).
+    ``mode='min'`` tells ``EarlyStopping`` to treat *lower* scores as better,
+    so training stops when the loss stops decreasing.
+
+    See: https://docs.pytorch.org/ignite/generated/ignite.handlers.EarlyStopping.html#ignite.handlers.EarlyStopping
+    """
     early_stopping = EarlyStopping(
         patience=patience,
         score_function=lambda engine: engine.state.metrics["loss"],
@@ -275,6 +348,16 @@ def setup_training_checkpointing(
     to_save: dict[str, Any],
     save_handler: DiskSaver | ClearMLSaver,
 ) -> Checkpoint:
+    """Save the latest model and optimizer state at the end of every epoch.
+
+    Keeps only the single most recent checkpoint (``n_saved=1``) so disk usage
+    stays bounded.  The checkpoint can be used to resume training after an
+    interruption.
+
+    The filename pattern is ``last.pt`` (prefix=``last``, no score suffix).
+
+    See: https://docs.pytorch.org/ignite/generated/ignite.handlers.Checkpoint.html#checkpoint
+    """
     last_checkpoint = Checkpoint(
         to_save=to_save,
         save_handler=save_handler,
@@ -295,6 +378,16 @@ def setup_best_model_checkpoint(
     score_function: Callable,
     score_name: str,
 ) -> Checkpoint:
+    """Save the model that achieves the best validation score during training.
+
+    ``Checkpoint`` from PyTorch-Ignite compares the `score_function` result after
+    each validation run and overwrites the file only when the score improves, so
+    the saved file always contains the best weights seen so far.
+
+    Setting ``n_saved=1`` means at most one "best" checkpoint is kept on disk.
+
+    See: https://docs.pytorch.org/ignite/generated/ignite.handlers.Checkpoint.html#checkpoint
+    """
     checkpoint = Checkpoint(
         to_save=to_save,
         save_handler=save_handler,
@@ -315,6 +408,17 @@ def setup_console_logger(
     log_every_steps: int,
     optimizer: Any,
 ) -> logging.Logger:
+    """Attach a console (and file) logger to the training engine.
+
+    Uses ``FBResearchLogger`` from PyTorch-Ignite which prints training progress
+    in a compact, human-readable format every `log_every_steps` iterations, similar
+    to the style used in Facebook Research's training scripts.
+
+    A ``logging.Logger`` writing to both stdout and ``<run_dir>/output.log`` is
+    returned so other parts of the code can reuse the same logger instance.
+
+    See: https://docs.pytorch.org/ignite/generated/ignite.handlers.fbresearch_logger.html#module-ignite.handlers.fbresearch_logger
+    """
     logger = setup_logger(
         "trainer",
         level=logging.INFO,

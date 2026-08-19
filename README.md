@@ -202,6 +202,7 @@ outputs/
 | ---------------- | ----------------------- | -------------------------------------------------- |
 | `string-reverse` | Reverse a random string | Synthetic, CPU-generatable. No downloads required. |
 | `hugging-face`   | User-defined             | Loads a Hub dataset and leaves the task-specific transform for you. |
+| `counting`       | Count the number of occurrences of a target token in a sequence.           | Synthetic, CPU-generatable. No downloads required. |
 
 ### Trainers
 
