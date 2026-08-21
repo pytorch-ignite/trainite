@@ -125,6 +125,7 @@ class HuggingFaceTransformConfig(TransformConfig):
         alias="_target_",
     )
     max_length: int = Field(default=128, gt=1)
+    ignore_index: int = -100
 
 
 class HuggingFaceDatasetConfig(DatasetConfig):
