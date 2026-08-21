@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from trainite.config.base import ModelConfig
 
@@ -8,7 +8,6 @@ from trainite.config.base import ModelConfig
 class BasicTransformerModelConfig(ModelConfig):
     """Configuration for the BasicTransformerModel (absolute positional encoding)."""
 
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: Literal[
         "trainite.models.basic_transformer.BasicTransformerModel",
         "models.basic_transformer.BasicTransformerModel",
@@ -24,7 +23,6 @@ class BasicTransformerModelConfig(ModelConfig):
 class RoPETransformerModelConfig(ModelConfig):
     """Configuration for the RoPETransformerModel (rotary positional embeddings)."""
 
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: Literal[
         "trainite.models.rope_transformer.RoPETransformerModel",
         "models.rope_transformer.RoPETransformerModel",
