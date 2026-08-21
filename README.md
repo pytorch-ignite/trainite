@@ -195,6 +195,7 @@ outputs/
 | Name   | Description                                                                                                                           |
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------- |
 | `char` | Character-level tokenizer mapping a charset to integer IDs, with reserved special tokens (`<PAD>`, `<BOS>`, `<SEP>`, `<EOS>`, `<UNK>`). |
+| `gpt2` | Fast GPT-2 byte-level BPE tokenizer from Hugging Face Transformers; reuses the end-of-text token for padding. |
 
 ### Datasets
 
