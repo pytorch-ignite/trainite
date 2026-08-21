@@ -112,7 +112,6 @@ class CountingDataConfig(DataWithAutoSplit):
 
 
 class HuggingFaceTransformConfig(TransformConfig):
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: Literal[
         "trainite.datasets.hugging_face.HuggingFaceTransform",
         "dataset_impl.hugging_face.HuggingFaceTransform",
@@ -125,7 +124,6 @@ class HuggingFaceTransformConfig(TransformConfig):
 
 
 class HuggingFaceDatasetConfig(DatasetConfig):
-    model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: Literal["datasets.load_dataset"] = Field(default="datasets.load_dataset", alias="_target_")
     path: str = Field(default="namespace/dataset-name", min_length=1)
     name: str | None = None
