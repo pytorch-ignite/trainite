@@ -27,7 +27,7 @@ class HuggingFaceTransform:
     def __init__(self, tokenizer: Any, max_length: int = 128, ignore_index: int = -100) -> None:
         if max_length < 2:
             raise ValueError("max_length must be at least 2")
-        self.tokenizer: object = tokenizer
+        self.tokenizer: Any = tokenizer
         self.max_length: int = max_length
         self.ignore_index: int = ignore_index
 
