@@ -88,7 +88,7 @@ If you prefer standard Python tools, you can create a virtual environment and us
 
 To launch this experiment on cloud GPUs (AWS, GCP, Azure, Lambda, etc.) using [SkyPilot](https://docs.skypilot.ai/):
 
-1. **Initialize SkyPilot configuration**:
+1. **Initialize SkyPilot configuration** (if not already generated):
    ```bash
    trainite sky init
    ```

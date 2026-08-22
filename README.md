@@ -135,6 +135,7 @@ Interactive prompt preview:
 ? Trainer: decoder-trainer
 ? Output directory: outputs
 ? Run name: rope-transformer__string-reverse
+? Enable SkyPilot cloud training (generate sky.yaml)? No
 
  Generated config.yaml
  Generated models/rope_transformer.py
@@ -184,18 +185,23 @@ outputs/
 
 ### Cloud Training with SkyPilot
 
-When you're ready to scale your experiment to cloud GPUs, you can add a [SkyPilot](https://docs.skypilot.ai/) configuration with a single command:
+You can enable [SkyPilot](https://docs.skypilot.ai/) cloud training in two ways:
 
-```bash
-cd my-experiment
-trainite sky init
-```
+1. **During project creation**:
+   ```bash
+   trainite init my-experiment --sky
+   ```
+2. **In an existing project**:
+   ```bash
+   cd my-experiment
+   trainite sky init
+   ```
 
-This generates `sky.yaml` in your project and adds `skypilot` to `pyproject.toml`. To launch on any cloud (AWS, GCP, Azure, Lambda, etc.):
+This creates `sky.yaml` in your project and adds `skypilot` to `pyproject.toml`. To launch on any cloud (AWS, GCP, Azure, Lambda, Kubernetes, etc.):
 
 ```bash
 # 1. Update environment
-pip install -e .
+pip install -e .    # or: uv sync
 
 # 2. Verify cloud credentials
 sky check
