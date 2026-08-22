@@ -210,6 +210,9 @@ sky check
 sky launch sky.yaml
 ```
 
+> [!TIP]
+> Trainite installs the base `skypilot` package. Running `sky check` will detect your active cloud credentials and provide the exact one-line command to install your specific cloud provider's driver if needed (e.g. `pip install "skypilot[aws]"` or `pip install "skypilot[kubernetes]"`).
+
 ## Built-in Components
 
 ### Models
