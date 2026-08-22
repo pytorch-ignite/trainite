@@ -4,7 +4,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from trainite.cli.init import Init
+from trainite.cli.init import Init, init_project
 import yaml
 
 import pytest
@@ -243,3 +243,27 @@ def test_import_without_dependencies() -> None:
 def test_duplicate_models_raises_error():
     with pytest.raises(ValueError, match="Duplicate model entries are not allowed"):
         Init(model=("rope-transformer", "rope-transformer"))
+
+
+def test_init_with_sky_flag(tmp_path):
+    project_dir = tmp_path / "sky-experiment"
+    config = Init(project_dir=str(project_dir), sky=True)
+    init_project(config)
+
+    assert (project_dir / "sky.yaml").exists()
+    sky_content = (project_dir / "sky.yaml").read_text()
+    assert 'name: "sky-experiment"' in sky_content
+    assert "uv sync" in sky_content
+
+    pyproject_content = (project_dir / "pyproject.toml").read_text()
+    assert "skypilot" in pyproject_content
+
+
+def test_init_without_sky_flag_default(tmp_path):
+    project_dir = tmp_path / "no-sky-experiment"
+    config = Init(project_dir=str(project_dir), sky=False)
+    init_project(config)
+
+    assert not (project_dir / "sky.yaml").exists()
+    pyproject_content = (project_dir / "pyproject.toml").read_text()
+    assert "skypilot" not in pyproject_content
