@@ -1,0 +1,22 @@
+# For full SkyPilot YAML reference, visit: https://docs.skypilot.ai/en/latest/reference/yaml-spec.html
+
+name: "{{project_name}}"
+
+workdir: .
+
+resources:
+  accelerators: L4:1
+  use_spot: false
+  disk_size: 50
+
+setup: |
+  pip install uv
+  uv sync
+
+run: |
+  uv run python main.py config.yaml
+
+# envs:
+#   # Optional environment variables (accessible in setup and run, or override via --env)
+#   MY_BUCKET: skypilot-data
+#   MY_ENV_VAR: value

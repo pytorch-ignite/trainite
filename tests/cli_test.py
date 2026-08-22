@@ -209,6 +209,10 @@ def test_cli_main_routing(capsys):
         )
         mock_init_project.assert_called_once()
 
+    with mock.patch("trainite.cli.main.init_sky") as mock_init_sky:
+        main(argv=["sky", "init", "--force"])
+        mock_init_sky.assert_called_once()
+
 
 def test_import_without_dependencies() -> None:
     """

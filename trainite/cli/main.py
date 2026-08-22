@@ -5,6 +5,7 @@ import tyro
 
 from trainite import __version__
 from trainite.cli.init import Init, init_project, run_interactive_mode
+from trainite.cli.sky import SkyInit, init_sky
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -12,6 +13,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     commands = {
         "init": "Initialize a new trainite project",
+        "sky": "Add SkyPilot cloud configuration to the current experiment",
     }
 
     if args_list and args_list[0] in ("--version", "-V"):
@@ -34,3 +36,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         else:
             cmd = tyro.cli(Init, args=args_list[1:])
             init_project(cmd)
+    elif subcommand == "sky":
+        sky_args = args_list[1:]
+        if sky_args and sky_args[0] == "init":
+            sky_args = sky_args[1:]
+        cmd = tyro.cli(SkyInit, args=sky_args)
+        init_sky(cmd)

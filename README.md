@@ -50,6 +50,7 @@ optimizer:
   - [Initialize a Project](#initialize-a-project)
   - [Run Training](#run-training)
   - [Monitor & Iterate](#monitor--iterate)
+  - [Cloud Training with SkyPilot](#cloud-training-with-skypilot)
 - [Built-in Components](#built-in-components)
 - [Configuration](#configuration)
 - [Customizing Your Project](#customizing-your-project)
@@ -179,6 +180,28 @@ outputs/
         ├── best_checkpoint_*.pt
         ├── last_checkpoint_*.pt
         └── tensorboard/        # TensorBoard event files
+```
+
+### Cloud Training with SkyPilot
+
+When you're ready to scale your experiment to cloud GPUs, you can add a [SkyPilot](https://docs.skypilot.ai/) configuration with a single command:
+
+```bash
+cd my-experiment
+trainite sky init
+```
+
+This generates `sky.yaml` in your project and adds `skypilot` to `pyproject.toml`. To launch on any cloud (AWS, GCP, Azure, Lambda, etc.):
+
+```bash
+# 1. Update environment
+pip install -e .
+
+# 2. Verify cloud credentials
+sky check
+
+# 3. Launch training on cloud GPU
+sky launch sky.yaml
 ```
 
 ## Built-in Components
