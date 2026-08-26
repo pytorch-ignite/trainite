@@ -183,7 +183,7 @@ def test_cli_main_routing(capsys):
 
     with pytest.raises(SystemExit) as exc_info:
         main(argv=[])
-    assert exc_info.value.code == 1
+    assert exc_info.value.code == 2
 
     main(argv=["--version"])
     output = capsys.readouterr()
@@ -210,7 +210,7 @@ def test_cli_main_routing(capsys):
         mock_init_project.assert_called_once()
 
     with mock.patch("trainite.cli.main.init_sky") as mock_init_sky:
-        main(argv=["sky", "init", "--force"])
+        main(argv=["add:sky", "--force"])
         mock_init_sky.assert_called_once()
 
 

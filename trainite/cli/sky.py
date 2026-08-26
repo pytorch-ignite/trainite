@@ -4,6 +4,8 @@ from pydantic import BaseModel
 import tomlkit
 import yaml
 
+from trainite.cli.init import get_skypilot_dependency
+
 
 class SkyInit(BaseModel):
     """Add a SkyPilot configuration (sky.yaml) and cloud dependencies to the current Trainite experiment.
@@ -29,7 +31,8 @@ def _add_sky_dependency(pyproject_path: Path) -> bool:
         # Check if already present
         has_sky = any(isinstance(dep, str) and dep.startswith("skypilot") for dep in dependencies)
         if not has_sky:
-            dependencies.append("skypilot")
+            sky_dep = get_skypilot_dependency()
+            dependencies.append(sky_dep)
             pyproject_path.write_text(tomlkit.dumps(doc))
             return True
         return False
@@ -49,7 +52,7 @@ def init_sky(config: SkyInit) -> None:
         print(
             f"Error: '{current_dir.name}' is not a valid Trainite project directory "
             "(missing config.yaml and main.py).\n"
-            "Please navigate into your Trainite experiment directory before running 'trainite sky init'.",
+            "Please navigate into your Trainite experiment directory before running 'trainite add:sky'.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -58,7 +61,7 @@ def init_sky(config: SkyInit) -> None:
     if target_file.exists() and not config.force:
         print(
             f"Error: '{target_file.name}' already exists in {current_dir.name}.\n"
-            "Pass '--force' to overwrite it: trainite sky init --force",
+            "Pass '--force' to overwrite it: trainite add:sky --force",
             file=sys.stderr,
         )
         sys.exit(1)

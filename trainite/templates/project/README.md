@@ -90,7 +90,7 @@ To launch this experiment on cloud GPUs (AWS, GCP, Azure, Lambda, etc.) using [S
 
 1. **Initialize SkyPilot configuration** (if not already generated):
    ```bash
-   trainite sky init
+   trainite add:sky
    ```
    This generates `sky.yaml` and adds `skypilot` to `pyproject.toml`.
 

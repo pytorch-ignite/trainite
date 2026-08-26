@@ -35,7 +35,7 @@ dependencies = [
 def test_sky_init_in_valid_project(mock_trainite_project: Path, monkeypatch: pytest.MonkeyPatch, capsys):
     monkeypatch.chdir(mock_trainite_project)
 
-    main(argv=["sky", "init"])
+    main(argv=["add:sky"])
 
     sky_yaml = mock_trainite_project / "sky.yaml"
     assert sky_yaml.exists()
@@ -61,20 +61,11 @@ def test_sky_init_in_valid_project(mock_trainite_project: Path, monkeypatch: pyt
     assert "Added 'skypilot' to pyproject.toml dependencies" in output
 
 
-def test_sky_subcommand_direct(mock_trainite_project: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.chdir(mock_trainite_project)
-
-    main(argv=["sky"])
-
-    sky_yaml = mock_trainite_project / "sky.yaml"
-    assert sky_yaml.exists()
-
-
 def test_sky_init_idempotent(mock_trainite_project: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.chdir(mock_trainite_project)
 
-    main(argv=["sky", "init"])
-    main(argv=["sky", "init", "--force"])
+    main(argv=["add:sky"])
+    main(argv=["add:sky", "--force"])
 
     pyproject_doc = tomlkit.parse((mock_trainite_project / "pyproject.toml").read_text())
     deps = list(pyproject_doc["project"]["dependencies"])
@@ -87,24 +78,25 @@ def test_sky_init_fails_outside_trainite_project(tmp_path: Path, monkeypatch: py
     monkeypatch.chdir(empty_dir)
 
     with pytest.raises(SystemExit) as exc_info:
-        main(argv=["sky", "init"])
+        main(argv=["add:sky"])
 
     assert exc_info.value.code == 1
     assert not (empty_dir / "sky.yaml").exists()
 
     err = capsys.readouterr().err
     assert "is not a valid Trainite project directory" in err
+    assert "trainite add:sky" in err
 
 
 def test_sky_init_overwrite_protection(mock_trainite_project: Path, monkeypatch: pytest.MonkeyPatch, capsys):
     monkeypatch.chdir(mock_trainite_project)
 
-    main(argv=["sky", "init"])
+    main(argv=["add:sky"])
 
     with pytest.raises(SystemExit) as exc_info:
-        main(argv=["sky", "init"])
+        main(argv=["add:sky"])
 
     assert exc_info.value.code == 1
     err = capsys.readouterr().err
     assert "already exists" in err
-    assert "Pass '--force' to overwrite it" in err
+    assert "Pass '--force' to overwrite it: trainite add:sky --force" in err

@@ -82,6 +82,9 @@ dev = [
     "pyrefly>=1.0.0",
     "clearml",
 ]
+integrations = [
+    "skypilot",
+]
 
 [tool.ruff]
 src = ["trainite", "examples", "tests"]

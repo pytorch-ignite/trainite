@@ -210,6 +210,18 @@ def _recreation_command(config: "Init", project_name: str) -> str:
     return " ".join(cmd_parts)
 
 
+def get_skypilot_dependency() -> str:
+    """Get the canonical skypilot dependency string from Trainite's pyproject.toml."""
+    toml_path = PACKAGE_ROOT / "pyproject.toml"
+    if not toml_path.exists():
+        toml_path = PROJECT_ROOT / "pyproject.toml"
+    if toml_path.exists():
+        _, other_deps = parse_dependencies(toml_path)
+        if "skypilot" in other_deps:
+            return other_deps["skypilot"]
+    return "skypilot"
+
+
 def _build_templates(
     model_specs: Sequence[ModelSpec],
     dataset_spec: DatasetSpec,
@@ -236,12 +248,7 @@ def _build_templates(
         final_deps.add(val)
 
     if sky:
-        if "skypilot" in other_deps:
-            final_deps.add(other_deps["skypilot"])
-        elif "skypilot" in required_deps:
-            final_deps.add(required_deps["skypilot"])
-        else:
-            final_deps.add("skypilot")
+        final_deps.add(other_deps.get("skypilot", "skypilot"))
 
     # Generated file -> source file it is copied from
     sources: dict[str, Path] = {}

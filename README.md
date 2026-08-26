@@ -194,7 +194,7 @@ You can enable [SkyPilot](https://docs.skypilot.ai/) cloud training in two ways:
 2. **In an existing project**:
    ```bash
    cd my-experiment
-   trainite sky init
+   trainite add:sky
    ```
 
 This creates `sky.yaml` in your project and adds `skypilot` to `pyproject.toml`. To launch on any cloud (AWS, GCP, Azure, Lambda, Kubernetes, etc.):
