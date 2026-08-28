@@ -87,7 +87,7 @@ def init_sky(config: SkyInit) -> None:
         pass
 
     # Render template
-    template_path = Path(__file__).resolve().parents[1] / "templates" / "integrations" / "sky.yaml"
+    template_path = PACKAGE_ROOT / "templates" / "integrations" / "sky.yaml"
     content = template_path.read_text().replace("{{project_name}}", project_name)
     target_file.write_text(content)
 

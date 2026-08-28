@@ -1,5 +1,5 @@
 import sys
-from typing import Annotated, Sequence, Union
+from typing import Annotated, Sequence
 
 import tyro
 
@@ -7,16 +7,9 @@ from trainite import __version__
 from trainite.cli.init import Init, init_project, run_interactive_mode
 from trainite.cli.sky import SkyInit, init_sky
 
-TrainiteCLI = Union[
-    Annotated[Init, tyro.conf.subcommand(name="init", description="Initialize a new trainite project")],
-    Annotated[
-        SkyInit,
-        tyro.conf.subcommand(
-            name="add:sky",
-            description="Add SkyPilot cloud configuration to the current experiment",
-        ),
-    ],
-]
+TrainiteCLI = (
+    Annotated[Init, tyro.conf.subcommand(name="init")] | Annotated[SkyInit, tyro.conf.subcommand(name="add:sky")]
+)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
