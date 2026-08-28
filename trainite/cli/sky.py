@@ -3,8 +3,7 @@ import sys
 from pydantic import BaseModel
 import tomlkit
 import yaml
-
-from trainite.cli.init import get_skypilot_dependency
+from trainite.cli.init import parse_dependencies, PROJECT_ROOT, PACKAGE_ROOT
 
 
 class SkyInit(BaseModel):
@@ -17,6 +16,18 @@ class SkyInit(BaseModel):
     """
 
     force: bool = False
+
+
+def get_skypilot_dependency() -> str:
+    """Get the canonical skypilot dependency string from Trainite's pyproject.toml."""
+    toml_path = PACKAGE_ROOT / "pyproject.toml"
+    if not toml_path.exists():
+        toml_path = PROJECT_ROOT / "pyproject.toml"
+    if toml_path.exists():
+        _, other_deps = parse_dependencies(toml_path)
+        if "skypilot" in other_deps:
+            return other_deps["skypilot"]
+    return "skypilot"
 
 
 def _add_sky_dependency(pyproject_path: Path) -> bool:
