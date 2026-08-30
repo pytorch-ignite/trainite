@@ -97,8 +97,33 @@ def test_char_tokenizer_call_return_tensors():
 def test_char_tokenizer_call_truncation():
     tokenizer = CharTokenizer()
     result = tokenizer("hello world this is a long string", add_special_tokens=True, truncation=True, max_length=5)
-    # Should be truncated to max_length (including special tokens)
+    # Should be truncated to max_length while retaining both special tokens.
     assert len(result["input_ids"]) == 5
+    assert result["input_ids"][0] == tokenizer.bos_token_id
+    assert result["input_ids"][-1] == tokenizer.eos_token_id
+    assert result["attention_mask"] == [1] * 5
+
+
+def test_char_tokenizer_call_truncation_without_special_tokens():
+    tokenizer = CharTokenizer()
+    result = tokenizer("hello", add_special_tokens=False, truncation=True, max_length=3)
+    assert result["input_ids"] == tokenizer.encode("hel")
+    assert result["attention_mask"] == [1] * 3
+
+
+@pytest.mark.parametrize("max_length", [0, 1])
+def test_char_tokenizer_call_truncation_short_max_length(max_length: int):
+    tokenizer = CharTokenizer()
+    result = tokenizer("hello", truncation=True, max_length=max_length)
+    expected_ids = [] if max_length == 0 else [tokenizer.bos_token_id]
+    assert result["input_ids"] == expected_ids
+    assert result["attention_mask"] == [1] * len(expected_ids)
+
+
+def test_char_tokenizer_call_truncation_rejects_negative_max_length():
+    tokenizer = CharTokenizer()
+    with pytest.raises(ValueError, match="max_length must be non-negative"):
+        tokenizer("hello", truncation=True, max_length=-1)
 
 
 def test_char_tokenizer_call_no_special_tokens():
