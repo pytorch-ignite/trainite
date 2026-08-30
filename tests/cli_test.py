@@ -245,6 +245,20 @@ def test_duplicate_models_raises_error():
         Init(model=("rope-transformer", "rope-transformer"))
 
 
+def test_interactive_model_selection_cancel_exits_cleanly():
+    from unittest import mock
+
+    from trainite.cli.init import _prompt_multi_choice
+
+    with mock.patch("trainite.cli.init.questionary.checkbox") as checkbox:
+        checkbox.return_value.ask.return_value = None
+
+        with pytest.raises(SystemExit) as exc_info:
+            _prompt_multi_choice("Model(s):", ("rope-transformer",), default=("rope-transformer",))
+
+    assert exc_info.value.code == 0
+
+
 def test_init_with_sky_flag(tmp_path):
     project_dir = tmp_path / "sky-experiment"
     config = Init(project_dir=str(project_dir), sky=True)
