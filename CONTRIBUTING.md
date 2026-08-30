@@ -48,16 +48,23 @@ Tests are organized by component:
 
 ```
 tests/
-├── cli_test.py                     # CLI and code generation
+├── cli_test.py                     # Core CLI and code generation tests
+├── cli_sky_test.py                 # Sky integration CLI tests
+├── conftest.py                     # Shared pytest fixtures
 ├── utils_test.py                   # Config loading and instantiation
 ├── config/
-│   └── base_test.py                # Config validation
+│   └── base_test.py                # Config validation and defaults
 ├── datasets/
-│   └── string_reverse_test.py      # Dataset and tokenizer
+│   ├── counting_test.py            # Counting dataset behavior
+│   ├── hugging_face_test.py        # Hugging Face dataset integration
+│   ├── string_reverse_test.py      # String reverse dataset and tokenizer
+│   └── transformed_test.py         # Transformed dataset wrappers
 ├── models/
 │   └── transformer_test.py         # Model forward pass and generation
-└── trainers/
-    └── decoder_trainer_test.py      # Training loop integration
+├── preprocessors/
+│   └── char_test.py                # Character tokenizer preprocessors
+├── trainers/
+    └── decoder_trainer_test.py     # Training loop integration
 ```
 
 ---
