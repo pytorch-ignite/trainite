@@ -74,21 +74,6 @@ class SimpleDataset(torch.utils.data.Dataset):
         }
 
 
-class SimpleDatasetNoVocab(torch.utils.data.Dataset):
-    def __init__(self, size=16, seq_len=4, **kwargs):
-        self.size = size
-        self.seq_len = seq_len
-
-    def __len__(self):
-        return self.size
-
-    def __getitem__(self, index):
-        return {
-            "input_ids": torch.randint(0, 10, (self.seq_len,)),
-            "labels": torch.randint(0, 10, (self.seq_len,)),
-        }
-
-
 class EmptyDataset(torch.utils.data.Dataset):
     def __init__(self, **kwargs):
         pass
@@ -274,48 +259,6 @@ def test_device_auto_selection(project_config):
         raise ValueError("trainer.device should be either torch.device or str")
     device = idist.device()
     assert device_str == device.type
-
-
-@pytest.mark.skip(reason="Obsolete after decoupling tokenizer from model and dataset vocab_size resolution")
-def test_decoder_trainer_auto_vocab_size(project_config):
-    # Remove vocab_size from model config
-    model_conf = project_config.model.model_dump(by_alias=True)
-    model_conf.pop("vocab_size", None)
-    project_config.model = cc(**model_conf)
-
-    # Ensure dataset has vocab_size
-    trainer = create_trainer_from_config(project_config)
-    assert trainer.vocab_size == 10  # type: ignore
-    assert isinstance(trainer.model, SimpleModel)
-    assert trainer.model.embedding.num_embeddings == 10
-
-
-@pytest.mark.skip(reason="Obsolete after decoupling tokenizer from model and dataset vocab_size resolution")
-def test_decoder_trainer_vocab_size_mismatch(project_config):
-    # Set model vocab_size smaller than dataset
-    model_conf = project_config.model.model_dump(by_alias=True)
-    model_conf["vocab_size"] = 5
-    project_config.model = cc(**model_conf)
-
-    with pytest.raises(ValueError, match="is smaller than the tokenizer vocabulary size"):
-        create_trainer_from_config(project_config)
-
-
-@pytest.mark.skip(reason="Obsolete after decoupling tokenizer from model and dataset vocab_size resolution")
-def test_decoder_trainer_vocab_size_missing(project_config):
-    # Setup dataset to not have vocab_size
-    project_config.data.train.dataset = cc(
-        "tests.trainers.decoder_trainer_test.SimpleDatasetNoVocab",
-        size=16,
-        seq_len=4,
-    )
-    # Ensure model config does not have vocab_size
-    model_conf = project_config.model.model_dump(by_alias=True)
-    model_conf.pop("vocab_size", None)
-    project_config.model = cc(**model_conf)
-
-    with pytest.raises(ValueError, match="Resolved vocab_size is 0"):
-        create_trainer_from_config(project_config)
 
 
 def test_decoder_trainer_run_with_val(project_config, temp_run_dir):
