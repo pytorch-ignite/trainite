@@ -80,7 +80,7 @@ def _prompt_multi_choice(
         instruction=instruction,
     ).ask()
     if result is None or len(result) == 0:
-        raise SystemExit("At least one model must be selected.")
+        raise SystemExit(0)
     return result
 
 
