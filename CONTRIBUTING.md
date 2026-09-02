@@ -49,13 +49,20 @@ Tests are organized by component:
 ```
 tests/
 ├── cli_test.py                     # CLI and code generation
+├── cli_sky_test.py                 # `add:sky` command — SkyPilot config generation
+├── conftest.py                     # Forces DataLoader num_workers=0 in tests (autouse fixture)
 ├── utils_test.py                   # Config loading and instantiation
 ├── config/
 │   └── base_test.py                # Config validation
 ├── datasets/
-│   └── string_reverse_test.py      # Dataset and tokenizer
+│   ├── string_reverse_test.py      # Dataset and tokenizer
+│   ├── counting_test.py            # CountingDataset + transform/collator pipeline
+│   ├── hugging_face_test.py        # HuggingFaceDatasetConfig loading + transform
+│   └── transformed_test.py         # TransformedDataset wrapper (generic transform layer)
 ├── models/
 │   └── transformer_test.py         # Model forward pass and generation
+├── preprocessors/
+│   └── char_test.py                # CharTokenizer — vocab, encode/decode, padding, config
 └── trainers/
     └── decoder_trainer_test.py      # Training loop integration
 ```
