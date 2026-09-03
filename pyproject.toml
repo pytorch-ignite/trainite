@@ -168,7 +168,7 @@ exclude = '''
 )
 '''
 [tool.pytest.ini_options]
-addopts = "--color=yes"
+addopts = "--color=yes -m 'not integration'"
 markers = [
     "integration: slow tests that build an isolated uv env and train a real step",
 ]
