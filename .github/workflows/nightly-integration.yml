@@ -1,0 +1,24 @@
+name: nightly integration tests
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  integration:
+    name: Integration test (CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.11"
+      - name: Sync dependencies
+        run: uv sync --locked --dev
+      - name: Run integration tests
+        run: uv run pytest -m integration
