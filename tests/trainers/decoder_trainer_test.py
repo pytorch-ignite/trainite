@@ -74,21 +74,6 @@ class SimpleDataset(torch.utils.data.Dataset):
         }
 
 
-class SimpleDatasetNoVocab(torch.utils.data.Dataset):
-    def __init__(self, size=16, seq_len=4, **kwargs):
-        self.size = size
-        self.seq_len = seq_len
-
-    def __len__(self):
-        return self.size
-
-    def __getitem__(self, index):
-        return {
-            "input_ids": torch.randint(0, 10, (self.seq_len,)),
-            "labels": torch.randint(0, 10, (self.seq_len,)),
-        }
-
-
 class EmptyDataset(torch.utils.data.Dataset):
     def __init__(self, **kwargs):
         pass
@@ -276,48 +261,6 @@ def test_device_auto_selection(project_config):
     assert device_str == device.type
 
 
-@pytest.mark.skip(reason="Obsolete after decoupling tokenizer from model and dataset vocab_size resolution")
-def test_decoder_trainer_auto_vocab_size(project_config):
-    # Remove vocab_size from model config
-    model_conf = project_config.model.model_dump(by_alias=True)
-    model_conf.pop("vocab_size", None)
-    project_config.model = cc(**model_conf)
-
-    # Ensure dataset has vocab_size
-    trainer = create_trainer_from_config(project_config)
-    assert trainer.vocab_size == 10  # type: ignore
-    assert isinstance(trainer.model, SimpleModel)
-    assert trainer.model.embedding.num_embeddings == 10
-
-
-@pytest.mark.skip(reason="Obsolete after decoupling tokenizer from model and dataset vocab_size resolution")
-def test_decoder_trainer_vocab_size_mismatch(project_config):
-    # Set model vocab_size smaller than dataset
-    model_conf = project_config.model.model_dump(by_alias=True)
-    model_conf["vocab_size"] = 5
-    project_config.model = cc(**model_conf)
-
-    with pytest.raises(ValueError, match="is smaller than the tokenizer vocabulary size"):
-        create_trainer_from_config(project_config)
-
-
-@pytest.mark.skip(reason="Obsolete after decoupling tokenizer from model and dataset vocab_size resolution")
-def test_decoder_trainer_vocab_size_missing(project_config):
-    # Setup dataset to not have vocab_size
-    project_config.data.train.dataset = cc(
-        "tests.trainers.decoder_trainer_test.SimpleDatasetNoVocab",
-        size=16,
-        seq_len=4,
-    )
-    # Ensure model config does not have vocab_size
-    model_conf = project_config.model.model_dump(by_alias=True)
-    model_conf.pop("vocab_size", None)
-    project_config.model = cc(**model_conf)
-
-    with pytest.raises(ValueError, match="Resolved vocab_size is 0"):
-        create_trainer_from_config(project_config)
-
-
 def test_decoder_trainer_run_with_val(project_config, temp_run_dir):
     trainer = create_trainer_from_config(project_config)
     trainer.run()
@@ -338,40 +281,6 @@ def test_decoder_trainer_run_with_val(project_config, temp_run_dir):
 
     event_handlers = trainer.val_evaluator._event_handlers.get(Events.COMPLETED, [])
     assert any(isinstance(h[0], EarlyStopping) for h in event_handlers)
-    assert trainer.best_checkpoint is not None
-
-
-@pytest.mark.skip(reason="Skipping this test because validation is required.")
-def test_decoder_trainer_run_without_val(project_config, temp_run_dir):
-    object.__setattr__(
-        project_config,
-        "data",
-        DataConfigBase.model_construct(
-            train=project_config.data.train,
-            val=None,
-            test=None,
-        ),
-    )
-    trainer = create_trainer_from_config(project_config)
-    trainer.run()
-
-    # Check if run directory was created
-    run_dirs = list((temp_run_dir / "test_run").iterdir())
-    assert len(run_dirs) == 1
-    run_dir = run_dirs[0]
-
-    assert (run_dir / "config.yaml").exists()
-    assert (run_dir / "output.log").exists()
-    assert (run_dir / "tensorboard").exists()
-
-    # Check for checkpoints
-    # ModelCheckpoint n_saved=1, so we expect at least one
-    checkpoints = list(run_dir.glob("*.pt"))
-    assert len(checkpoints) >= 1
-
-    # Early stopping and best checkpoint should NOT be in handlers / attached
-    event_handlers = trainer.val_evaluator._event_handlers.get(Events.COMPLETED, [])
-    assert not any(isinstance(h[0], EarlyStopping) for h in event_handlers)
     assert trainer.best_checkpoint is not None
 
 
@@ -458,40 +367,29 @@ def test_decoder_trainer_test_method(project_config, temp_run_dir):
     assert "token_accuracy" in trainer.test_evaluator.state.metrics
 
 
-@pytest.mark.skip(reason="Skipping this test because validation is required ")
-def test_decoder_trainer_test_without_val(project_config, temp_run_dir):
-    # Remove validation split
+def test_decoder_trainer_test_loads_best_checkpoint(project_config, temp_run_dir):
     # Add test split
-    object.__setattr__(
-        project_config,
-        "data",
-        DataConfigBase.model_construct(
-            train=project_config.data.train,
-            val=None,
-            test=SplitConfig(
-                dataset=cc(
-                    "tests.trainers.decoder_trainer_test.SimpleDataset",
-                    size=4,
-                    seq_len=4,
-                    vocab_size=10,
-                ),
-                dataloader=DataLoaderConfig(batch_size=4),
-            ),
+    project_config.data.test = SplitConfig(
+        dataset=cc(
+            "tests.trainers.decoder_trainer_test.SimpleDataset",
+            size=4,
+            seq_len=4,
+            vocab_size=10,
         ),
+        dataloader=DataLoaderConfig(batch_size=4),
     )
 
     trainer = create_trainer_from_config(project_config)
     trainer.run()
 
     assert trainer.best_checkpoint is not None
-    assert trainer.last_checkpoint is not None
 
     with mock.patch("torch.load", side_effect=torch.load) as mock_load:
         trainer.test()
 
-    # Verify that it loaded the last checkpoint
-    last_checkpoint_path = trainer.last_checkpoint.last_checkpoint
-    mock_load.assert_any_call(last_checkpoint_path, map_location=trainer.device, weights_only=True)
+    # Verify that it loaded the best checkpoint
+    best_checkpoint_path = trainer.best_checkpoint.last_checkpoint
+    mock_load.assert_any_call(best_checkpoint_path, map_location=trainer.device, weights_only=True)
 
 
 def test_decoder_trainer_dataloader_collate_fn(project_config):
