@@ -149,21 +149,7 @@ def test_generated_project_is_runnable() -> None:
         with open(config_path, "w") as f:
             yaml.safe_dump(config, f)
 
-        # 3. Configure CPU-only PyTorch for the generated project
-        pyproject_path = project_dir / "pyproject.toml"
-        with open(pyproject_path, "a") as f:
-            f.write(
-                """
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
-
-[tool.uv.sources]
-torch = { index = "pytorch-cpu" }
-"""
-            )
-        # 4. Install ONLY the generated project's own declared dependencies
+        # 3. Install ONLY the generated project's own declared dependencies
         try:
             subprocess.run(
                 ["uv", "sync"],
@@ -182,7 +168,7 @@ torch = { index = "pytorch-cpu" }
         except subprocess.TimeoutExpired:
             pytest.fail(f"uv sync timed out for generated project ({model} + {dataset})")
 
-        # 5. Run the generated main.py
+        # 4. Run the generated main.py
         try:
             subprocess.run(
                 ["uv", "run", "python", "main.py", "config.yaml"],
