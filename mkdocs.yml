@@ -1,0 +1,12 @@
+site_name: Trainite
+site_description: Documentation for Trainite
+repo_url: https://github.com/pytorch-ignite/trainite
+
+theme:
+  name: material
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - CLI: cli.md
+  - Training: training.md
