@@ -126,7 +126,12 @@ class CharTokenizer:
                 ids = prefix + ids + suffix
 
             if truncation and max_length is not None:
-                ids = ids[:max_length]
+                if max_length < 0:
+                    raise ValueError("max_length must be non-negative")
+                if len(ids) > max_length and add_special_tokens and max_length >= 2:
+                    ids = ids[: max_length - 1] + [self.eos_token_id]
+                else:
+                    ids = ids[:max_length]
 
             batch_input_ids.append(ids)
             batch_attention_mask.append([1] * len(ids))
