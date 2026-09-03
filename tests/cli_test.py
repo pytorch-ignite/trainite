@@ -9,20 +9,34 @@ import yaml
 
 import pytest
 
-from trainite.config.registry import MODEL_SPECS, DATASET_SPECS, PREPROCESSOR_SPECS, TRAINER_SPECS
+from trainite.config.registry import DATASET_SPECS, MODEL_SPECS, PREPROCESSOR_SPECS, REGISTRY, TRAINER_SPECS
+
+
+def _generate_init_combinations() -> list[tuple[list[str], str, str]]:
+    """Dynamically generate project init combinations from registered components."""
+    model_names = list(REGISTRY["models"].keys())
+    dataset_names = list(REGISTRY["datasets"].keys())
+    trainer_names = list(REGISTRY["trainers"].keys())
+
+    combinations: list[tuple[list[str], str, str]] = []
+    # Single model combinations across all datasets and trainers
+    for model in model_names:
+        for dataset in dataset_names:
+            for trainer in trainer_names:
+                combinations.append(([model], dataset, trainer))
+
+    # Multi-model combinations to verify multi-model project generation
+    if len(model_names) > 1:
+        for dataset in dataset_names:
+            for trainer in trainer_names:
+                combinations.append((model_names, dataset, trainer))
+
+    return combinations
 
 
 @pytest.mark.parametrize(
     "models,dataset,trainer",
-    [
-        (["basic-transformer"], "string-reverse", "decoder-trainer"),
-        (["rope-transformer"], "string-reverse", "decoder-trainer"),
-        (["rope-transformer", "basic-transformer"], "string-reverse", "decoder-trainer"),
-        (["basic-transformer"], "counting", "decoder-trainer"),
-        (["rope-transformer"], "counting", "decoder-trainer"),
-        (["rope-transformer", "basic-transformer"], "counting", "decoder-trainer"),
-        (["rope-transformer"], "hugging-face", "decoder-trainer"),
-    ],
+    _generate_init_combinations(),
 )
 def test_init_generates_valid_project(models: list[str], dataset: str, trainer: str) -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
