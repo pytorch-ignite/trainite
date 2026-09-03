@@ -2,27 +2,26 @@
 
 Trainite provides a command-line interface (CLI) for creating and configuring training projects.
 
+> The examples below assume Trainite is installed and available as the `trainite` command. If you are using `uv`, you can prefix the commands with `uv run`.
+
 ## Getting Help
 
-To see the available commands:
+To see all available commands:
 
 ```bash
-uv run trainite --help
+trainite --help
 ```
 
-Trainite provides the following commands:
-
-- `init` — Generate a starter training project.
-- `add:sky` — Add a SkyPilot configuration to an existing Trainite project.
-
-To see the options for a specific command:
+To see help for the `init` command:
 
 ```bash
-uv run trainite init --help
+trainite init --help
 ```
 
+To see help for the `add:sky` command:
+
 ```bash
-uv run trainite add:sky --help
+trainite add:sky --help
 ```
 
 ## Check the Version
@@ -30,167 +29,182 @@ uv run trainite add:sky --help
 To check the installed version of Trainite:
 
 ```bash
-uv run trainite --version
+trainite --version
+```
+
+You can also use:
+
+```bash
+trainite -V
 ```
 
 ## `trainite init`
 
-The `init` command generates a starter training project.
+The `init` command creates a new Trainite training project.
 
 ### Interactive Mode
 
-Run `init` without any options to start the interactive setup:
+Run `init` without any arguments:
 
 ```bash
-uv run trainite init
+trainite init
 ```
 
-Trainite will prompt you for:
+Trainite starts an interactive setup and prompts you for:
 
 1. Project directory
-2. Model or models
+2. Model(s)
 3. Dataset
 4. Trainer
 5. Output directory
 6. Run name
 7. Whether to enable SkyPilot cloud training
 
+You can select one or more models. If you select multiple models, Trainite asks you to choose which model should be the primary active model in `config.yaml`.
+
+The default interactive choices include:
+
+- Model: `rope-transformer`
+- Dataset: `string-reverse`
+- Trainer: `decoder-trainer`
+- Output directory: `outputs`
+
 ### Non-interactive Mode
 
-You can provide the project configuration directly through command-line options.
+You can provide the configuration directly as command-line arguments.
 
 For example:
 
 ```bash
-uv run trainite init my-experiment \
+trainite init my-experiment \
     --model rope-transformer \
     --dataset string-reverse \
     --trainer decoder-trainer
 ```
 
-This creates a starter training project in the `my-experiment` directory with the specified model, dataset, and trainer.
+This creates a project named `my-experiment`.
 
-### Command Options
+### Models
 
-#### `--model`
-
-Select the model or models to use.
-
-Available models:
+The currently available models are:
 
 - `basic-transformer`
 - `rope-transformer`
 
-Example:
+To select a model:
 
 ```bash
-uv run trainite init my-experiment \
+trainite init my-experiment \
     --model rope-transformer
 ```
 
-Multiple models can be selected:
+Multiple models can be provided:
 
 ```bash
-uv run trainite init my-experiment \
+trainite init my-experiment \
     --model basic-transformer rope-transformer
 ```
 
-#### `--dataset`
+### Datasets
 
-Select the dataset.
-
-Available datasets:
+The currently available datasets are:
 
 - `string-reverse`
 - `counting`
 - `hugging-face`
 
-Example:
+For example:
 
 ```bash
-uv run trainite init my-experiment \
+trainite init my-experiment \
     --model rope-transformer \
     --dataset counting
 ```
 
-#### `--trainer`
+### Trainers
 
-Select the trainer.
-
-Available trainer:
+The currently available trainer is:
 
 - `decoder-trainer`
 
-Example:
+For example:
 
 ```bash
-uv run trainite init my-experiment \
+trainite init my-experiment \
     --model rope-transformer \
     --dataset string-reverse \
     --trainer decoder-trainer
 ```
 
-#### `--output-root`
+### `--output-root`
 
-Specify the root directory for training outputs.
+Use `--output-root` to specify where training outputs should be stored.
 
-The default is `outputs`.
+The default value is `outputs`.
 
 Example:
 
 ```bash
-uv run trainite init my-experiment \
+trainite init my-experiment \
+    --model rope-transformer \
+    --dataset string-reverse \
+    --trainer decoder-trainer \
     --output-root experiment-outputs
 ```
 
-#### `--run-name`
+### `--run-name`
 
-Specify a custom name for the training run.
+Use `--run-name` to specify a custom name for the training run.
 
 Example:
 
 ```bash
-uv run trainite init my-experiment \
+trainite init my-experiment \
+    --model rope-transformer \
+    --dataset string-reverse \
+    --trainer decoder-trainer \
     --run-name my-first-run
 ```
 
-#### `--sky`
+### `--sky`
 
-Enable SkyPilot cloud-training support and generate the `sky.yaml` configuration.
+Use `--sky` to enable SkyPilot cloud-training support when creating a project.
 
 Example:
 
 ```bash
-uv run trainite init my-experiment \
+trainite init my-experiment \
     --model rope-transformer \
     --dataset string-reverse \
     --trainer decoder-trainer \
     --sky
 ```
 
-#### `--force`
+This generates a `sky.yaml` configuration along with the project.
 
-Overwrite existing starter files in the target project directory.
+### `--force`
 
-Use this when the target directory already contains generated starter files that you want to replace.
+By default, Trainite does not overwrite an existing non-empty project directory.
 
-Example:
+Use `--force` when you want to overwrite generated starter files in the target directory:
 
 ```bash
-uv run trainite init my-experiment --force \
+trainite init my-experiment \
     --model rope-transformer \
     --dataset string-reverse \
-    --trainer decoder-trainer
+    --trainer decoder-trainer \
+    --force
 ```
 
 ## `trainite add:sky`
 
-The `add:sky` command adds a SkyPilot configuration to an existing Trainite project.
+The `add:sky` command adds SkyPilot support to an existing Trainite project.
 
-Run it from inside an existing Trainite project:
+Run the command from inside an existing Trainite experiment:
 
 ```bash
-uv run trainite add:sky
+cd my-experiment
+trainite add:sky
 ```
 
 The project must contain:
@@ -200,63 +214,30 @@ config.yaml
 main.py
 ```
 
-### Overwrite an Existing Configuration
+Trainite generates a `sky.yaml` configuration and adds the required SkyPilot dependency to the project's `pyproject.toml`.
+
+### Force Overwrite
 
 If `sky.yaml` already exists, Trainite will not overwrite it by default.
 
-Use `--force` to overwrite the existing configuration:
+Use `--force` to replace the existing configuration:
 
 ```bash
-uv run trainite add:sky --force
-```
-
-### Using the Generated SkyPilot Configuration
-
-After running `trainite add:sky`, update the project environment:
-
-```bash
-pip install -e .
-```
-
-or, with `uv`:
-
-```bash
-uv sync
-```
-
-Check that SkyPilot is available:
-
-```bash
-sky check
-```
-
-Launch the training job:
-
-```bash
-sky launch sky.yaml
-```
-
-View running jobs:
-
-```bash
-sky queue
-```
-
-View logs for a cluster:
-
-```bash
-sky logs <cluster_name>
-```
-
-Shut down a cluster when it is no longer needed:
-
-```bash
-sky down <cluster_name>
+trainite add:sky --force
 ```
 
 ## Running a Generated Project
 
-After creating a project with `trainite init`, move into the generated project:
+After creating a project:
+
+```bash
+trainite init my-experiment \
+    --model rope-transformer \
+    --dataset string-reverse \
+    --trainer decoder-trainer
+```
+
+Move into the generated project:
 
 ```bash
 cd my-experiment
@@ -268,30 +249,124 @@ Install the project:
 pip install -e .
 ```
 
-Run the training script with the generated configuration:
+Run the training:
 
 ```bash
 python main.py config.yaml
 ```
 
-When using `uv`, you can run:
+If you are using `uv`, the generated project's training command can instead be run with:
 
 ```bash
 uv run python main.py config.yaml
 ```
 
-## Command Reference
+## SkyPilot Workflow
 
-Use the built-in help to see the complete and current CLI options:
+After using either:
+
+```bash
+trainite init my-experiment --sky
+```
+
+or:
+
+```bash
+cd my-experiment
+trainite add:sky
+```
+
+install the project dependencies:
+
+```bash
+pip install -e .
+```
+
+Or with `uv`:
+
+```bash
+uv sync
+```
+
+Check your SkyPilot setup:
+
+```bash
+sky check
+```
+
+Launch the training job:
+
+```bash
+sky launch sky.yaml
+```
+
+View running clusters and jobs:
+
+```bash
+sky queue
+```
+
+View logs for a cluster:
+
+```bash
+sky logs <cluster_name>
+```
+
+Stop and remove a cluster:
+
+```bash
+sky down <cluster_name>
+```
+
+## Command Summary
+
+| Command | Purpose |
+|---|---|
+| `trainite --help` | Show all available CLI commands |
+| `trainite --version` | Show the installed Trainite version |
+| `trainite -V` | Show the installed Trainite version |
+| `trainite init` | Start interactive project creation |
+| `trainite init --help` | Show `init` options |
+| `trainite init <project>` | Create a project non-interactively |
+| `trainite init <project> --force` | Overwrite generated files in an existing project |
+| `trainite init <project> --sky` | Create a project with SkyPilot support |
+| `trainite add:sky` | Add SkyPilot support to an existing project |
+| `trainite add:sky --force` | Overwrite an existing `sky.yaml` |
+| `trainite add:sky --help` | Show `add:sky` options |
+
+## Using `uv`
+
+The commands above assume Trainite is installed and available directly as `trainite`.
+
+If you are working from the Trainite repository with `uv`, prefix Trainite CLI commands with `uv run`.
+
+For example:
 
 ```bash
 uv run trainite --help
 ```
 
 ```bash
-uv run trainite init --help
+uv run trainite --version
 ```
 
 ```bash
-uv run trainite add:sky --help
+uv run trainite init my-experiment \
+    --model rope-transformer \
+    --dataset string-reverse \
+    --trainer decoder-trainer
+```
+
+The generated project's training command can also be run with:
+
+```bash
+uv run python main.py config.yaml
+```
+
+## CLI Documentation Validation
+
+From the Trainite repository, build the documentation with:
+
+```bash
+uv run --group docs mkdocs build --strict
 ```
