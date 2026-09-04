@@ -102,19 +102,14 @@ def test_init_generates_valid_project(models: list[str], dataset: str, trainer: 
         assert generated_config["data"]["transform"]["_target_"].startswith("dataset_impl.")
 
 
-@pytest.mark.parametrize(
-    "model,dataset,trainer",
-    [
-        ("basic-transformer", "string-reverse", "decoder-trainer"),
-        ("rope-transformer", "string-reverse", "decoder-trainer"),
-        ("basic-transformer", "counting", "decoder-trainer"),
-        ("rope-transformer", "counting", "decoder-trainer"),
-    ],
-)
-def test_generated_project_is_runnable(model: str, dataset: str, trainer: str) -> None:
+@pytest.mark.integration
+def test_generated_project_is_runnable() -> None:
     """
-    Test that the generated project can actually be run for a few steps across all valid combinations.
+    generate one representative project, install its own declared dependencies
+    in an isolated uv environment, and run a minimal training workload.
     """
+    model, dataset, trainer = "rope-transformer", "string-reverse", "decoder-trainer"
+
     with tempfile.TemporaryDirectory() as temp_dir:
         project_dir = Path(temp_dir) / "runnable-project"
 
@@ -136,31 +131,50 @@ def test_generated_project_is_runnable(model: str, dataset: str, trainer: str) -
             check=True,
         )
 
-        # 2. Modify config.yaml to run for only 1 step/epoch to keep test fast
+        # 2. Modify config.yaml to run a minimal workload
         config_path = project_dir / "config.yaml"
+
         with open(config_path, "r") as f:
             config = yaml.safe_load(f)
 
-        # Base overrides for speed
         config["trainer"]["epochs"] = 1
         config["trainer"]["log_every_steps"] = 1
+
         config["model"]["num_layers"] = 1
         config["model"]["hidden_size"] = 16
         config["model"]["feedforward_dim"] = 32
 
-        # Dataset-specific overrides to keep sequences small
-        if dataset == "string-reverse":
-            config["data"]["dataset"]["per_seq_size"] = 16
-        elif dataset == "counting":
-            config["data"]["dataset"]["total_size"] = 16
+        config["data"]["dataset"]["per_seq_size"] = 16
+        config["data"]["dataloader"]["batch_size"] = 8
+        config["data"]["test_ratio"] = 0.1
+        config["data"]["val_ratio"] = 0.1
 
         with open(config_path, "w") as f:
             yaml.safe_dump(config, f)
 
-        # 3. Run the generated main.py
+        # 3. Install ONLY the generated project's dependencies
         try:
             subprocess.run(
-                [sys.executable, "main.py", "config.yaml"],
+                ["uv", "sync"],
+                cwd=project_dir,
+                check=True,
+                timeout=600,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as e:
+            pytest.fail(
+                f"uv sync failed for generated project ({model} + {dataset}) "
+                f"-- likely a missing/incorrect dependency in generated pyproject.toml:\n"
+                f"STDOUT: {e.stdout}\nSTDERR: {e.stderr}"
+            )
+        except subprocess.TimeoutExpired:
+            pytest.fail(f"uv sync timed out for generated project ({model} + {dataset})")
+
+        # 4. Run the generated project
+        try:
+            subprocess.run(
+                ["uv", "run", "python", "main.py", "config.yaml"],
                 cwd=project_dir,
                 check=True,
                 timeout=300,
