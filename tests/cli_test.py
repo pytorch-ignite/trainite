@@ -101,6 +101,7 @@ def test_init_generates_valid_project(models: list[str], dataset: str, trainer: 
             assert generated_config["data"]["dataset"]["_target_"].startswith("dataset_impl.")
         assert generated_config["data"]["transform"]["_target_"].startswith("dataset_impl.")
 
+
 @pytest.mark.integration
 def test_generated_project_is_runnable() -> None:
     """
@@ -168,9 +169,7 @@ def test_generated_project_is_runnable() -> None:
                 f"STDOUT: {e.stdout}\nSTDERR: {e.stderr}"
             )
         except subprocess.TimeoutExpired:
-            pytest.fail(
-                f"uv sync timed out for generated project ({model} + {dataset})"
-            )
+            pytest.fail(f"uv sync timed out for generated project ({model} + {dataset})")
 
         # 4. Run the generated project
         try:
@@ -184,15 +183,14 @@ def test_generated_project_is_runnable() -> None:
             )
         except subprocess.CalledProcessError as e:
             pytest.fail(
-                f"Generated project failed to run ({model} + {dataset}):\n"
-                f"STDOUT: {e.stdout}\nSTDERR: {e.stderr}"
+                f"Generated project failed to run ({model} + {dataset}):\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}"
             )
         except subprocess.TimeoutExpired:
-            pytest.fail(
-                f"Generated project timed out ({model} + {dataset})"
-            )
+            pytest.fail(f"Generated project timed out ({model} + {dataset})")
         finally:
             logging.shutdown()
+
+
 def test_cli_main_routing(capsys):
     from trainite.cli.main import main
     from unittest import mock
