@@ -100,6 +100,12 @@ def test_char_tokenizer_call_truncation():
     assert len(result["input_ids"]) == 5
     assert result["input_ids"][0] == tokenizer.bos_token_id
     assert result["input_ids"][-1] == tokenizer.eos_token_id
+    res_1 = tokenizer("hello world", add_special_tokens=True, truncation=True, max_length=1)
+    assert len(res_1["input_ids"]) == 1
+    assert res_1["input_ids"] == [tokenizer.eos_token_id]
+
+    res_0 = tokenizer("hello world", add_special_tokens=True, truncation=True, max_length=0)
+    assert len(res_0["input_ids"]) == 0
 
 
 def test_char_tokenizer_call_no_special_tokens():
