@@ -11,18 +11,17 @@ import pytest
 
 from trainite.config.registry import MODEL_SPECS, DATASET_SPECS, PREPROCESSOR_SPECS, TRAINER_SPECS
 
+def get_valid_project_combinations():
+    valid_combinations = []
+    for model_name, model in MODEL_SPECS.items():
+        for dataset_name , model in DATASET_SPECS.items():
+            for trainer_name , model in TRAINER_SPECS.items():
+                valid_combinations.append(([model_name] , dataset_name , trainer_name))
+            return valid_combinations
 
 @pytest.mark.parametrize(
     "models,dataset,trainer",
-    [
-        (["basic-transformer"], "string-reverse", "decoder-trainer"),
-        (["rope-transformer"], "string-reverse", "decoder-trainer"),
-        (["rope-transformer", "basic-transformer"], "string-reverse", "decoder-trainer"),
-        (["basic-transformer"], "counting", "decoder-trainer"),
-        (["rope-transformer"], "counting", "decoder-trainer"),
-        (["rope-transformer", "basic-transformer"], "counting", "decoder-trainer"),
-        (["rope-transformer"], "hugging-face", "decoder-trainer"),
-    ],
+    get_valid_project_combinations(),
 )
 def test_init_generates_valid_project(models: list[str], dataset: str, trainer: str) -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
