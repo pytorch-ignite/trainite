@@ -14,8 +14,8 @@ from trainite.config.registry import MODEL_SPECS, DATASET_SPECS, PREPROCESSOR_SP
 def get_valid_project_combinations():
     valid_combinations = []
     for model_name, model in MODEL_SPECS.items():
-        for dataset_name , model in DATASET_SPECS.items()
-            for trainer_name , model in TRAINER_SPECS.items()
+        for dataset_name , model in DATASET_SPECS.items():
+            for trainer_name , model in TRAINER_SPECS.items():
                 valid_combinations.append(([model_name] , dataset_name , trainer_name))
             return valid_combinations
 
