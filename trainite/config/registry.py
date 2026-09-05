@@ -88,6 +88,17 @@ DATASET_SPECS = {
         preprocessor_spec_name="gpt2",
         dependencies=["datasets"],
     ),
+    "wikitext": DatasetSpec(
+        name="wikitext",
+        implementation_path=Path("trainite/datasets/wikitext.py"),
+        config_cls_path="trainite.config.datasets.WikiTextDataConfig",
+        dataset_config_cls_path="trainite.config.datasets.WikiTextDatasetConfig",
+        implementation_symbol="WikiTextTransform",
+        builder_symbol="datasets.load_dataset",
+        readme_template_path=Path("trainite/templates/components/datasets/wikitext.md"),
+        preprocessor_spec_name="gpt2",
+        dependencies=["datasets"],
+    ),
 }
 
 TRAINER_SPECS = {

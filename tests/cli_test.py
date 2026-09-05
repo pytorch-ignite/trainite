@@ -22,6 +22,7 @@ from trainite.config.registry import MODEL_SPECS, DATASET_SPECS, PREPROCESSOR_SP
         (["rope-transformer"], "counting", "decoder-trainer"),
         (["rope-transformer", "basic-transformer"], "counting", "decoder-trainer"),
         (["rope-transformer"], "hugging-face", "decoder-trainer"),
+        (["rope-transformer"], "wikitext", "decoder-trainer"),
     ],
 )
 def test_init_generates_valid_project(models: list[str], dataset: str, trainer: str) -> None:
@@ -91,15 +92,23 @@ def test_init_generates_valid_project(models: list[str], dataset: str, trainer: 
             if filename is not None:
                 py_compile.compile(str(project_dir / filename), doraise=True)
 
-        if dataset == "hugging-face":
-            assert generated_config["data"]["dataset"]["_target_"] == "datasets.load_dataset"
-            assert generated_config["preprocessor"]["_target_"] == ("preprocessors.gpt2_tokenizer.load_gpt2_tokenizer")
+        if dataset == "wikitext":
+            assert generated_config["data"]["train"]["dataset"]["_target_"] == "datasets.load_dataset"
+            assert generated_config["preprocessor"]["_target_"] == "preprocessors.gpt2_tokenizer.load_gpt2_tokenizer"
             generated_pyproject = (project_dir / "pyproject.toml").read_text()
             assert "datasets" in generated_pyproject
             assert "transformers" in generated_pyproject
+
+        elif dataset == "hugging-face":
+            assert generated_config["data"]["dataset"]["_target_"] == "datasets.load_dataset"
+            assert generated_config["preprocessor"]["_target_"] == "preprocessors.gpt2_tokenizer.load_gpt2_tokenizer"
+            generated_pyproject = (project_dir / "pyproject.toml").read_text()
+            assert "datasets" in generated_pyproject
+            assert "transformers" in generated_pyproject
+
         else:
             assert generated_config["data"]["dataset"]["_target_"].startswith("dataset_impl.")
-        assert generated_config["data"]["transform"]["_target_"].startswith("dataset_impl.")
+            assert generated_config["data"]["transform"]["_target_"].startswith("dataset_impl.")
 
 
 @pytest.mark.integration

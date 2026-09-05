@@ -1,6 +1,13 @@
 from typing import Literal, Self
 from pydantic import Field, model_validator
-from trainite.config.base import DatasetConfig, TransformConfig, DataWithAutoSplit, DataLoaderConfig
+from trainite.config.base import (
+    DatasetConfig,
+    TransformConfig,
+    DataWithAutoSplit,
+    DataLoaderConfig,
+    DataConfigBase,
+    SplitConfig,
+)
 
 
 class PromptCompletionTransformConfig(TransformConfig):
@@ -140,5 +147,63 @@ class HuggingFaceDataConfig(DataWithAutoSplit):
         default_factory=lambda: DataLoaderConfig(
             batch_size=32,
             shuffle=True,
+        )
+    )
+
+
+class WikiTextTransformConfig(TransformConfig):
+    target: Literal[
+        "trainite.datasets.wikitext.WikiTextTransform",
+        "dataset_impl.wikitext.WikiTextTransform",
+    ] = Field(
+        default="trainite.datasets.wikitext.WikiTextTransform",
+        alias="_target_",
+    )
+    max_length: int = Field(default=128, gt=1)
+
+
+class WikiTextDatasetConfig(HuggingFaceDatasetConfig):
+    path: Literal["Salesforce/wikitext"] = "Salesforce/wikitext"
+    # https://huggingface.co/datasets/Salesforce/wikitext
+    name: str = "wikitext-2-raw-v1"
+
+
+class WikiTextDataConfig(DataConfigBase):
+    train: SplitConfig = Field(
+        default_factory=lambda: SplitConfig(
+            dataset=WikiTextDatasetConfig(
+                split="train",
+            ),
+            transform=WikiTextTransformConfig(),
+            dataloader=DataLoaderConfig(
+                batch_size=32,
+                shuffle=True,
+            ),
+        )
+    )
+
+    val: SplitConfig = Field(
+        default_factory=lambda: SplitConfig(
+            dataset=WikiTextDatasetConfig(
+                split="validation",
+            ),
+            transform=WikiTextTransformConfig(),
+            dataloader=DataLoaderConfig(
+                batch_size=32,
+                shuffle=False,
+            ),
+        )
+    )
+
+    test: SplitConfig = Field(
+        default_factory=lambda: SplitConfig(
+            dataset=WikiTextDatasetConfig(
+                split="test",
+            ),
+            transform=WikiTextTransformConfig(),
+            dataloader=DataLoaderConfig(
+                batch_size=32,
+                shuffle=False,
+            ),
         )
     )
