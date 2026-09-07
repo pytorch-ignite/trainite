@@ -141,8 +141,8 @@ def test_generated_project_is_runnable() -> None:
         config["trainer"]["log_every_steps"] = 1
 
         config["model"]["num_layers"] = 1
-        config["model"]["hidden_size"] = 16
-        config["model"]["feedforward_dim"] = 32
+        config["model"]["hidden_size"] = 8
+        config["model"]["feedforward_dim"] = 16
 
         config["data"]["dataset"]["per_seq_size"] = 16
         config["data"]["dataloader"]["batch_size"] = 8
