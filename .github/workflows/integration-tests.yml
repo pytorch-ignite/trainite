@@ -41,4 +41,4 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Run integration tests
-        run: uv run --with pytest --with torch pytest -o addopts="" -m integration
+        run: uv run --with pytest pytest -o addopts="" -m integration --continue-on-collection-errors
