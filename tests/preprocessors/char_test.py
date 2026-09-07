@@ -97,8 +97,14 @@ def test_char_tokenizer_call_return_tensors():
 def test_char_tokenizer_call_truncation():
     tokenizer = CharTokenizer()
     result = tokenizer("hello world this is a long string", add_special_tokens=True, truncation=True, max_length=5)
-    # Should be truncated to max_length (including special tokens)
     assert len(result["input_ids"]) == 5
+    assert result["input_ids"][0] == tokenizer.bos_token_id
+    assert result["input_ids"][-1] == tokenizer.eos_token_id
+    with pytest.raises(ValueError):
+        tokenizer("hello world", add_special_tokens=True, truncation=True, max_length=1)
+
+    with pytest.raises(ValueError):
+        tokenizer("hello world", add_special_tokens=True, truncation=True, max_length=0)
 
 
 def test_char_tokenizer_call_no_special_tokens():

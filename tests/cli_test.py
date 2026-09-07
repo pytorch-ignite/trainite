@@ -12,17 +12,24 @@ import pytest
 from trainite.config.registry import MODEL_SPECS, DATASET_SPECS, PREPROCESSOR_SPECS, TRAINER_SPECS
 
 
+def get_valid_project_combinations():
+    valid_combinations = []
+    for model_name in MODEL_SPECS.keys():
+        for dataset_name in DATASET_SPECS.keys():
+            for trainer_name in TRAINER_SPECS.keys():
+                valid_combinations.append(([model_name], dataset_name, trainer_name))
+
+    all_models = list(MODEL_SPECS.keys())
+    if len(all_models) > 1:
+        for dataset_name in DATASET_SPECS.keys():
+            for trainer_name in TRAINER_SPECS.keys():
+                valid_combinations.append((all_models, dataset_name, trainer_name))
+    return valid_combinations
+
+
 @pytest.mark.parametrize(
-    "models,dataset,trainer",
-    [
-        (["basic-transformer"], "string-reverse", "decoder-trainer"),
-        (["rope-transformer"], "string-reverse", "decoder-trainer"),
-        (["rope-transformer", "basic-transformer"], "string-reverse", "decoder-trainer"),
-        (["basic-transformer"], "counting", "decoder-trainer"),
-        (["rope-transformer"], "counting", "decoder-trainer"),
-        (["rope-transformer", "basic-transformer"], "counting", "decoder-trainer"),
-        (["rope-transformer"], "hugging-face", "decoder-trainer"),
-    ],
+    "models, dataset, trainer",
+    get_valid_project_combinations(),
 )
 def test_init_generates_valid_project(models: list[str], dataset: str, trainer: str) -> None:
     with tempfile.TemporaryDirectory() as temp_dir:

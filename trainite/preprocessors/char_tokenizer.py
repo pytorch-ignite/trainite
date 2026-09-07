@@ -120,13 +120,19 @@ class CharTokenizer:
 
         for t in texts:
             ids = self.encode(t)
-            if add_special_tokens:
-                prefix = [self.bos_token_id]
-                suffix = [self.eos_token_id]
-                ids = prefix + ids + suffix
-
             if truncation and max_length is not None:
-                ids = ids[:max_length]
+                num_special = 2 if add_special_tokens else 0
+                if max_length < num_special or max_length <= 0:
+                    raise ValueError(
+                        f"max_length ({max_length}) must be at least {num_special if add_special_tokens else 1} "
+                        f"when truncation=True and add_special_tokens={add_special_tokens}."
+                    )
+
+                keep = max_length - num_special
+                ids = ids[:keep]
+
+            if add_special_tokens:
+                ids = [self.bos_token_id] + ids + [self.eos_token_id]
 
             batch_input_ids.append(ids)
             batch_attention_mask.append([1] * len(ids))
@@ -143,9 +149,6 @@ class CharTokenizer:
                     pad_len = target_len - current_len
                     batch_input_ids[i] = [self.pad_token_id] * pad_len + batch_input_ids[i]
                     batch_attention_mask[i] = [0] * pad_len + batch_attention_mask[i]
-                elif current_len > target_len:
-                    batch_input_ids[i] = batch_input_ids[i][-target_len:]
-                    batch_attention_mask[i] = batch_attention_mask[i][-target_len:]
 
         if not is_batched:
             out = {
