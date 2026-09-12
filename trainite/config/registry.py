@@ -99,6 +99,17 @@ DATASET_SPECS = {
         preprocessor_spec_name="gpt2",
         dependencies=["datasets"],
     ),
+    "ultrachat-200k": DatasetSpec(
+        name="ultrachat_200k",
+        implementation_path=Path("trainite/datasets/ultrachat_200k.py"),
+        config_cls_path="trainite.config.datasets.UltraChat200kDataConfig",
+        dataset_config_cls_path="trainite.config.datasets.UltraChat200kDatasetConfig",
+        implementation_symbol="UltraChat200kTransform",
+        builder_symbol="datasets.load_dataset",
+        readme_template_path=Path("trainite/templates/components/datasets/ultrachat_200k.md"),
+        preprocessor_spec_name="gpt2",
+        dependencies=["datasets"],
+    ),
 }
 
 TRAINER_SPECS = {

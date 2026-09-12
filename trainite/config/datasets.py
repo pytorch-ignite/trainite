@@ -189,3 +189,45 @@ class WikiTextDataConfig(DataConfigBase):
             ),
         )
     )
+
+
+class UltraChat200kTransformConfig(TransformConfig):
+    target: str = Field(
+        default="trainite.datasets.ultrachat_200k.UltraChat200kTransform",
+        alias="_target_",
+    )
+    max_length: int = Field(default=128, gt=1)
+
+
+class UltraChat200kDatasetConfig(HuggingFaceDatasetConfig):
+    # https://huggingface.co/datasets/HuggingFaceH4/ultrachat_200k
+    path: str = "HuggingFaceH4/ultrachat_200k"
+    name: str = "default"
+
+
+class UltraChat200kDataConfig(DataConfigBase):
+    train: SplitConfig = Field(
+        default_factory=lambda: SplitConfig(
+            dataset=UltraChat200kDatasetConfig(
+                split="train_sft",
+            ),
+            transform=UltraChat200kTransformConfig(),
+            dataloader=DataLoaderConfig(
+                batch_size=32,
+                shuffle=True,
+            ),
+        )
+    )
+
+    val: SplitConfig = Field(
+        default_factory=lambda: SplitConfig(
+            dataset=UltraChat200kDatasetConfig(
+                split="test_sft",
+            ),
+            transform=UltraChat200kTransformConfig(),
+            dataloader=DataLoaderConfig(
+                batch_size=32,
+                shuffle=False,
+            ),
+        )
+    )
