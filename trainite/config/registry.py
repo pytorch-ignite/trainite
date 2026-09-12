@@ -99,6 +99,17 @@ DATASET_SPECS = {
         preprocessor_spec_name="gpt2",
         dependencies=["datasets"],
     ),
+    "python-edu": DatasetSpec(
+        name="python_edu",
+        implementation_path=Path("trainite/datasets/python_edu.py"),
+        config_cls_path="trainite.config.datasets.PythonEduDataConfig",
+        dataset_config_cls_path="trainite.config.datasets.PythonEduDatasetConfig",
+        implementation_symbol="PythonEduTransform",
+        builder_symbol="trainite.datasets.python_edu.PythonEduDataset",
+        readme_template_path=Path("trainite/templates/components/datasets/python_edu.md"),
+        preprocessor_spec_name="gpt2",
+        dependencies=["datasets"],
+    ),
 }
 
 TRAINER_SPECS = {
