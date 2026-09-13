@@ -223,6 +223,7 @@ sky launch sky.yaml
 | ------------------- | ------------------------ | -------------------------------------------------------------------------- |
 | `basic-transformer` | Decoder-only Transformer | Standard causal LM with absolute positional embeddings.                    |
 | `rope-transformer`  | Decoder-only Transformer | Standard causal LM with rotary positional embeddings (RoPE).               |
+| `gemma-dense`       | Decoder-only Transformer | Google DeepMind Gemma 4 Dense model.      |
 
 ### Preprocessors
 

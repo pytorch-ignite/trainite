@@ -54,6 +54,15 @@ MODEL_SPECS = {
         collate_fn_target="trainite.models.rope_transformer.CausalLMCollateFn",
         readme_template_path=Path("trainite/templates/components/models/rope_transformer.md"),
     ),
+    "gemma-dense": ModelSpec(
+        name="gemma_dense",
+        implementation_path=Path("trainite/models/gemma.py"),
+        config_cls_path="trainite.config.models.GemmaDenseModelConfig",
+        implementation_symbol="GemmaDenseModel",
+        builder_symbol="GemmaDenseModel",
+        collate_fn_target="trainite.models.gemma.CausalLMCollateFn",
+        readme_template_path=Path("trainite/templates/components/models/gemma_dense.md"),
+    ),
 }
 
 DATASET_SPECS = {
