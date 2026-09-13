@@ -9,7 +9,7 @@ import pytest
 import torch
 import torch.nn as nn
 from pydantic import ValidationError
-from trainite.config import (
+from trainite.config.base import (
     DataConfigBase,
     DataLoaderConfig,
     DataWithAutoSplit,
@@ -23,7 +23,7 @@ from trainite.config import (
 )
 from trainite.datasets.string_reverse import DatapointModel
 from trainite.trainers.decoder_trainer import Trainer, _flatten
-from trainite.config import ProjectConfig, TrainerConfig
+from trainite.config.base import ProjectConfig, TrainerConfig
 from ignite.engine import Events
 from ignite.handlers import EarlyStopping
 import ignite.distributed as idist
@@ -621,3 +621,5 @@ def test_decoder_trainer_generate(project_config):
         generated = trainer.generate(input_ids, max_new_tokens=1, attention_mask=attention_mask)
         assert isinstance(generated, torch.Tensor)
         assert generated[0].tolist() == [5, 6, 7]
+
+

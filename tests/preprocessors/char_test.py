@@ -2,7 +2,8 @@ import string
 
 import pytest
 import torch
-from trainite.preprocessors import CharTokenizer, CharTokenizerConfig
+from trainite.preprocessors.char_tokenizer import CharTokenizer
+from trainite.config.preprocessors import CharTokenizerConfig
 
 
 def test_char_tokenizer_vocab_size():
@@ -128,3 +129,4 @@ def test_char_tokenizer_config():
     config = CharTokenizerConfig()
     assert config.target == "trainite.preprocessors.char_tokenizer.CharTokenizer"
     assert config.charset == "@universal"
+

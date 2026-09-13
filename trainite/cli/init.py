@@ -9,7 +9,7 @@ from packaging.requirements import Requirement
 from pydantic import BaseModel, field_validator
 
 from trainite import __version__ as TRAINITE_VERSION
-from trainite.config import (
+from trainite.config.base import (
     OutputConfig,
     ProjectConfig,
 )
