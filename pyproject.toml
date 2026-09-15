@@ -81,6 +81,8 @@ dev = [
     "pre-commit>=4.6.0",
     "pyrefly>=1.0.0",
     "clearml",
+    "huggingface_hub",
+    "safetensors"
 ]
 integrations = [
     "skypilot",
