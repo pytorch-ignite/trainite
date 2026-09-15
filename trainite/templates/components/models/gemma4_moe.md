@@ -4,6 +4,12 @@ A compact decoder-only Gemma 4 mixture-of-experts model for training from scratc
 It alternates sliding-window and global attention. Each block combines a dense
 gated MLP with routed experts, while only the top experts run for each token.
 
+## Helpful reference
+
+This implementation was developed with
+[rwightman/gemma4_pytorch_codex](https://github.com/rwightman/gemma4_pytorch_codex)
+as an architecture reference.
+
 ## What goes in / out
 
 - `input_ids`: `(batch, sequence)` token IDs
