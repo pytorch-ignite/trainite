@@ -1,4 +1,5 @@
 from unittest.mock import patch
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -11,7 +12,10 @@ from trainite.models.gemma4_moe import (
     Gemma4TextModel,
     gelu_tanh,
     Gemma4TextAttention,
+    CausalLMCollateFn,
 )
+from trainite.config.models import Gemma4MoEModelConfig
+from trainite.shared.utils import build_model
 
 
 def make_text_model(**overrides) -> Gemma4TextModel:
@@ -36,6 +40,51 @@ def make_text_model(**overrides) -> Gemma4TextModel:
     }
     options.update(overrides)
     return Gemma4TextModel(**options)
+
+
+def test_causal_lm_collate_left_pads_batch():
+    collate = CausalLMCollateFn(SimpleNamespace(pad_token_id=9))
+    batch = [
+        SimpleNamespace(
+            train_input_ids=torch.tensor([1, 2]),
+            train_label_ids=torch.tensor([2, 3]),
+            attention_mask=torch.tensor([1, 1]),
+        ),
+        SimpleNamespace(
+            train_input_ids=torch.tensor([4]),
+            train_label_ids=torch.tensor([5]),
+            attention_mask=torch.tensor([1]),
+        ),
+    ]
+
+    result = collate(batch)
+
+    assert torch.equal(result["input_ids"], torch.tensor([[1, 2], [9, 4]]))
+    assert torch.equal(result["attention_mask"], torch.tensor([[1, 1], [0, 1]]))
+    assert torch.equal(result["labels"], torch.tensor([[2, 3], [-100, 5]]))
+
+
+def test_gemma4_config_builds_with_tokenizer_values():
+    config = Gemma4MoEModelConfig(
+        hidden_size=8,
+        num_layers=2,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        dense_intermediate_size=12,
+        expert_dim=4,
+        num_experts=3,
+        top_k=2,
+        head_dim=4,
+        layer_types=("sliding", "global"),
+        sliding_window=2,
+        global_num_key_value_heads=1,
+        global_head_dim=4,
+    )
+
+    model = build_model(config, "cpu", vocab_size=17, pad_token_id=3)
+
+    assert model.token_embedding.num_embeddings == 17
+    assert model.token_embedding.padding_idx == 3
 
 
 def test_gemma4_text_attention_forward():
@@ -153,7 +202,7 @@ def test_gemma4_text_block_matches_attention_and_parallel_ffn_branches():
 
 def test_gemma4_text_model_returns_token_logits_and_backpropagates():
     model = make_text_model(
-        padding_idx=0,
+        pad_token_id=0,
         rope_scaling_factor=2.0,
         global_rope_scaling_factor=4.0,
     )

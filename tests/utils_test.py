@@ -1,4 +1,5 @@
 import pytest
+import yaml
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -8,7 +9,7 @@ class MockComponent(BaseModel):
     target: str = Field(alias="_target_")
 
 
-from trainite.shared.utils import get_target, instantiate
+from trainite.shared.utils import dump_config, get_target, instantiate, load_config
 
 
 def cc(target: str | None = None, **kwargs: object) -> MockComponent:
@@ -63,3 +64,14 @@ def test_instantiate_kwargs_override():
     config = cc("builtins.dict", key="value")
     result = instantiate(config, key="override")
     assert result == {"key": "override"}
+
+
+def test_loaded_list_config_can_be_dumped(tmp_path):
+    source = tmp_path / "config.yaml"
+    output = tmp_path / "output.yaml"
+    source.write_text("_target_: builtins.dict\nlayer_types: [sliding, global]\n")
+
+    config = load_config(source, MockComponent)
+    dump_config(config, output)
+
+    assert yaml.safe_load(output.read_text())["layer_types"] == ["sliding", "global"]
