@@ -16,7 +16,7 @@ on:
       - "mkdocs.yml"
       - "pyproject.toml"
       - "uv.lock"
-      - ".github/workflows/docs.yml"   
+      - ".github/workflows/docs.yml"  
 permissions:
   contents: read
   pages: write
@@ -54,6 +54,7 @@ jobs:
           path: site
 
   deploy:
+    if: github.event_name == 'push' 
     needs: build
     runs-on: ubuntu-latest
     environment:
