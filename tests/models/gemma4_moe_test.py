@@ -1,7 +1,59 @@
 import torch
 import torch.nn.functional as F
 
-from trainite.models.gemma4_moe import DenseMLP, Gemma4MoE, Gemma4TextBlock, Gemma4TextModel, gelu_tanh
+from trainite.models.gemma4_moe import (
+    DenseMLP,
+    Gemma4MoE,
+    Gemma4TextBlock,
+    Gemma4TextModel,
+    gelu_tanh,
+    Gemma4TextAttention,
+)
+
+from unittest.mock import patch
+
+
+def test_gemma4_text_attention_forward():
+    attention = Gemma4TextAttention(
+        hidden_size=32,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        head_dim=8,
+    )
+    hidden_states = torch.randn(2, 5, 32)
+
+    output = attention(hidden_states)
+
+    assert output.shape == hidden_states.shape
+
+
+def test_sliding_attention_combines_local_and_causal_masks():
+    attention = Gemma4TextAttention(
+        hidden_size=8,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        head_dim=4,
+        sliding_window=2,
+    )
+
+    with patch(
+        "torch.nn.functional.scaled_dot_product_attention",
+        return_value=torch.zeros(1, 2, 4, 4),
+    ) as sdpa:
+        attention(torch.randn(1, 4, 8))
+
+    mask = sdpa.call_args.kwargs["attn_mask"][0, 0]
+    assert torch.equal(
+        mask,
+        torch.tensor(
+            [
+                [True, False, False, False],
+                [True, True, False, False],
+                [False, True, True, False],
+                [False, False, True, True],
+            ]
+        ),
+    )
 
 
 def test_dense_mlp_matches_gated_projection_formula():
@@ -66,7 +118,7 @@ def test_gemma4_text_block_matches_attention_and_parallel_ffn_branches():
     after_attention = x + block.post_attention_norm(block.attention(block.pre_attention_norm(x)))
     dense = block.post_dense_norm(block.dense_mlp(block.pre_dense_norm(after_attention)))
     moe_input = block.pre_moe_norm(after_attention)
-    moe = block.moe(moe_input.reshape(-1, 8)).reshape_as(moe_input)
+    moe = block.moe(moe_input.reshape(-1, 8), router_input=after_attention.reshape(-1, 8)).reshape_as(moe_input)
     expected = after_attention + block.post_feedforward_norm(dense + block.post_moe_norm(moe))
     expected = expected * block.layer_scale
 
@@ -87,6 +139,15 @@ def test_gemma4_text_model_returns_token_logits_and_backpropagates():
         top_k=2,
         head_dim=4,
         padding_idx=0,
+        layer_types=("sliding", "global"),
+        sliding_window=2,
+        rope_scaling_factor=2.0,
+        global_num_key_value_heads=1,
+        global_head_dim=6,
+        global_rope_theta=1_000_000,
+        global_rope_scaling_factor=4.0,
+        global_rotary_fraction=0.25,
+        global_key_equals_value=True,
     )
     input_ids = torch.tensor([[0, 1, 2], [3, 4, 5]])
     attention_mask = input_ids != 0
@@ -96,3 +157,10 @@ def test_gemma4_text_model_returns_token_logits_and_backpropagates():
 
     assert logits.shape == (2, 3, 32)
     assert model.token_embedding.weight.grad is not None
+    assert model.layers[0].attention.sliding_window == 2
+    assert model.layers[0].attention.head_dim == 4
+    assert model.layers[0].attention.rope_scaling_factor == 2.0
+    assert model.layers[1].attention.sliding_window is None
+    assert model.layers[1].attention.head_dim == 6
+    assert model.layers[1].attention.rope_scaling_factor == 4.0
+    assert model.layers[1].attention.v_proj is None
