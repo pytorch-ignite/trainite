@@ -1,22 +1,21 @@
+import json
 import tempfile
-from huggingface_hub import snapshot_download
+from urllib.request import urlopen
 
 import pytest
 import torch
-
-
-import json
-from urllib.request import urlopen
-from trainite.models.gemma4_moe import Gemma4TextModel
+from huggingface_hub import snapshot_download
 from transformers import Gemma4ForConditionalGeneration
 
+from trainite.models.gemma4_moe import load_hf_gemma4_text_model
 
-@pytest.mark.load_weights
+
+@pytest.mark.model_parity
 def test_tiny_hf_checkpoint_matches_transformers():
     with tempfile.TemporaryDirectory() as temp_dir:
         checkpoint = snapshot_download("tiny-random/gemma-4-moe", local_dir=temp_dir)
-        ours = Gemma4TextModel.from_hf_checkpoint(checkpoint).eval()
-        reference = Gemma4ForConditionalGeneration.from_pretrained(checkpoint, local_files_only=True).eval()
+        ours = load_hf_gemma4_text_model(checkpoint).float().eval()
+        reference = Gemma4ForConditionalGeneration.from_pretrained(checkpoint, local_files_only=True).float().eval()
         input_ids = torch.tensor([[2, 10, 11]])
         attention_mask = torch.ones_like(input_ids)
 
@@ -24,7 +23,7 @@ def test_tiny_hf_checkpoint_matches_transformers():
             actual = ours(input_ids, attention_mask).float()
             expected = reference(input_ids=input_ids, attention_mask=attention_mask).logits.float()
 
-        torch.testing.assert_close(actual, expected, rtol=0.02, atol=0.004)
+        torch.testing.assert_close(actual, expected, rtol=1e-4, atol=1e-4)
         assert torch.equal(actual.argmax(dim=-1), expected.argmax(dim=-1))
 
 
@@ -37,7 +36,7 @@ def _download_json(filename: str) -> dict:
         return json.load(response)
 
 
-@pytest.mark.load_weights
+@pytest.mark.model_parity
 def test_official_gemma4_26b_metadata_matches_loader():
     config = _download_json("config.json")["text_config"]
     weight_names = _download_json("model.safetensors.index.json")["weight_map"]
