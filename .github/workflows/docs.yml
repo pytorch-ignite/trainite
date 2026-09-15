@@ -9,6 +9,8 @@ on:
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/docs.yml"
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
