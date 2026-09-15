@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+# Architecture reference: https://github.com/rwightman/gemma4_pytorch_codex
+
 import torch
 import torch.nn.functional as F
 from torch import nn
