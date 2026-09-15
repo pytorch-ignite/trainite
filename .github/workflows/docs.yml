@@ -2,15 +2,13 @@ name: docs
 
 on:
   push:
-    branches: [main]
+    branches: [develop]
     paths:
       - "docs/**"
       - "mkdocs.yml"
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/docs.yml"
-  pull_request:
-    branches: [main]
 
 permissions:
   contents: read
@@ -32,7 +30,7 @@ jobs:
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
-          python-version: "3.11"
+          python-version: "3.14"
 
       - name: Sync docs dependencies
         run: uv sync --locked --group docs
@@ -44,7 +42,7 @@ jobs:
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: site
 
@@ -57,4 +55,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
