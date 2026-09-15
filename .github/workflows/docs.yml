@@ -2,22 +2,13 @@ name: docs
 
 on:
   push:
-    branches: [main, "develop"]
+    branches: [main]
     paths:
       - "docs/**"
       - "mkdocs.yml"
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/docs.yml"
-  pull_request:
-    branches: [main, "develop"]
-    paths:
-      - "docs/**"
-      - "mkdocs.yml"
-      - "pyproject.toml"
-      - "uv.lock"
-      - ".github/workflows/docs.yml"
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -48,17 +39,14 @@ jobs:
         run: uv run --group docs mkdocs build --strict
 
       - name: Configure Pages
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
 
       - name: Upload artifact
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
         with:
           path: site
 
   deploy:
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: build
     runs-on: ubuntu-latest
     environment:
