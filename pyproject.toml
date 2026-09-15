@@ -29,6 +29,7 @@ dynamic = ["version"]
 [project.urls]
 Homepage = "https://pytorch-ignite.ai"
 Repository = "https://github.com/pytorch-ignite/trainite"
+Documentation = "https://pytorch-ignite.github.io/trainite/"
 
 [project.scripts]
 trainite = "trainite.cli:main"

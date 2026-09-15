@@ -298,4 +298,6 @@ Each example is a standalone project — `cd` into it, install dependencies, and
 
 ---
 
+Full documentation is available at [pytorch-ignite.github.io/trainite](https://pytorch-ignite.github.io/trainite/).
+
 > For contributor and development docs, see [CONTRIBUTING.md](CONTRIBUTING.md).

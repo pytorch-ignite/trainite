@@ -1,0 +1,7 @@
+[build]
+  command = "pip install uv && uv sync --locked --group docs && uv run mkdocs build --strict"
+  publish = "site"
+  ignore = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- docs/ mkdocs.yml pyproject.toml uv.lock"
+
+[build.environment]
+  PYTHON_VERSION = "3.14"

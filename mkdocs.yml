@@ -1,5 +1,6 @@
 site_name: Trainite
 site_description: Documentation for Trainite
+site_url: https://pytorch-ignite.github.io/trainite/
 repo_url: https://github.com/pytorch-ignite/trainite
 
 theme:
