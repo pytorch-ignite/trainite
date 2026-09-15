@@ -1,3 +1,6 @@
+from unittest.mock import patch
+
+import pytest
 import torch
 import torch.nn.functional as F
 
@@ -10,7 +13,29 @@ from trainite.models.gemma4_moe import (
     Gemma4TextAttention,
 )
 
-from unittest.mock import patch
+
+def make_text_model(**overrides) -> Gemma4TextModel:
+    options = {
+        "vocab_size": 32,
+        "hidden_size": 8,
+        "num_layers": 2,
+        "num_attention_heads": 2,
+        "num_key_value_heads": 1,
+        "dense_intermediate_size": 12,
+        "expert_dim": 4,
+        "num_experts": 3,
+        "top_k": 2,
+        "head_dim": 4,
+        "layer_types": ("sliding", "global"),
+        "sliding_window": 2,
+        "global_num_key_value_heads": 1,
+        "global_head_dim": 6,
+        "global_rope_theta": 1_000_000,
+        "global_rotary_fraction": 0.25,
+        "global_key_equals_value": True,
+    }
+    options.update(overrides)
+    return Gemma4TextModel(**options)
 
 
 def test_gemma4_text_attention_forward():
@@ -127,27 +152,10 @@ def test_gemma4_text_block_matches_attention_and_parallel_ffn_branches():
 
 
 def test_gemma4_text_model_returns_token_logits_and_backpropagates():
-    model = Gemma4TextModel(
-        vocab_size=32,
-        hidden_size=8,
-        num_layers=2,
-        num_attention_heads=2,
-        num_key_value_heads=1,
-        dense_intermediate_size=12,
-        expert_dim=4,
-        num_experts=3,
-        top_k=2,
-        head_dim=4,
+    model = make_text_model(
         padding_idx=0,
-        layer_types=("sliding", "global"),
-        sliding_window=2,
         rope_scaling_factor=2.0,
-        global_num_key_value_heads=1,
-        global_head_dim=6,
-        global_rope_theta=1_000_000,
         global_rope_scaling_factor=4.0,
-        global_rotary_fraction=0.25,
-        global_key_equals_value=True,
     )
     input_ids = torch.tensor([[0, 1, 2], [3, 4, 5]])
     attention_mask = input_ids != 0
@@ -164,3 +172,47 @@ def test_gemma4_text_model_returns_token_logits_and_backpropagates():
     assert model.layers[1].attention.head_dim == 6
     assert model.layers[1].attention.rope_scaling_factor == 4.0
     assert model.layers[1].attention.v_proj is None
+
+
+def test_text_model_builds_distinct_local_and_global_attention():
+    model = make_text_model()
+    local = model.layers[0].attention
+    global_attention = model.layers[1].attention
+
+    assert local.q_proj.weight.shape == (8, 8)
+    assert local.k_proj.weight.shape == (4, 8)
+    assert local.v_proj is not None
+    assert local.o_proj.weight.shape == (8, 8)
+    assert local.rope_theta == 10_000
+    assert local.rotary_fraction == 1.0
+
+    assert global_attention.q_proj.weight.shape == (12, 8)
+    assert global_attention.k_proj.weight.shape == (6, 8)
+    assert global_attention.v_proj is None
+    assert global_attention.o_proj.weight.shape == (8, 12)
+    assert global_attention.rope_theta == 1_000_000
+    assert global_attention.rotary_fraction == 0.25
+    assert model.layers[0].moe.router.weight is not model.layers[1].moe.router.weight
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"layer_types": ("global",)}, "one entry per layer"),
+        ({"layer_types": ("sliding", "invalid")}, "'sliding' or 'global'"),
+        ({"sliding_window": None}, "required for sliding layers"),
+    ],
+)
+def test_text_model_rejects_invalid_layer_configuration(overrides, message):
+    with pytest.raises(ValueError, match=message):
+        make_text_model(**overrides)
+
+
+def test_text_model_softcaps_tied_embedding_logits():
+    model = make_text_model(final_logit_softcap=0.1)
+
+    logits = model(torch.tensor([[1, 2, 3]]))
+
+    assert logits.shape == (1, 3, 32)
+    assert logits.abs().max() <= 0.1
+    assert "lm_head.weight" not in model.state_dict()
