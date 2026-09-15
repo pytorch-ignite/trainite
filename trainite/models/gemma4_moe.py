@@ -1,9 +1,11 @@
 import json
 from pathlib import Path
+from typing import Any
 
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch.nn.utils.rnn import pad_sequence
 
 
 def gelu_tanh(x: torch.Tensor) -> torch.Tensor:
@@ -381,7 +383,7 @@ class Gemma4TextModel(nn.Module):
         rope_theta: float = 10_000.0,
         rope_scaling_factor: float = 1.0,
         rotary_fraction: float = 1.0,
-        padding_idx: int | None = None,
+        pad_token_id: int | None = None,
         layer_types: tuple[str, ...] | None = None,
         sliding_window: int | None = None,
         global_num_key_value_heads: int | None = None,
@@ -401,7 +403,7 @@ class Gemma4TextModel(nn.Module):
         if "sliding" in layer_types and sliding_window is None:
             raise ValueError("sliding_window is required for sliding layers")
 
-        self.token_embedding = nn.Embedding(vocab_size, hidden_size, padding_idx=padding_idx)
+        self.token_embedding = nn.Embedding(vocab_size, hidden_size, padding_idx=pad_token_id)
         self.embedding_scale = hidden_size**0.5
         self.final_logit_softcap = final_logit_softcap
         self.layer_types = layer_types
@@ -485,7 +487,7 @@ def load_hf_gemma4_text_model(checkpoint_dir: str | Path) -> Gemma4TextModel:
         rope_theta=local_rope["rope_theta"],
         rope_scaling_factor=local_rope.get("factor", 1.0),
         rotary_fraction=local_rope.get("partial_rotary_factor", 1.0),
-        padding_idx=config.get("pad_token_id"),
+        pad_token_id=config.get("pad_token_id"),
         layer_types=layer_types,
         sliding_window=config["sliding_window"],
         global_num_key_value_heads=config["num_global_key_value_heads"],
@@ -497,7 +499,6 @@ def load_hf_gemma4_text_model(checkpoint_dir: str | Path) -> Gemma4TextModel:
         final_logit_softcap=config.get("final_logit_softcapping"),
     )
 
-    # ponytail: eager single-file loading; use sharded meta loading for full-size checkpoints.
     source = load_file(checkpoint_dir / "model.safetensors", device="cpu")
     converted = {
         "token_embedding.weight": source["model.language_model.embed_tokens.weight"],
@@ -538,3 +539,24 @@ def load_hf_gemma4_text_model(checkpoint_dir: str | Path) -> Gemma4TextModel:
     model.to(dtype=converted["token_embedding.weight"].dtype)
     model.load_state_dict(converted, strict=True)
     return model
+
+
+class CausalLMCollateFn:
+    """Left-pad decoder-only inputs and ignore padded labels."""
+
+    def __init__(self, tokenizer: Any) -> None:
+        self.pad_token_id = getattr(tokenizer, "pad_token_id", None) or 0
+
+    def __call__(self, batch: list[Any]) -> dict[str, torch.Tensor]:
+        def left_pad(values: list[torch.Tensor], padding_value: int) -> torch.Tensor:
+            return pad_sequence(
+                [value.flip(0) for value in values],
+                batch_first=True,
+                padding_value=padding_value,
+            ).flip(1)
+
+        return {
+            "input_ids": left_pad([item.train_input_ids for item in batch], self.pad_token_id),
+            "attention_mask": left_pad([item.attention_mask for item in batch], 0),
+            "labels": left_pad([item.train_label_ids for item in batch], -100),
+        }
