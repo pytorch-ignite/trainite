@@ -2,7 +2,8 @@ import string
 
 import pytest
 import torch
-from trainite.preprocessors import CharTokenizer, CharTokenizerConfig
+from trainite.preprocessors.char_tokenizer import CharTokenizer
+from trainite.config.preprocessors import CharTokenizerConfig
 
 
 def test_char_tokenizer_vocab_size():

@@ -1,0 +1,51 @@
+[data-md-color-scheme="default"] {
+    --md-primary-fg-color: #fffaf5;
+    --md-primary-bg-color: #292524;
+    --md-primary-bg-color--light: #57534e;
+    --md-default-bg-color: #fffdfb;
+    --md-default-fg-color: #292524;
+    --md-default-fg-color--light: #57534e;
+    --md-typeset-a-color: #b93815;
+    --md-accent-fg-color: #a83212;
+    --md-accent-fg-color--transparent: #b938151a;
+    --md-code-bg-color: #f3eee8;
+}
+
+[data-md-color-scheme="slate"] {
+    --md-hue: 25;
+    --md-primary-fg-color: #211e1c;
+    --md-primary-bg-color: #faf6f1;
+    --md-primary-bg-color--light: #c9bfb5;
+    --md-default-bg-color: #191715;
+    --md-default-fg-color: #eee7df;
+    --md-default-fg-color--light: #c9bfb5;
+    --md-typeset-a-color: #ff956d;
+    --md-accent-fg-color: #ffb18c;
+    --md-accent-fg-color--transparent: #ff956d1a;
+    --md-code-bg-color: #25211e;
+}
+
+.md-header__inner {
+    min-height: 3.4rem;
+    padding-block: 0.1rem;
+}
+
+.md-header__button.md-logo {
+    margin: 0;
+    padding: 0.1rem 0.3rem;
+}
+
+[dir] .md-header__title {
+    margin-inline-start: -0.15rem;
+    font-size: 1.05rem;
+}
+
+.md-header__button.md-logo img,
+.md-nav__title .md-logo img {
+    height: 2.4rem;
+    width: auto;
+}
+
+.md-header__button.md-logo img {
+    height: 3rem;
+}
