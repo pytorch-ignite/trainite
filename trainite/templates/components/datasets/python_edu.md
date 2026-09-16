@@ -1,46 +1,45 @@
 # Python-Edu dataset
 
-This built-in dataset loads the `python-edu` config of
-[`HuggingFaceTB/smollm-corpus`](https://huggingface.co/datasets/HuggingFaceTB/smollm-corpus)
-and applies a causal language-modeling transform to each sample.
+This built-in dataset loads
+[`tyoc213/split-avelina-python-edu-distilled`](https://huggingface.co/datasets/tyoc213/split-avelina-python-edu-distilled)
+— a cleaned, pre-split dataset derived from
+[`Avelina/python-edu-cleaned`](https://huggingface.co/datasets/Avelina/python-edu-cleaned),
+which is based on the `python-edu` configuration of
+[`HuggingFaceTB/smollm-corpus`](https://huggingface.co/datasets/HuggingFaceTB/smollm-corpus).
+
+Unlike the original `smollm-corpus` Python-Edu dataset, this dataset already
+includes the source code in a `text` column, so no additional file downloads
+are required.
 
 ## Configure the dataset
 
 ```yaml
 data:
-  dataset:
-    split: train
-    min_int_score: 4
-    max_samples: null
+  train:
+    dataset:
+      path: tyoc213/split-avelina-python-edu-distilled
+      split: "train[:90%]"
 ```
 
-* `min_int_score` filters to files scored at or above this value by
-  HuggingFaceTB's educational-code classifier (the upstream default is `4`).
-* `max_samples` caps how many rows are loaded — useful for a quick local
-  smoke test before running on the full ~7.7M-row dataset.
+Like the WikiText dataset, `path` and `split` are plain config values passed
+directly to Hugging Face `datasets.load_dataset`.
 
-## File contents are downloaded separately
+## No separate file download
 
-Unlike a typical Hugging Face text dataset, `python-edu` ships only file
-metadata (`blob_id`, `repo_name`, `path`, `length_bytes`, `score`,
-`int_score`) — no `text` field. The actual source file for each row is
-fetched, gzip-decoded, from Software Heritage's public S3 bucket; no AWS
-credentials are required.
+The original
+[`HuggingFaceTB/smollm-corpus`](https://huggingface.co/datasets/HuggingFaceTB/smollm-corpus)
+Python-Edu configuration provides file metadata such as `blob_id`,
+`repo_name`, `path`, `length_bytes`, `score`, and `int_score`, with the actual
+source code stored separately in Software Heritage.
 
-* **With `max_samples` set**, the dataset streams rows from the Hub lazily
-  and stops as soon as enough rows pass the score filter and download
-  successfully — it never downloads the full ~600MB metadata file. This is
-  the fast path, intended for local iteration.
-* **With `max_samples` unset** (a full training run), the full split's
-  metadata is downloaded and cached by Hugging Face `datasets` up front (a
-  one-time cost reused by every subsequent run), then every row's file
-  content is fetched.
+In contrast,
+[`tyoc213/split-avelina-python-edu-distilled`](https://huggingface.co/datasets/tyoc213/split-avelina-python-edu-distilled)
+already contains the decoded source code in its `text` column. The dataset
+can therefore be loaded directly with `datasets.load_dataset`, without
+additional per-file downloads, AWS access, or Software Heritage requests.
 
-A small number of files can fail to download (removed from Software
-Heritage, etc.); those rows are filtered out automatically.
-
-Refer to [the-stack-v2](https://huggingface.co/datasets/bigcode/the-stack-v2-train-full-ids)
-for the data's license terms before redistributing or training on this content.
+The dataset is downloaded and cached by Hugging Face `datasets` on first use.
+Subsequent runs reuse the local cache.
 
 ## Configure the transform
 
@@ -50,8 +49,8 @@ data:
     max_length: 128
 ```
 
-`max_length` controls the maximum sequence length. The tokenizer handles
-special-token addition. The transform creates:
+`max_length` controls the maximum sequence length passed to the tokenizer.
+The transform creates:
 
 * `train_input_ids`
 * `train_label_ids`
@@ -60,12 +59,24 @@ special-token addition. The transform creates:
 
 ## Dataset splits
 
-`python-edu` only has a `train` split upstream, so this dataset uses
-Trainite's auto-split strategy (`test_ratio` / `val_ratio` in `config.yaml`)
-rather than explicit `train`/`val`/`test` splits.
+The upstream dataset provides `train` and `test` splits but does not provide
+a separate `val` split.
+
+The default Trainite configuration creates the validation split using
+Hugging Face split-slicing syntax:
+
+* **`train`**: `"train[:90%]"` — the first 90% of the upstream `train` split.
+* **`val`**: `"train[90%:]"` — the remaining 10% of the upstream `train` split.
+* **`test`**: `"test"` — the upstream test split, used as-is.
+
+The train and validation splits are therefore non-overlapping. You can adjust
+the train/validation ratio by changing the split expressions in the dataset
+configuration.
 
 ## Hugging Face authentication
 
-The dataset metadata is downloaded and cached by Hugging Face Datasets. Do
-not put Hugging Face access tokens in `config.yaml`. Authenticate through
-the Hugging Face CLI or the environment when required.
+The dataset is loaded and cached by Hugging Face Datasets. Do not put Hugging
+Face access tokens directly in `config.yaml`.
+
+If authentication is required for the dataset, authenticate through the
+Hugging Face CLI or the appropriate environment configuration.
