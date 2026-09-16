@@ -129,3 +129,4 @@ def test_char_tokenizer_config():
     config = CharTokenizerConfig()
     assert config.target == "trainite.preprocessors.char_tokenizer.CharTokenizer"
     assert config.charset == "@universal"
+

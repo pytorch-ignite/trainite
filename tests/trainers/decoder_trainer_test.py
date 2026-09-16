@@ -621,3 +621,5 @@ def test_decoder_trainer_generate(project_config):
         generated = trainer.generate(input_ids, max_new_tokens=1, attention_mask=attention_mask)
         assert isinstance(generated, torch.Tensor)
         assert generated[0].tolist() == [5, 6, 7]
+
+
