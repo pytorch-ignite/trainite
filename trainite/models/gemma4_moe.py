@@ -160,6 +160,7 @@ class Gemma4MoE(nn.Module):
             raise ValueError("top_k must be between 1 and num_experts")
 
         self.hidden_size = hidden_size
+        self.num_experts = num_experts
         self.top_k = top_k
         self.router_norm = nn.RMSNorm(hidden_size, eps=1e-6, elementwise_affine=False)
         self.router_scale = nn.Parameter(torch.ones(hidden_size))
@@ -184,7 +185,7 @@ class Gemma4MoE(nn.Module):
         topk_weights = topk_weights * self.per_expert_scale[topk_indices]
 
         output = torch.zeros_like(x)
-        for expert_idx in torch.unique(topk_indices).tolist():
+        for expert_idx in range(self.num_experts):
             token_indices, topk_positions = (topk_indices == expert_idx).nonzero(as_tuple=True)
             gate, up = F.linear(x[token_indices], self.gate_up_proj[expert_idx]).chunk(2, dim=-1)
             expert_output = F.linear(gelu_tanh(gate) * up, self.down_proj[expert_idx])
