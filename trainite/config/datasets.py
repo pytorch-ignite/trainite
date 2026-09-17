@@ -200,28 +200,12 @@ class PythonEduTransformConfig(TransformConfig):
 
 
 class PythonEduDatasetConfig(HuggingFaceDatasetConfig):
-    path: str = "tyoc213/split-avelina-python-edu-distilled"
+    path: str = "Avelina/python-edu-cleaned"
 
 
-class PythonEduDataConfig(DataConfigBase):
-    train: SplitConfig = Field(
-        default_factory=lambda: SplitConfig(
-            dataset=PythonEduDatasetConfig(split="train[:90%]"),
-            transform=PythonEduTransformConfig(),
-            dataloader=DataLoaderConfig(batch_size=32, shuffle=True),
-        )
-    )
-    val: SplitConfig = Field(
-        default_factory=lambda: SplitConfig(
-            dataset=PythonEduDatasetConfig(split="train[90%:]"),
-            transform=PythonEduTransformConfig(),
-            dataloader=DataLoaderConfig(batch_size=32, shuffle=False),
-        )
-    )
-    test: SplitConfig = Field(
-        default_factory=lambda: SplitConfig(
-            dataset=PythonEduDatasetConfig(split="test"),
-            transform=PythonEduTransformConfig(),
-            dataloader=DataLoaderConfig(batch_size=32, shuffle=False),
-        )
-    )
+class PythonEduDataConfig(DataWithAutoSplit):
+    dataset: PythonEduDatasetConfig = Field(default_factory=PythonEduDatasetConfig)
+    transform: PythonEduTransformConfig = Field(default_factory=PythonEduTransformConfig)
+    test_ratio: float = 0.1
+    val_ratio: float = 0.1
+    dataloader: DataLoaderConfig = Field(default_factory=lambda: DataLoaderConfig(batch_size=32, shuffle=True))
