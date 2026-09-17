@@ -183,3 +183,49 @@ def test_gemma_instantiate_from_config():
     input_ids = torch.randint(0, 64, (2, 8))
     logits = model(input_ids)
     assert logits.shape == (2, 8, 64)
+
+
+def test_gemma_attention_key_equals_value():
+    dim = 32
+    num_heads = 4
+    num_kv_heads = 2
+    head_dim = 8
+    attn = GemmaAttention(
+        dim=dim,
+        num_heads=num_heads,
+        num_kv_heads=num_kv_heads,
+        head_dim=head_dim,
+        key_equals_value=True,
+    )
+    assert attn.v_proj is None
+    assert attn.v_norm.weight is None  # unscaled RMSNorm
+
+    x = torch.randn(2, 4, dim)
+    positions = torch.arange(4).unsqueeze(0).repeat(2, 1)
+    out = attn(x, positions=positions)
+    assert out.shape == (2, 4, dim)
+
+
+def test_gemma_dense_model_global_key_equals_value():
+    vocab_size = 50
+    dim = 32
+    # Layer 0 is sliding, Layer 1 is global (since last layer is always global)
+    model = GemmaDenseModel(
+        vocab_size=vocab_size,
+        dim=dim,
+        num_layers=2,
+        num_heads=4,
+        num_kv_heads=2,
+        head_dim=8,
+        intermediate_size=64,
+        sliding_ratio=5,
+        global_key_equals_value=True,
+    )
+    # Sliding layer has separate v_proj
+    assert model.layers[0].attn.v_proj is not None
+    # Global layer reuses key (v_proj is None)
+    assert model.layers[1].attn.v_proj is None
+
+    input_ids = torch.randint(0, vocab_size, (2, 4))
+    logits = model(input_ids)
+    assert logits.shape == (2, 4, vocab_size)

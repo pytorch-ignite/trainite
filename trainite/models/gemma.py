@@ -91,6 +91,7 @@ class GemmaAttention(nn.Module):
         rope_proportion: float = 1.0,
         rms_norm_eps: float = 1e-6,
         dropout: float = 0.0,
+        key_equals_value: bool = False,
     ) -> None:
         super().__init__()
         self.dim = dim
@@ -103,14 +104,16 @@ class GemmaAttention(nn.Module):
         self.rope_proportion = rope_proportion
         self.rms_norm_eps = rms_norm_eps
         self.dropout = dropout
+        self.key_equals_value = key_equals_value
 
         self.q_proj = nn.Linear(dim, num_heads * head_dim, bias=False)
         self.k_proj = nn.Linear(dim, num_kv_heads * head_dim, bias=False)
-        self.v_proj = nn.Linear(dim, num_kv_heads * head_dim, bias=False)
+        self.v_proj = None if key_equals_value else nn.Linear(dim, num_kv_heads * head_dim, bias=False)
         self.o_proj = nn.Linear(num_heads * head_dim, dim, bias=False)
 
         self.q_norm = RMSNorm(head_dim, eps=rms_norm_eps)
         self.k_norm = RMSNorm(head_dim, eps=rms_norm_eps)
+        self.v_norm = RMSNorm(head_dim, eps=rms_norm_eps, with_scale=False)
 
     def forward(
         self,
@@ -121,10 +124,11 @@ class GemmaAttention(nn.Module):
         B, S, _ = x.shape
         q = self.q_proj(x).view(B, S, self.num_heads, self.head_dim)
         k = self.k_proj(x).view(B, S, self.num_kv_heads, self.head_dim)
-        v = self.v_proj(x).view(B, S, self.num_kv_heads, self.head_dim)
+        v = k if self.v_proj is None else self.v_proj(x).view(B, S, self.num_kv_heads, self.head_dim)
 
         q = self.q_norm(q)
         k = self.k_norm(k)
+        v = self.v_norm(v)
 
         q = apply_rope(q, positions, self.rope_theta, self.rope_proportion)
         k = apply_rope(k, positions, self.rope_theta, self.rope_proportion)
@@ -146,7 +150,9 @@ class GemmaAttention(nn.Module):
             mask = mask & attention_mask.bool().unsqueeze(1).unsqueeze(2)
 
         dropout_p = self.dropout if self.training else 0.0
-        attn_out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=dropout_p, enable_gqa=True)
+        attn_out = F.scaled_dot_product_attention(
+            q, k, v, attn_mask=mask, dropout_p=dropout_p, scale=1.0, enable_gqa=True
+        )
         attn_out = attn_out.transpose(1, 2).contiguous().view(B, S, self.num_heads * self.head_dim)
         return self.o_proj(attn_out)
 
@@ -167,6 +173,7 @@ class GemmaBlock(nn.Module):
         dropout: float = 0.0,
         use_post_attn_norm: bool = True,
         use_post_ffn_norm: bool = True,
+        key_equals_value: bool = False,
     ) -> None:
         super().__init__()
         self.dim = dim
@@ -182,6 +189,7 @@ class GemmaBlock(nn.Module):
         self.dropout = dropout
         self.use_post_attn_norm = use_post_attn_norm
         self.use_post_ffn_norm = use_post_ffn_norm
+        self.key_equals_value = key_equals_value
 
         self.pre_attn_norm = RMSNorm(dim, eps=rms_norm_eps)
         self.attn = GemmaAttention(
@@ -195,6 +203,7 @@ class GemmaBlock(nn.Module):
             rope_proportion=rope_proportion,
             rms_norm_eps=rms_norm_eps,
             dropout=dropout,
+            key_equals_value=key_equals_value,
         )
         self.post_attn_norm = RMSNorm(dim, eps=rms_norm_eps) if use_post_attn_norm else None
 
@@ -248,6 +257,7 @@ class GemmaDenseModel(nn.Module):
         dropout: float = 0.0,
         final_logit_softcap: float | None = None,
         tie_word_embeddings: bool = True,
+        global_key_equals_value: bool = True,
         pad_token_id: int | None = None,
     ) -> None:
         super().__init__()
@@ -268,6 +278,7 @@ class GemmaDenseModel(nn.Module):
         self.dropout = dropout
         self.final_logit_softcap = final_logit_softcap
         self.tie_word_embeddings = tie_word_embeddings
+        self.global_key_equals_value = global_key_equals_value
 
         self.embed_tokens = nn.Embedding(vocab_size, dim, padding_idx=pad_token_id)
         self.embed_scale = math.sqrt(dim)
@@ -281,10 +292,12 @@ class GemmaDenseModel(nn.Module):
                 rope_theta = local_rope_theta
                 rope_proportion = local_rope_proportion
                 window = sliding_window
+                key_equals_value = False
             else:
                 rope_theta = global_rope_theta
                 rope_proportion = global_rope_proportion
                 window = None
+                key_equals_value = global_key_equals_value
 
             self.layers.append(
                 GemmaBlock(
@@ -301,6 +314,7 @@ class GemmaDenseModel(nn.Module):
                     dropout=dropout,
                     use_post_attn_norm=True,
                     use_post_ffn_norm=True,
+                    key_equals_value=key_equals_value,
                 )
             )
 

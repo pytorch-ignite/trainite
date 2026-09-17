@@ -47,4 +47,5 @@ class GemmaDenseModelConfig(ModelConfig):
     dropout: float = Field(default=0.0, ge=0.0, lt=1.0)
     final_logit_softcap: float | None = Field(default=None)
     tie_word_embeddings: bool = Field(default=True)
+    global_key_equals_value: bool = Field(default=True)
     max_seq_len: int = Field(default=512, gt=0)
