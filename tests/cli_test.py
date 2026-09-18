@@ -11,6 +11,9 @@ import yaml
 from trainite.cli.init import Init, init_project, generate_uv_project
 from trainite.config.registry import (
     DATASET_SPECS,
+    DEFAULT_DATASET,
+    DEFAULT_MODEL,
+    DEFAULT_TRAINER,
     MODEL_SPECS,
     PREPROCESSOR_SPECS,
     TRAINER_SPECS,
@@ -18,9 +21,78 @@ from trainite.config.registry import (
 
 
 def test_generated_pyproject_has_build_system() -> None:
-    pyproject = generate_uv_project(name="demo", version="0.1.0", dependencies=["torch"])
+    pyproject = generate_uv_project(
+        name="demo",
+        version="0.1.0",
+        dependencies=["torch"],
+    )
     assert 'build-backend = "setuptools.build_meta"' in pyproject
     assert "packages = []" in pyproject
+
+
+def test_interactive_defaults_are_explicit(monkeypatch):
+    from trainite.cli import init
+
+    monkeypatch.setattr(
+        init,
+        "DATASET_CHOICES",
+        tuple(reversed(init.DATASET_CHOICES)),
+    )
+
+    captured = {}
+
+    def fake_prompt_choice(prompt, choices, default, instruction=None):
+        captured[prompt] = default
+        return default
+
+    def fake_prompt_multi_choice(
+        prompt,
+        choices,
+        default=None,
+        instruction=None,
+    ):
+        captured[prompt] = default
+        return [DEFAULT_MODEL]
+
+    monkeypatch.setattr(init, "_prompt_choice", fake_prompt_choice)
+    monkeypatch.setattr(
+        init,
+        "_prompt_multi_choice",
+        fake_prompt_multi_choice,
+    )
+    monkeypatch.setattr(
+        init,
+        "_prompt_text",
+        lambda *args, **kwargs: args[1],
+    )
+    monkeypatch.setattr(
+        init.questionary,
+        "confirm",
+        lambda *args, **kwargs: type(
+            "Prompt",
+            (),
+            {"ask": lambda self: False},
+        )(),
+    )
+    monkeypatch.setattr(
+        init,
+        "init_project",
+        lambda config: None,
+    )
+
+    init.run_interactive_mode()
+
+    assert captured["Model(s):"] == [DEFAULT_MODEL]
+    assert captured["Dataset:"] == DEFAULT_DATASET
+    assert captured["Trainer:"] == DEFAULT_TRAINER
+
+
+def test_cli_init_defaults_are_explicit():
+    config = Init()
+
+    assert config.model == (DEFAULT_MODEL,)
+    assert config.dataset == DEFAULT_DATASET
+    assert config.trainer == DEFAULT_TRAINER
 
 
 def get_valid_project_combinations():
