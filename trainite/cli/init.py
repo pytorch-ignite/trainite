@@ -22,6 +22,9 @@ from trainite.config.registry import (
     DATASET_SPECS,
     TRAINER_SPECS,
     PREPROCESSOR_SPECS,
+    DEFAULT_MODEL,
+    DEFAULT_DATASET,
+    DEFAULT_TRAINER,
 )
 from trainite.shared.utils import dump_config
 
@@ -305,27 +308,27 @@ def run_interactive_mode() -> None:
     models = _prompt_multi_choice(
         "Model(s):",
         MODEL_CHOICES,
-        default=["rope-transformer"],
+        default=[DEFAULT_MODEL],
         instruction="Select starter model template(s) to include (use space to select)",
     )
     if len(models) > 1:
         primary_model = _prompt_choice(
             "Primary active model in config.yaml:",
             models,
-            default=models[0],
+            default=DEFAULT_MODEL if DEFAULT_MODEL in models else models[0],
             instruction="Choose which model is configured as default active in config.yaml",
         )
         models = [primary_model] + [m for m in models if m != primary_model]
     dataset = _prompt_choice(
         "Dataset:",
         DATASET_CHOICES,
-        DATASET_CHOICES[0],
+        DEFAULT_DATASET,
         "Starter dataset template to use",
     )
     trainer = _prompt_choice(
         "Trainer:",
         TRAINER_CHOICES,
-        TRAINER_CHOICES[0],
+        DEFAULT_TRAINER,
         "Starter trainer template to use",
     )
     output_root = _prompt_text("Output directory:", "outputs", "Output directory for generated files \n")
@@ -388,9 +391,9 @@ class Init(BaseModel):
     """
 
     project_dir: tyro.conf.Positional[str] = "my-cool-experiment"
-    model: tuple[ModelType, ...] = ("rope-transformer",)
-    dataset: DatasetType = "string-reverse"
-    trainer: TrainerType = "decoder-trainer"
+    model: tuple[ModelType, ...] = (DEFAULT_MODEL,)
+    dataset: DatasetType = DEFAULT_DATASET
+    trainer: TrainerType = DEFAULT_TRAINER
     output_root: str = "outputs"
     run_name: str = ""
     sky: bool = False

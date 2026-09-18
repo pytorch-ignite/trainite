@@ -141,6 +141,11 @@ PREPROCESSOR_SPECS = {
 }
 
 
+DEFAULT_MODEL = "rope-transformer"
+DEFAULT_DATASET = "string-reverse"
+DEFAULT_TRAINER = "decoder-trainer"
+
+
 REGISTRY = {
     "models": MODEL_SPECS,
     "datasets": DATASET_SPECS,
