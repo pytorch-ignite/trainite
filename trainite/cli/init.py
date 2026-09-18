@@ -326,7 +326,7 @@ def run_interactive_mode() -> None:
         primary_model = _prompt_choice(
             "Primary active model in config.yaml:",
             models,
-            default=models[0],
+            default=DEFAULT_MODEL if DEFAULT_MODEL in models else models[0],
             instruction="Choose which model is configured as default active in config.yaml",
         )
         models = [primary_model] + [m for m in models if m != primary_model]

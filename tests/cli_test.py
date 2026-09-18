@@ -52,7 +52,7 @@ def test_interactive_defaults_are_explicit(monkeypatch):
         instruction=None,
     ):
         captured[prompt] = default
-        return [DEFAULT_MODEL]
+        return ["basic-transformer", init.DEFAULT_MODEL]
 
     monkeypatch.setattr(init, "_prompt_choice", fake_prompt_choice)
     monkeypatch.setattr(
@@ -85,6 +85,48 @@ def test_interactive_defaults_are_explicit(monkeypatch):
     assert captured["Model(s):"] == [DEFAULT_MODEL]
     assert captured["Dataset:"] == DEFAULT_DATASET
     assert captured["Trainer:"] == DEFAULT_TRAINER
+    assert captured["Primary active model in config.yaml:"] == init.DEFAULT_MODEL
+
+
+def test_primary_model_default_falls_back_when_default_not_selected(monkeypatch):
+    from trainite.cli import init
+
+    monkeypatch.setattr(init, "DEFAULT_MODEL", "not-selected")
+
+    captured = {}
+
+    def fake_prompt_choice(prompt, choices, default, instruction=None):
+        captured[prompt] = default
+        return default
+
+    def fake_prompt_multi_choice(prompt, choices, default=None, instruction=None):
+        return ["basic-transformer", "rope-transformer"]
+
+    monkeypatch.setattr(init, "_prompt_choice", fake_prompt_choice)
+    monkeypatch.setattr(
+        init,
+        "_prompt_multi_choice",
+        fake_prompt_multi_choice,
+    )
+    monkeypatch.setattr(
+        init,
+        "_prompt_text",
+        lambda *args, **kwargs: args[1],
+    )
+    monkeypatch.setattr(
+        init.questionary,
+        "confirm",
+        lambda *args, **kwargs: type(
+            "Prompt",
+            (),
+            {"ask": lambda self: False},
+        )(),
+    )
+    monkeypatch.setattr(init, "init_project", lambda config: None)
+
+    init.run_interactive_mode()
+
+    assert captured["Primary active model in config.yaml:"] == "basic-transformer"
 
 
 def test_cli_init_defaults_are_explicit():
