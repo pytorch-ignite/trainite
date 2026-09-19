@@ -1,3 +1,4 @@
+import itertools
 import importlib
 import inspect
 import logging
@@ -97,6 +98,35 @@ def dump_config(config: BaseModel, path: str | Path) -> None:
 def load_config(path: str | Path, config_cls: type[T]) -> T:
     raw_conf = OmegaConf.load(path)
     return config_cls.model_validate(raw_conf)
+
+
+def load_grid_configs(path: str | Path, config_cls: type[T]) -> list[T]:
+    """Loads a configuration file and generates a list of configurations for grid search."""
+    raw_conf = OmegaConf.load(path)
+    sweep_params = raw_conf.get("sweep", None)
+
+    # If there is no sweep block, return the single config inside a list
+    if not sweep_params:
+        return [config_cls.model_validate(raw_conf)]
+
+    # Extract and format the grid parameters
+    sweep_params = OmegaConf.to_container(sweep_params)
+    keys = list(sweep_params.keys())
+    values = [v if isinstance(v, list) else [v] for v in sweep_params.values()]
+
+    # Generate all combinations
+    combinations = list(itertools.product(*values))
+
+    # Create and validate a distinct configuration for each combination
+    configs = []
+    for combo in combinations:
+        run_conf = raw_conf.copy()
+        for key, val in zip(keys, combo):
+            OmegaConf.update(run_conf, key, val)
+
+        configs.append(config_cls.model_validate(run_conf))
+
+    return configs
 
 
 # ==========================================
