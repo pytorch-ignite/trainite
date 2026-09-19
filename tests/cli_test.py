@@ -326,3 +326,48 @@ def test_init_without_sky_flag_default(tmp_path):
 
     pyproject_content = (project_dir / "pyproject.toml").read_text()
     assert "skypilot" not in pyproject_content
+
+
+def test_primary_model_defaults_to_first_selected_model():
+    config = Init(model=("rope-transformer", "basic-transformer"))
+
+    assert config.primary_model == "rope-transformer"
+
+
+def test_primary_model_not_in_selection_raises_error():
+    with pytest.raises(ValueError, match="must be one of the selected models"):
+        Init(model=("rope-transformer",), primary_model="basic-transformer")
+
+
+def test_primary_model_drives_generated_config(tmp_path):
+    project_dir = tmp_path / "primary-model-experiment"
+    config = Init(
+        project_dir=str(project_dir),
+        model=("rope-transformer", "basic-transformer"),
+        primary_model="basic-transformer",
+    )
+    init_project(config)
+
+    generated_config = yaml.safe_load((project_dir / "config.yaml").read_text())
+
+    # The primary model drives config.yaml and the run name even though it is
+    # not first in the selection.
+    assert "basic_transformer" in generated_config["model"]["_target_"]
+    assert "basic_transformer" in generated_config["model"]["collate_fn_target"]
+    assert generated_config["output"]["run_name"] == "basic_transformer__string_reverse"
+
+    # Both selected models are still generated.
+    assert (project_dir / "models/basic_transformer.py").exists()
+    assert (project_dir / "models/rope_transformer.py").exists()
+
+
+def test_primary_model_round_trips_in_recreation_command(tmp_path):
+    project_dir = tmp_path / "recreation-experiment"
+    config = Init(
+        project_dir=str(project_dir),
+        model=("rope-transformer", "basic-transformer"),
+        primary_model="basic-transformer",
+    )
+    init_project(config)
+
+    assert "--primary-model basic-transformer" in (project_dir / "README.md").read_text()
