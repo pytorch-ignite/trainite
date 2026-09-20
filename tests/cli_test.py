@@ -88,6 +88,12 @@ def test_interactive_defaults_are_explicit(monkeypatch):
     assert captured["Primary active model in config.yaml:"] == init.DEFAULT_MODEL
 
 
+def test_default_constants_exist_in_registry():
+    assert DEFAULT_MODEL in MODEL_SPECS
+    assert DEFAULT_DATASET in DATASET_SPECS
+    assert DEFAULT_TRAINER in TRAINER_SPECS
+
+
 def test_primary_model_default_falls_back_when_default_not_selected(monkeypatch):
     from trainite.cli import init
 
