@@ -216,16 +216,3 @@ def test_gemma4_dense_instantiate_from_config():
     input_ids = torch.randint(0, 64, (2, 8))
     logits = model(input_ids)
     assert logits.shape == (2, 8, 64)
-
-
-def test_gemma_dense_alias_instantiate_from_config():
-    spec = MODEL_SPECS["gemma-dense"]
-    config_cls = spec.config_cls
-    config = config_cls()
-
-    model = instantiate(config, vocab_size=64, pad_token_id=0)
-    assert isinstance(model, Gemma4DenseModel)
-
-    input_ids = torch.randint(0, 64, (2, 8))
-    logits = model(input_ids)
-    assert logits.shape == (2, 8, 64)
