@@ -20,7 +20,7 @@ def test_registry_groups_are_populated():
         assert specs, f"registry group '{group_name}' has no components"
 
 
-@pytest.mark.parametrize("spec", _registered_specs())
+@pytest.mark.parametrize("spec", list(_registered_specs()))
 def test_registry_spec_resolves(spec):
     assert (PROJECT_ROOT / spec.implementation_path).is_file()
 
