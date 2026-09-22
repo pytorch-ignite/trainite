@@ -23,6 +23,11 @@ class ComponentSpec(BaseModel):
 class ModelSpec(ComponentSpec):
     builder_symbol: str
     collate_fn_target: str | None = None
+    loss_config_cls_path: str | None = None
+
+    @property
+    def loss_config_cls(self) -> Any | None:
+        return get_target(self.loss_config_cls_path) if self.loss_config_cls_path else None
 
 
 class DatasetSpec(ComponentSpec):

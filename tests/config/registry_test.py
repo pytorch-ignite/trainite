@@ -34,3 +34,6 @@ def test_registry_spec_resolves(spec):
 
     if isinstance(spec, ModelSpec) and spec.collate_fn_target is not None:
         get_target(spec.collate_fn_target)
+
+    if isinstance(spec, ModelSpec) and spec.loss_config_cls_path is not None:
+        get_target(spec.loss_config_cls_path)

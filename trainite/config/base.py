@@ -35,6 +35,11 @@ class OptimizerConfig(BaseModel):
     lr: float = Field(default=1e-3, gt=0.0)
 
 
+class LossConfig(BaseModel):
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
+    target: str = Field(alias="_target_", default="torch.nn.CrossEntropyLoss")
+
+
 class DataLoaderConfig(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     batch_size: int = Field(default=32, gt=0)
@@ -91,6 +96,7 @@ class ProjectConfig(BaseModel):
     preprocessor: PreprocessorConfig
     model: ModelConfig
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
+    loss: LossConfig = Field(default_factory=LossConfig)
     data: DataConfigBase | DataWithAutoSplit
     trainer: TrainerConfig = Field(default_factory=TrainerConfig)
     output: OutputConfig

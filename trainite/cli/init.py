@@ -469,6 +469,7 @@ def init_project(config: Init) -> None:
     model_component = primary_model_spec.config_cls(collate_fn_target=primary_model_spec.collate_fn_target)
     data_config = dataset_spec.config_cls()
     trainer_component = trainer_spec.config_cls()
+    loss_component = primary_model_spec.loss_config_cls() if primary_model_spec.loss_config_cls else None
 
     preprocessor_component = preprocessor_spec.config_cls() if preprocessor_spec else None
 
@@ -480,6 +481,8 @@ def init_project(config: Init) -> None:
         trainer=trainer_component,
         output=output_config,
     )
+    if loss_component is not None:
+        starter_config.loss = loss_component
 
     # Update targets to point to the local project structure
     _update_targets(starter_config, rewrites)
