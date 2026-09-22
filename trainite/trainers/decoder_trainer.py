@@ -341,7 +341,7 @@ class Trainer:
 
         # Shared transform: flatten and filter out ignored positions for both metrics
         def transform_fn(output):
-            return _flatten(output, ignore_index=self.criterion.ignore_index)
+            return _flatten(output, ignore_index=getattr(self.criterion, "ignore_index", -100))
 
         metrics = {}
         for prefix, evaluator in [
