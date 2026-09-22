@@ -1,4 +1,4 @@
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from trainite.config.base import ModelConfig
 
@@ -40,8 +40,20 @@ class Gemma4MoEModelConfig(ModelConfig):
     num_experts: int = Field(default=4, gt=0)
     top_k: int = Field(default=2, gt=0)
     head_dim: int = Field(default=16, gt=0)
-    layer_types: tuple[str, ...] = ("sliding", "global")
+    layer_types: tuple[str, ...] | None = None
+    layer_pattern: str | None = None
+    pattern_repeats: int | None = Field(default=None, gt=0)
     sliding_window: int = Field(default=64, gt=0)
     global_num_key_value_heads: int = Field(default=2, gt=0)
     global_head_dim: int = Field(default=16, gt=0)
     global_key_equals_value: bool = True
+
+    @model_validator(mode="after")
+    def _default_layer_layout(self):
+        if self.layer_types is not None and (self.layer_pattern is not None or self.pattern_repeats is not None):
+            raise ValueError("layer_types and layer_pattern/pattern_repeats are mutually exclusive")
+        if self.pattern_repeats is not None and self.layer_pattern is None:
+            raise ValueError("pattern_repeats requires layer_pattern")
+        if self.layer_types is None and self.layer_pattern is None:
+            self.layer_pattern = "sg"
+        return self
