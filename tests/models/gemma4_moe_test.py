@@ -250,11 +250,36 @@ def test_text_model_builds_distinct_local_and_global_attention():
         ({"layer_types": ("global",)}, "one entry per layer"),
         ({"layer_types": ("sliding", "invalid")}, "'sliding' or 'global'"),
         ({"sliding_window": None}, "required for sliding layers"),
+        ({"layer_types": ("sliding", "global"), "layer_pattern": "sg"}, "mutually exclusive"),
+        ({"layer_types": None, "pattern_repeats": 2}, "requires layer_pattern"),
+        ({"layer_types": None, "layer_pattern": "sx"}, "must only contain"),
+        ({"layer_types": None, "layer_pattern": "sg", "pattern_repeats": 3}, "does not fill"),
     ],
 )
 def test_text_model_rejects_invalid_layer_configuration(overrides, message):
     with pytest.raises(ValueError, match=message):
         make_text_model(**overrides)
+
+
+def test_text_model_expands_compact_layer_pattern():
+    model = make_text_model(
+        num_layers=12,
+        layer_types=None,
+        layer_pattern="sssssg",
+        pattern_repeats=2,
+    )
+
+    assert model.layer_types == ("sliding",) * 5 + ("global",) + ("sliding",) * 5 + ("global",)
+    assert model.layers[0].attention.sliding_window == 2
+    assert model.layers[5].attention.sliding_window is None
+    assert model.layers[5].attention.v_proj is None
+
+    tiled = make_text_model(num_layers=6, layer_types=None, layer_pattern="sssssg")
+    assert tiled.layer_types == ("sliding",) * 5 + ("global",)
+
+
+def test_gemma4_config_defaults_to_sg_pattern():
+    assert Gemma4MoEModelConfig().layer_pattern == "sg"
 
 
 def test_text_model_softcaps_tied_embedding_logits():
