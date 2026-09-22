@@ -22,7 +22,7 @@ as an architecture reference.
 model:
   _target_: models.gemma4_moe.Gemma4TextModel
   hidden_size: 64
-  num_layers: 2
+  num_layers: 12
   num_attention_heads: 4
   num_key_value_heads: 2
   dense_intermediate_size: 128
@@ -30,11 +30,18 @@ model:
   num_experts: 4
   top_k: 2
   head_dim: 16
-  layer_types: [sliding, global]
+  layer_pattern: sssssg
+  pattern_repeats: 2
   sliding_window: 64
   global_num_key_value_heads: 2
   global_head_dim: 16
   global_key_equals_value: true
 ```
 
-`layer_types` must have one entry per layer. Keep `top_k <= num_experts`.
+`layer_types` (one entry per layer) and `layer_pattern` + `pattern_repeats`
+are mutually exclusive. `layer_pattern` is a compact string with
+`s` = sliding and `g` = global (e.g. `sssssg` = 5x sliding + 1x global).
+It is repeated to fill `num_layers`: `pattern_repeats` defaults to
+`num_layers / len(pattern)` (must divide evenly), or set it explicitly
+(e.g. `sssssg` repeated 5x for 30 layers).
+Keep `top_k <= num_experts`.
