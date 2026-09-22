@@ -303,6 +303,192 @@ class Gemma4TextAttention(nn.Module):
         return self.o_proj(attended)
 
 
+class Gemma4DenseBlock(nn.Module):
+    """Gemma 4 Dense decoder block: attention followed by dense feed-forward network."""
+
+    def __init__(
+        self,
+        hidden_size: int,
+        num_attention_heads: int,
+        num_key_value_heads: int,
+        dense_intermediate_size: int,
+        *,
+        head_dim: int | None = None,
+        rope_theta: float = 10_000.0,
+        rope_scaling_factor: float = 1.0,
+        rotary_fraction: float = 1.0,
+        sliding_window: int | None = None,
+        key_equals_value: bool = False,
+    ) -> None:
+        super().__init__()
+        self.attention = Gemma4TextAttention(
+            hidden_size,
+            num_attention_heads,
+            num_key_value_heads,
+            head_dim=head_dim,
+            rope_theta=rope_theta,
+            rope_scaling_factor=rope_scaling_factor,
+            rotary_fraction=rotary_fraction,
+            sliding_window=sliding_window,
+            key_equals_value=key_equals_value,
+        )
+        self.pre_attention_norm = nn.RMSNorm(hidden_size, eps=1e-6)
+        self.post_attention_norm = nn.RMSNorm(hidden_size, eps=1e-6)
+        self.pre_dense_norm = nn.RMSNorm(hidden_size, eps=1e-6)
+        self.dense_mlp = DenseMLP(hidden_size, dense_intermediate_size)
+        self.post_dense_norm = nn.RMSNorm(hidden_size, eps=1e-6)
+        self.layer_scale = nn.Parameter(torch.ones(1))
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        position_ids: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        residual = hidden_states
+        hidden_states = self.attention(self.pre_attention_norm(hidden_states), position_ids, attention_mask)
+        hidden_states = residual + self.post_attention_norm(hidden_states)
+
+        residual = hidden_states
+        dense = self.post_dense_norm(self.dense_mlp(self.pre_dense_norm(hidden_states)))
+        return (residual + dense) * self.layer_scale
+
+
+def resolve_layer_types(
+    num_layers: int,
+    layer_types: tuple[str, ...] | None = None,
+    layer_pattern: str | None = None,
+    sliding_window: int | None = None,
+) -> tuple[str, ...]:
+    """Resolve and validate the sequence of layer types ('sliding' or 'global').
+
+    Args:
+        num_layers: Total number of layers in the model.
+        layer_types: Explicit tuple of layer types of length `num_layers`.
+        layer_pattern: Compact character pattern using 's' (sliding) and 'g' (global)
+            that divides `num_layers` (e.g. 'sg', 'sssssg').
+        sliding_window: Context window for sliding layers. Required if any layer is 'sliding'.
+
+    Returns:
+        A tuple of layer type strings ('sliding' or 'global') of length `num_layers`.
+    """
+    if layer_types is not None and layer_pattern is not None:
+        raise ValueError("layer_types and layer_pattern are mutually exclusive")
+    if layer_pattern is not None:
+        mapping = {"s": "sliding", "g": "global"}
+        chars = layer_pattern.strip().lower()
+        if not chars or any(c not in mapping for c in chars):
+            raise ValueError("layer_pattern must only contain 's' (sliding) and 'g' (global)")
+        pattern = [mapping[c] for c in chars]
+        if num_layers % len(pattern) != 0:
+            raise ValueError(
+                f"layer_pattern {layer_pattern!r} of length {len(pattern)} does not divide num_layers={num_layers}"
+            )
+        layer_types = tuple(pattern * (num_layers // len(pattern)))
+    if layer_types is None:
+        layer_types = ("global",) * num_layers
+    if len(layer_types) != num_layers:
+        raise ValueError("layer_types must contain one entry per layer")
+    if any(layer_type not in {"sliding", "global"} for layer_type in layer_types):
+        raise ValueError("layer_types entries must be 'sliding' or 'global'")
+    if "sliding" in layer_types and sliding_window is None:
+        raise ValueError("sliding_window is required for sliding layers")
+    return layer_types
+
+
+class Gemma4DenseModel(nn.Module):
+    """Minimal trainable Gemma 4 Dense language model."""
+
+    def __init__(
+        self,
+        vocab_size: int,
+        hidden_size: int,
+        num_layers: int,
+        num_attention_heads: int,
+        num_key_value_heads: int,
+        dense_intermediate_size: int,
+        *,
+        head_dim: int | None = None,
+        rope_theta: float = 10_000.0,
+        rope_scaling_factor: float = 1.0,
+        rotary_fraction: float = 1.0,
+        pad_token_id: int | None = None,
+        layer_types: tuple[str, ...] | None = None,
+        layer_pattern: str | None = None,
+        sliding_window: int | None = 512,
+        global_num_key_value_heads: int | None = None,
+        global_head_dim: int | None = None,
+        global_rope_theta: float | None = 1_000_000.0,
+        global_rope_scaling_factor: float | None = None,
+        global_rotary_fraction: float | None = 0.25,
+        global_key_equals_value: bool = True,
+        tie_word_embeddings: bool = True,
+        final_logit_softcap: float | None = None,
+    ) -> None:
+        super().__init__()
+        self.layer_types = resolve_layer_types(
+            num_layers,
+            layer_types=layer_types,
+            layer_pattern=layer_pattern,
+            sliding_window=sliding_window,
+        )
+
+        self.token_embedding = nn.Embedding(vocab_size, hidden_size, padding_idx=pad_token_id)
+        self.embedding_scale = hidden_size**0.5
+        self.final_logit_softcap = final_logit_softcap
+
+        layers = []
+        for layer_type in self.layer_types:
+            is_global = layer_type == "global"
+            layers.append(
+                Gemma4DenseBlock(
+                    hidden_size,
+                    num_attention_heads,
+                    (global_num_key_value_heads or num_key_value_heads) if is_global else num_key_value_heads,
+                    dense_intermediate_size,
+                    head_dim=(global_head_dim or head_dim) if is_global else head_dim,
+                    rope_theta=(global_rope_theta or rope_theta) if is_global else rope_theta,
+                    rope_scaling_factor=(
+                        global_rope_scaling_factor
+                        if is_global and global_rope_scaling_factor is not None
+                        else rope_scaling_factor
+                    ),
+                    rotary_fraction=(
+                        global_rotary_fraction if is_global and global_rotary_fraction is not None else rotary_fraction
+                    ),
+                    sliding_window=None if is_global else sliding_window,
+                    key_equals_value=is_global and global_key_equals_value,
+                )
+            )
+        self.layers = nn.ModuleList(layers)
+        self.final_norm = nn.RMSNorm(hidden_size, eps=1e-6)
+        self.lm_head = None if tie_word_embeddings else nn.Linear(hidden_size, vocab_size, bias=False)
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor | None = None,
+        position_ids: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        if position_ids is None and attention_mask is not None:
+            position_ids = (attention_mask.cumsum(dim=-1) - 1).clamp(min=0)
+
+        hidden_states = self.token_embedding(input_ids) * self.embedding_scale
+        for layer in self.layers:
+            hidden_states = layer(hidden_states, position_ids, attention_mask)
+
+        hidden_states = self.final_norm(hidden_states)
+        if self.lm_head is not None:
+            logits = self.lm_head(hidden_states)
+        else:
+            logits = F.linear(hidden_states, self.token_embedding.weight)
+
+        if self.final_logit_softcap is not None:
+            logits = torch.tanh(logits / self.final_logit_softcap) * self.final_logit_softcap
+
+        return logits
+
+
 class Gemma4TextBlock(nn.Module):
     """Gemma 4 MoE decoder block: attention, then parallel dense and expert FFNs."""
 
@@ -399,34 +585,18 @@ class Gemma4TextModel(nn.Module):
         final_logit_softcap: float | None = None,
     ) -> None:
         super().__init__()
-        if layer_types is not None and layer_pattern is not None:
-            raise ValueError("layer_types and layer_pattern are mutually exclusive")
-        if layer_pattern is not None:
-            mapping = {"s": "sliding", "g": "global"}
-            chars = layer_pattern.strip().lower()
-            if not chars or any(c not in mapping for c in chars):
-                raise ValueError("layer_pattern must only contain 's' (sliding) and 'g' (global)")
-            pattern = [mapping[c] for c in chars]
-            if num_layers % len(pattern) != 0:
-                raise ValueError(
-                    f"layer_pattern {layer_pattern!r} of length {len(pattern)} does not divide num_layers={num_layers}"
-                )
-            layer_types = tuple(pattern * (num_layers // len(pattern)))
-        if layer_types is None:
-            layer_types = ("global",) * num_layers
-        if len(layer_types) != num_layers:
-            raise ValueError("layer_types must contain one entry per layer")
-        if any(layer_type not in {"sliding", "global"} for layer_type in layer_types):
-            raise ValueError("layer_types entries must be 'sliding' or 'global'")
-        if "sliding" in layer_types and sliding_window is None:
-            raise ValueError("sliding_window is required for sliding layers")
+        self.layer_types = resolve_layer_types(
+            num_layers,
+            layer_types=layer_types,
+            layer_pattern=layer_pattern,
+            sliding_window=sliding_window,
+        )
 
         self.token_embedding = nn.Embedding(vocab_size, hidden_size, padding_idx=pad_token_id)
         self.embedding_scale = hidden_size**0.5
         self.final_logit_softcap = final_logit_softcap
-        self.layer_types = layer_types
         layers = []
-        for layer_type in layer_types:
+        for layer_type in self.layer_types:
             is_global = layer_type == "global"
             layers.append(
                 Gemma4TextBlock(

@@ -52,3 +52,34 @@ class Gemma4MoEModelConfig(ModelConfig):
         if self.layer_types is None and self.layer_pattern is None:
             self.layer_pattern = "sg"
         return self
+
+
+class Gemma4DenseModelConfig(ModelConfig):
+    """Small Gemma 4 Dense configuration suitable for training from scratch."""
+
+    target: str = Field(default="trainite.models.gemma4_moe.Gemma4DenseModel", alias="_target_")
+    hidden_size: int = Field(default=64, gt=0)
+    num_layers: int = Field(default=2, gt=0)
+    num_attention_heads: int = Field(default=4, gt=0)
+    num_key_value_heads: int = Field(default=2, gt=0)
+    dense_intermediate_size: int = Field(default=128, gt=0)
+    head_dim: int = Field(default=16, gt=0)
+    layer_types: tuple[str, ...] | None = None
+    layer_pattern: str | None = None
+    sliding_window: int = Field(default=512, gt=0)
+    rope_theta: float = Field(default=10000.0, gt=0.0)
+    global_rope_theta: float = Field(default=1000000.0, gt=0.0)
+    rotary_fraction: float = Field(default=1.0, gt=0.0, le=1.0)
+    global_rotary_fraction: float = Field(default=0.25, gt=0.0, le=1.0)
+    global_num_key_value_heads: int = Field(default=2, gt=0)
+    global_head_dim: int = Field(default=16, gt=0)
+    global_key_equals_value: bool = True
+    tie_word_embeddings: bool = True
+    final_logit_softcap: float | None = None
+    max_seq_len: int = Field(default=512, gt=0)
+
+    @model_validator(mode="after")
+    def _default_layer_layout(self):
+        if self.layer_types is None and self.layer_pattern is None:
+            self.layer_pattern = "sg"
+        return self
