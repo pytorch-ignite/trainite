@@ -251,9 +251,8 @@ def test_text_model_builds_distinct_local_and_global_attention():
         ({"layer_types": ("sliding", "invalid")}, "'sliding' or 'global'"),
         ({"sliding_window": None}, "required for sliding layers"),
         ({"layer_types": ("sliding", "global"), "layer_pattern": "sg"}, "mutually exclusive"),
-        ({"layer_types": None, "pattern_repeats": 2}, "requires layer_pattern"),
         ({"layer_types": None, "layer_pattern": "sx"}, "must only contain"),
-        ({"layer_types": None, "layer_pattern": "sg", "pattern_repeats": 3}, "does not fill"),
+        ({"layer_types": None, "layer_pattern": "sgg"}, "does not divide"),
     ],
 )
 def test_text_model_rejects_invalid_layer_configuration(overrides, message):
@@ -266,7 +265,6 @@ def test_text_model_expands_compact_layer_pattern():
         num_layers=12,
         layer_types=None,
         layer_pattern="sssssg",
-        pattern_repeats=2,
     )
 
     assert model.layer_types == ("sliding",) * 5 + ("global",) + ("sliding",) * 5 + ("global",)

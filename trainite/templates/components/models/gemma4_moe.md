@@ -31,17 +31,14 @@ model:
   top_k: 2
   head_dim: 16
   layer_pattern: sssssg
-  pattern_repeats: 2
   sliding_window: 64
   global_num_key_value_heads: 2
   global_head_dim: 16
   global_key_equals_value: true
 ```
 
-`layer_types` (one entry per layer) and `layer_pattern` + `pattern_repeats`
-are mutually exclusive. `layer_pattern` is a compact string with
-`s` = sliding and `g` = global (e.g. `sssssg` = 5x sliding + 1x global).
-It is repeated to fill `num_layers`: `pattern_repeats` defaults to
-`num_layers / len(pattern)` (must divide evenly), or set it explicitly
-(e.g. `sssssg` repeated 5x for 30 layers).
+`layer_types` (one entry per layer) and `layer_pattern` are mutually exclusive.
+`layer_pattern` is a compact string with `s` = sliding and `g` = global
+(e.g. `sssssg` = 5x sliding + 1x global), repeated to fill `num_layers`
+(`len(pattern)` must divide `num_layers`).
 Keep `top_k <= num_experts`.
