@@ -389,7 +389,6 @@ class Gemma4TextModel(nn.Module):
         pad_token_id: int | None = None,
         layer_types: tuple[str, ...] | None = None,
         layer_pattern: str | None = None,
-        pattern_repeats: int | None = None,
         sliding_window: int | None = None,
         global_num_key_value_heads: int | None = None,
         global_head_dim: int | None = None,
@@ -400,23 +399,19 @@ class Gemma4TextModel(nn.Module):
         final_logit_softcap: float | None = None,
     ) -> None:
         super().__init__()
-        if layer_types is not None and (layer_pattern is not None or pattern_repeats is not None):
-            raise ValueError("layer_types and layer_pattern/pattern_repeats are mutually exclusive")
-        if pattern_repeats is not None and layer_pattern is None:
-            raise ValueError("pattern_repeats requires layer_pattern")
+        if layer_types is not None and layer_pattern is not None:
+            raise ValueError("layer_types and layer_pattern are mutually exclusive")
         if layer_pattern is not None:
             mapping = {"s": "sliding", "g": "global"}
             chars = layer_pattern.strip().lower()
             if not chars or any(c not in mapping for c in chars):
                 raise ValueError("layer_pattern must only contain 's' (sliding) and 'g' (global)")
             pattern = [mapping[c] for c in chars]
-            repeats = pattern_repeats if pattern_repeats is not None else num_layers // len(pattern)
-            if repeats <= 0 or len(pattern) * repeats != num_layers:
+            if num_layers % len(pattern) != 0:
                 raise ValueError(
-                    f"layer_pattern {layer_pattern!r} of length {len(pattern)} does not fill "
-                    f"num_layers={num_layers}; provide pattern_repeats or full layer_types"
+                    f"layer_pattern {layer_pattern!r} of length {len(pattern)} does not divide num_layers={num_layers}"
                 )
-            layer_types = tuple(pattern * repeats)
+            layer_types = tuple(pattern * (num_layers // len(pattern)))
         if layer_types is None:
             layer_types = ("global",) * num_layers
         if len(layer_types) != num_layers:
