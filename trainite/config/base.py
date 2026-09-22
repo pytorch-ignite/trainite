@@ -38,6 +38,7 @@ class OptimizerConfig(BaseModel):
 class LossConfig(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     target: str = Field(alias="_target_", default="torch.nn.CrossEntropyLoss")
+    ignore_index: int = -100
 
 
 class DataLoaderConfig(BaseModel):
