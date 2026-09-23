@@ -66,11 +66,11 @@ MODEL_SPECS = {
     ),
     "gemma4-dense": ModelSpec(
         name="gemma4_dense",
-        implementation_path=Path("trainite/models/gemma4_moe.py"),
+        implementation_path=Path("trainite/models/gemma4_dense.py"),
         config_cls_path="trainite.config.models.Gemma4DenseModelConfig",
         implementation_symbol="Gemma4DenseModel",
         builder_symbol="Gemma4DenseModel",
-        collate_fn_target="trainite.models.gemma4_moe.CausalLMCollateFn",
+        collate_fn_target="trainite.models.gemma4_dense.CausalLMCollateFn",
         readme_template_path=Path("trainite/templates/components/models/gemma4_dense.md"),
     ),
 }

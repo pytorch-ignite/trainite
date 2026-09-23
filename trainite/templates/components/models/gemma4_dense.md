@@ -91,7 +91,7 @@ Maximum sequence length constraint for the model and trainer (default: 512).
 
 ```yaml
 model:
-  _target_: trainite.models.gemma4_moe.Gemma4DenseModel
+  _target_: trainite.models.gemma4_dense.Gemma4DenseModel
   hidden_size: 64
   num_layers: 2
   num_attention_heads: 4

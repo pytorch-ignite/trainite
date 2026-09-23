@@ -151,50 +151,6 @@ class DenseMLP(nn.Module):
         return self.down_proj(gelu_tanh(self.gate_proj(x)) * self.up_proj(x))
 
 
-class Gemma4MoE(nn.Module):
-    """Gemma 4 top-k mixture-of-experts feed-forward block."""
-
-    def __init__(self, hidden_size: int, expert_dim: int, num_experts: int, top_k: int) -> None:
-        super().__init__()
-        if not 0 < top_k <= num_experts:
-            raise ValueError("top_k must be between 1 and num_experts")
-
-        self.hidden_size = hidden_size
-        self.num_experts = num_experts
-        self.top_k = top_k
-        self.router_norm = nn.RMSNorm(hidden_size, eps=1e-6, elementwise_affine=False)
-        self.router_scale = nn.Parameter(torch.ones(hidden_size))
-        self.per_expert_scale = nn.Parameter(torch.ones(num_experts))
-        self.router = nn.Linear(hidden_size, num_experts, bias=False)
-        self.gate_up_proj = nn.Parameter(torch.empty(num_experts, 2 * expert_dim, hidden_size))
-        self.down_proj = nn.Parameter(torch.empty(num_experts, hidden_size, expert_dim))
-
-        for weight in self.gate_up_proj:
-            nn.init.kaiming_uniform_(weight, a=5**0.5)
-        for weight in self.down_proj:
-            nn.init.kaiming_uniform_(weight, a=5**0.5)
-
-    def forward(self, x: torch.Tensor, router_input: torch.Tensor | None = None) -> torch.Tensor:
-        router_input = x if router_input is None else router_input
-        router_input = self.router_norm(router_input) * self.router_scale * (self.hidden_size**-0.5)
-        router_logits = self.router(router_input).float()
-        router_probs = F.softmax(router_logits, dim=-1)
-        topk_indices = torch.topk(router_logits, k=self.top_k, dim=-1).indices
-        topk_weights = router_probs.gather(-1, topk_indices)
-        topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
-        topk_weights = topk_weights * self.per_expert_scale[topk_indices]
-
-        output = torch.zeros_like(x)
-        for expert_idx in range(self.num_experts):
-            token_indices, topk_positions = (topk_indices == expert_idx).nonzero(as_tuple=True)
-            gate, up = F.linear(x[token_indices], self.gate_up_proj[expert_idx]).chunk(2, dim=-1)
-            expert_output = F.linear(gelu_tanh(gate) * up, self.down_proj[expert_idx])
-            expert_output = expert_output * topk_weights[token_indices, topk_positions, None].to(x.dtype)
-            output.index_add_(0, token_indices, expert_output)
-
-        return output
-
-
 class Gemma4TextAttention(nn.Module):
     """Checkpoint-compatible Gemma 4 text self-attention without KV caching."""
 
@@ -345,8 +301,8 @@ def resolve_layer_types(
     return layer_types
 
 
-class Gemma4TextBlock(nn.Module):
-    """Gemma 4 MoE decoder block: attention, then parallel dense and expert FFNs."""
+class Gemma4DenseBlock(nn.Module):
+    """Gemma 4 Dense decoder block: attention followed by dense feed-forward network."""
 
     def __init__(
         self,
@@ -354,9 +310,6 @@ class Gemma4TextBlock(nn.Module):
         num_attention_heads: int,
         num_key_value_heads: int,
         dense_intermediate_size: int,
-        expert_dim: int,
-        num_experts: int,
-        top_k: int,
         *,
         head_dim: int | None = None,
         rope_theta: float = 10_000.0,
@@ -382,10 +335,6 @@ class Gemma4TextBlock(nn.Module):
         self.pre_dense_norm = nn.RMSNorm(hidden_size, eps=1e-6)
         self.dense_mlp = DenseMLP(hidden_size, dense_intermediate_size)
         self.post_dense_norm = nn.RMSNorm(hidden_size, eps=1e-6)
-        self.pre_moe_norm = nn.RMSNorm(hidden_size, eps=1e-6)
-        self.moe = Gemma4MoE(hidden_size, expert_dim, num_experts, top_k)
-        self.post_moe_norm = nn.RMSNorm(hidden_size, eps=1e-6)
-        self.post_feedforward_norm = nn.RMSNorm(hidden_size, eps=1e-6)
         self.layer_scale = nn.Parameter(torch.ones(1))
 
     def forward(
@@ -400,17 +349,11 @@ class Gemma4TextBlock(nn.Module):
 
         residual = hidden_states
         dense = self.post_dense_norm(self.dense_mlp(self.pre_dense_norm(hidden_states)))
-        moe_input = self.pre_moe_norm(hidden_states)
-        moe = self.moe(
-            moe_input.reshape(-1, moe_input.shape[-1]),
-            router_input=residual.reshape(-1, residual.shape[-1]),
-        ).reshape_as(moe_input)
-        hidden_states = self.post_feedforward_norm(dense + self.post_moe_norm(moe))
-        return (residual + hidden_states) * self.layer_scale
+        return (residual + dense) * self.layer_scale
 
 
-class Gemma4TextModel(nn.Module):
-    """Minimal trainable Gemma 4 MoE language model."""
+class Gemma4DenseModel(nn.Module):
+    """Minimal trainable Gemma 4 Dense language model."""
 
     def __init__(
         self,
@@ -420,9 +363,6 @@ class Gemma4TextModel(nn.Module):
         num_attention_heads: int,
         num_key_value_heads: int,
         dense_intermediate_size: int,
-        expert_dim: int,
-        num_experts: int,
-        top_k: int,
         *,
         head_dim: int | None = None,
         rope_theta: float = 10_000.0,
@@ -431,13 +371,14 @@ class Gemma4TextModel(nn.Module):
         pad_token_id: int | None = None,
         layer_types: tuple[str, ...] | None = None,
         layer_pattern: str | None = None,
-        sliding_window: int | None = None,
+        sliding_window: int | None = 512,
         global_num_key_value_heads: int | None = None,
         global_head_dim: int | None = None,
-        global_rope_theta: float | None = None,
+        global_rope_theta: float | None = 1_000_000.0,
         global_rope_scaling_factor: float | None = None,
-        global_rotary_fraction: float | None = None,
-        global_key_equals_value: bool = False,
+        global_rotary_fraction: float | None = 0.25,
+        global_key_equals_value: bool = True,
+        tie_word_embeddings: bool = True,
         final_logit_softcap: float | None = None,
     ) -> None:
         super().__init__()
@@ -451,18 +392,16 @@ class Gemma4TextModel(nn.Module):
         self.token_embedding = nn.Embedding(vocab_size, hidden_size, padding_idx=pad_token_id)
         self.embedding_scale = hidden_size**0.5
         self.final_logit_softcap = final_logit_softcap
+
         layers = []
         for layer_type in self.layer_types:
             is_global = layer_type == "global"
             layers.append(
-                Gemma4TextBlock(
+                Gemma4DenseBlock(
                     hidden_size,
                     num_attention_heads,
                     (global_num_key_value_heads or num_key_value_heads) if is_global else num_key_value_heads,
                     dense_intermediate_size,
-                    expert_dim,
-                    num_experts,
-                    top_k,
                     head_dim=(global_head_dim or head_dim) if is_global else head_dim,
                     rope_theta=(global_rope_theta or rope_theta) if is_global else rope_theta,
                     rope_scaling_factor=(
@@ -479,6 +418,7 @@ class Gemma4TextModel(nn.Module):
             )
         self.layers = nn.ModuleList(layers)
         self.final_norm = nn.RMSNorm(hidden_size, eps=1e-6)
+        self.lm_head = None if tie_word_embeddings else nn.Linear(hidden_size, vocab_size, bias=False)
 
     def forward(
         self,
@@ -494,14 +434,19 @@ class Gemma4TextModel(nn.Module):
             hidden_states = layer(hidden_states, position_ids, attention_mask)
 
         hidden_states = self.final_norm(hidden_states)
-        logits = F.linear(hidden_states, self.token_embedding.weight)
+        if self.lm_head is not None:
+            logits = self.lm_head(hidden_states)
+        else:
+            logits = F.linear(hidden_states, self.token_embedding.weight)
+
         if self.final_logit_softcap is not None:
             logits = torch.tanh(logits / self.final_logit_softcap) * self.final_logit_softcap
+
         return logits
 
 
-def load_hf_gemma4_text_model(checkpoint_dir: str | Path) -> Gemma4TextModel:
-    """Load an unsharded Hugging Face Gemma 4 MoE text checkpoint."""
+def load_hf_gemma4_dense_model(checkpoint_dir: str | Path) -> Gemma4DenseModel:
+    """Load an unsharded Hugging Face Gemma 4 Dense text checkpoint."""
     try:
         from safetensors.torch import load_file
     except ImportError as error:
@@ -509,7 +454,8 @@ def load_hf_gemma4_text_model(checkpoint_dir: str | Path) -> Gemma4TextModel:
 
     checkpoint_dir = Path(checkpoint_dir)
     with (checkpoint_dir / "config.json").open(encoding="utf-8") as file:
-        config = json.load(file)["text_config"]
+        raw_config = json.load(file)
+        config = raw_config.get("text_config", raw_config)
 
     rope = config["rope_parameters"]
     local_rope = rope["sliding_attention"]
@@ -517,16 +463,14 @@ def load_hf_gemma4_text_model(checkpoint_dir: str | Path) -> Gemma4TextModel:
     layer_types = tuple(
         "sliding" if layer_type == "sliding_attention" else "global" for layer_type in config["layer_types"]
     )
-    model = Gemma4TextModel(
+    tie_word_embeddings = config.get("tie_word_embeddings", True)
+    model = Gemma4DenseModel(
         vocab_size=config["vocab_size"],
         hidden_size=config["hidden_size"],
         num_layers=config["num_hidden_layers"],
         num_attention_heads=config["num_attention_heads"],
         num_key_value_heads=config["num_key_value_heads"],
         dense_intermediate_size=config["intermediate_size"],
-        expert_dim=config["moe_intermediate_size"],
-        num_experts=config["num_experts"],
-        top_k=config["top_k_experts"],
         head_dim=config["head_dim"],
         rope_theta=local_rope["rope_theta"],
         rope_scaling_factor=local_rope.get("factor", 1.0),
@@ -540,6 +484,7 @@ def load_hf_gemma4_text_model(checkpoint_dir: str | Path) -> Gemma4TextModel:
         global_rope_scaling_factor=global_rope.get("factor", 1.0),
         global_rotary_fraction=global_rope.get("partial_rotary_factor", 1.0),
         global_key_equals_value=config.get("attention_k_eq_v", False),
+        tie_word_embeddings=tie_word_embeddings,
         final_logit_softcap=config.get("final_logit_softcapping"),
     )
 
@@ -548,6 +493,9 @@ def load_hf_gemma4_text_model(checkpoint_dir: str | Path) -> Gemma4TextModel:
         "token_embedding.weight": source["model.language_model.embed_tokens.weight"],
         "final_norm.weight": source["model.language_model.norm.weight"],
     }
+    if not tie_word_embeddings and "lm_head.weight" in source:
+        converted["lm_head.weight"] = source["lm_head.weight"]
+
     layer_key_map = {
         "layer_scalar": "layer_scale",
         "self_attn.q_proj.weight": "attention.q_proj.weight",
@@ -562,15 +510,7 @@ def load_hf_gemma4_text_model(checkpoint_dir: str | Path) -> Gemma4TextModel:
         "mlp.gate_proj.weight": "dense_mlp.gate_proj.weight",
         "mlp.up_proj.weight": "dense_mlp.up_proj.weight",
         "mlp.down_proj.weight": "dense_mlp.down_proj.weight",
-        "post_feedforward_layernorm_1.weight": "post_dense_norm.weight",
-        "pre_feedforward_layernorm_2.weight": "pre_moe_norm.weight",
-        "router.scale": "moe.router_scale",
-        "router.per_expert_scale": "moe.per_expert_scale",
-        "router.proj.weight": "moe.router.weight",
-        "experts.gate_up_proj": "moe.gate_up_proj",
-        "experts.down_proj": "moe.down_proj",
-        "post_feedforward_layernorm_2.weight": "post_moe_norm.weight",
-        "post_feedforward_layernorm.weight": "post_feedforward_norm.weight",
+        "post_feedforward_layernorm.weight": "post_dense_norm.weight",
     }
     for layer_index in range(config["num_hidden_layers"]):
         source_prefix = f"model.language_model.layers.{layer_index}."

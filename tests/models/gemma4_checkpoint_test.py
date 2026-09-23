@@ -7,6 +7,7 @@ import torch
 from huggingface_hub import snapshot_download
 from transformers import Gemma4ForConditionalGeneration
 
+from trainite.models.gemma4_dense import load_hf_gemma4_dense_model
 from trainite.models.gemma4_moe import load_hf_gemma4_text_model
 
 
@@ -15,6 +16,23 @@ def test_tiny_hf_checkpoint_matches_transformers():
     with tempfile.TemporaryDirectory() as temp_dir:
         checkpoint = snapshot_download("tiny-random/gemma-4-moe", local_dir=temp_dir)
         ours = load_hf_gemma4_text_model(checkpoint).float().eval()
+        reference = Gemma4ForConditionalGeneration.from_pretrained(checkpoint, local_files_only=True).float().eval()
+        input_ids = torch.tensor([[2, 10, 11]])
+        attention_mask = torch.ones_like(input_ids)
+
+        with torch.no_grad():
+            actual = ours(input_ids, attention_mask).float()
+            expected = reference(input_ids=input_ids, attention_mask=attention_mask).logits.float()
+
+        torch.testing.assert_close(actual, expected, rtol=1e-4, atol=1e-4)
+        assert torch.equal(actual.argmax(dim=-1), expected.argmax(dim=-1))
+
+
+@pytest.mark.model_parity
+def test_tiny_hf_dense_checkpoint_matches_transformers():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        checkpoint = snapshot_download("tiny-random/gemma-4-dense", local_dir=temp_dir)
+        ours = load_hf_gemma4_dense_model(checkpoint).float().eval()
         reference = Gemma4ForConditionalGeneration.from_pretrained(checkpoint, local_files_only=True).float().eval()
         input_ids = torch.tensor([[2, 10, 11]])
         attention_mask = torch.ones_like(input_ids)

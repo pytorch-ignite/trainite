@@ -57,7 +57,7 @@ class Gemma4MoEModelConfig(ModelConfig):
 class Gemma4DenseModelConfig(ModelConfig):
     """Small Gemma 4 Dense configuration suitable for training from scratch."""
 
-    target: str = Field(default="trainite.models.gemma4_moe.Gemma4DenseModel", alias="_target_")
+    target: str = Field(default="trainite.models.gemma4_dense.Gemma4DenseModel", alias="_target_")
     hidden_size: int = Field(default=64, gt=0)
     num_layers: int = Field(default=2, gt=0)
     num_attention_heads: int = Field(default=4, gt=0)
