@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import torch
 
 from trainite.config.registry import MODEL_SPECS
-from trainite.models.gemma4_moe import (
+from trainite.models.gemma4_dense import (
     CausalLMCollateFn,
     DenseMLP,
     Gemma4DenseBlock,
