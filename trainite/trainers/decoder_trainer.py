@@ -339,9 +339,11 @@ class Trainer:
         # Running average loss tracked per training iteration (logged in console)
         RunningAverage(output_transform=lambda output: output["loss"]).attach(self.trainer, "batch_loss")
 
+        ignore_index = getattr(self.criterion, "ignore_index", -100)
+
         # Shared transform: flatten and filter out ignored positions for both metrics
         def transform_fn(output):
-            return _flatten(output, ignore_index=getattr(self.criterion, "ignore_index", -100))
+            return _flatten(output, ignore_index=ignore_index)
 
         metrics = {}
         for prefix, evaluator in [
