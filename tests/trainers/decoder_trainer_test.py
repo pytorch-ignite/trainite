@@ -13,6 +13,7 @@ from trainite.config.base import (
     DataConfigBase,
     DataLoaderConfig,
     DataWithAutoSplit,
+    LossConfig,
     OptimizerConfig,
     OutputConfig,
     SplitConfig,
@@ -255,6 +256,31 @@ def test_decoder_trainer_init(project_config):
     assert trainer.val_loader is not None
     assert len(trainer.train_loader) == 4  # 16 / 4
     assert len(trainer.val_loader) == 2  # 8 / 4
+
+
+class DoubleCELoss(nn.Module):
+    """Custom loss doubling CE — proves Trainer honors loss._target_."""
+
+    def __init__(self, ignore_index=-100):
+        super().__init__()
+        self.ignore_index = ignore_index
+        self.ce = nn.CrossEntropyLoss(ignore_index=ignore_index)
+
+    def forward(self, logits, targets):
+        return 2 * self.ce(logits, targets)
+
+
+def test_decoder_trainer_custom_loss_from_config(project_config):
+    project_config.loss = LossConfig.model_validate({"_target_": target_path(DoubleCELoss)})
+    trainer = create_trainer_from_config(project_config)
+    assert isinstance(trainer.criterion, DoubleCELoss)
+
+    batch = next(iter(trainer.train_loader))
+    output = trainer._train_step(trainer.trainer, batch)
+    flat_logits = output["logits"].reshape(-1, output["logits"].size(-1))
+    flat_targets = batch["labels"].to(trainer.device).reshape(-1)
+    expected = 2 * nn.CrossEntropyLoss()(flat_logits, flat_targets)
+    assert torch.isclose(output["loss"], expected)
 
 
 def test_device_auto_selection(project_config):

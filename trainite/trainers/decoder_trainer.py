@@ -9,7 +9,6 @@ from ignite.handlers.clearml_logger import ClearMLSaver
 from ignite.handlers.logger_utils import setup_clearml_logging, setup_tb_logging
 from ignite.metrics import Accuracy, Loss, Metric, RunningAverage
 from ignite.utils import setup_logger
-from torch import nn
 from torch.utils.data import DataLoader
 
 from trainite.config.base import (
@@ -109,7 +108,7 @@ class Trainer:
         self.inference_every_epochs = self.trainer_config.inference_every_epochs
         self.inference_num_samples = self.trainer_config.inference_num_samples
         self.max_inference_new_tokens = self.trainer_config.max_inference_new_tokens
-        self.criterion: nn.CrossEntropyLoss = nn.CrossEntropyLoss()
+        self.criterion = instantiate(config.loss)
         self.total_iters: int = len(self.train_loader) * self.epochs
         self.trainer = Engine(self._train_step)
         self.train_evaluator = Engine(self._eval_step)
@@ -340,7 +339,7 @@ class Trainer:
         # Running average loss tracked per training iteration (logged in console)
         RunningAverage(output_transform=lambda output: output["loss"]).attach(self.trainer, "batch_loss")
 
-        ignore_index = self.criterion.ignore_index
+        ignore_index = getattr(self.criterion, "ignore_index", -100)
 
         # Shared transform: flatten and filter out ignored positions for both metrics
         def transform_fn(output):

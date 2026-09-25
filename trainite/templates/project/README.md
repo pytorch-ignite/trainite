@@ -74,6 +74,27 @@ If you prefer standard Python tools, you can create a virtual environment and us
    pip install -e .
    ```
 
+   > [!NOTE]
+   > `pip install -e .` only installs this project's dependencies — it does **not**
+   > build the project into an installable Python package. This project is meant
+   > to be run from source via `python main.py config.yaml`.
+   >
+   > To make it installable as a real package, restructure your code into a single
+   > package — e.g., move `models/`, `dataset_impl/`, `preprocessors/` and the
+   > top-level modules (`main.py`, `config.py`, `trainer.py`, `utils.py`) into a
+   > `src/<your_package>/` directory with `__init__.py` files — then edit
+   > `pyproject.toml` to replace the `[tool.setuptools]` block with:
+   >
+   > ```toml
+   > [tool.setuptools.packages.find]
+   > where = ["src"]
+   > include = ["<your_package>*"]
+   > ```
+   >
+   > and run `pip install -e .` again. See the
+   > [setuptools package discovery docs](https://setuptools.pypa.io/en/latest/userguide/package_discovery.html)
+   > for other layouts.
+
 3. **Run Training**:
    ```bash
    python main.py config.yaml

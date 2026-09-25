@@ -30,6 +30,10 @@ optimizer:
   _target_: torch.optim.AdamW
   lr: 0.0003
 
+loss:
+  _target_: torch.nn.CrossEntropyLoss
+  ignore_index: -100
+
 data:
   dataset:
     _target_: dataset_impl.string_reverse.StringReverseDataset
@@ -69,7 +73,7 @@ optimizer:
   lr: 0.0003
 ```
 
-The `preprocessor`, `model`, `optimizer`, and dataset/transform blocks all use this pattern (for example `data.dataset` in auto-split configs, or `data.train.dataset` / `data.val.dataset` in explicit-split configs).
+The `preprocessor`, `model`, `optimizer`, `loss`, and dataset/transform blocks all use this pattern (for example `data.dataset` in auto-split configs, or `data.train.dataset` / `data.val.dataset` in explicit-split configs).
 
 ### Configuration blocks
 
@@ -80,6 +84,8 @@ The `preprocessor`, `model`, `optimizer`, and dataset/transform blocks all use t
 **`model`** — Model architecture and hyperparameters. The `_target_` points to the model class (such as `models.rope_transformer.RoPETransformerModel`); constructor arguments like `hidden_size`, `num_layers`, and `num_heads` are passed through. You can also specify `collate_fn_target` (e.g. `models.rope_transformer.CausalLMCollateFn`) to configure the custom batch collation function used by the data loaders.
 
 **`optimizer`** — Defaults to `torch.optim.AdamW` with `lr=0.001` if not specified.
+
+**`loss`** — Defaults to `torch.nn.CrossEntropyLoss` with `ignore_index=-100` if not specified. Point `_target_` at a custom loss (defined next to its model or in an installed package) to override it; remaining keys are passed to its constructor.
 
 **`data`** — Datasets, transforms, and dataloaders. Trainite supports two ways to set up your data splits:
 
