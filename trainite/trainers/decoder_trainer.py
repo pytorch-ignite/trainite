@@ -10,6 +10,7 @@ from ignite.handlers.logger_utils import setup_clearml_logging, setup_tb_logging
 from ignite.metrics import Accuracy, Loss, Metric, RunningAverage
 from ignite.utils import setup_logger
 from torch.utils.data import DataLoader
+from pathlib import Path
 
 from trainite.config.base import (
     ProjectConfig,
@@ -102,7 +103,9 @@ class Trainer:
         self.model = build_model(
             config.model, self.device, vocab_size=self.tokenizer.vocab_size, pad_token_id=self.tokenizer.pad_token_id
         )
+        self.model = idist.auto_model(self.model)
         self.optimizer = instantiate(config.optimizer, params=self.model.parameters())
+        self.optimizer = idist.auto_optim(self.optimizer)
         self.epochs: int = self.trainer_config.epochs
         self.grad_clip_norm: float | None = getattr(self.trainer_config, "grad_clip_norm", None)
         self.inference_every_epochs = self.trainer_config.inference_every_epochs
@@ -118,10 +121,24 @@ class Trainer:
 
         # Run evaluations at the end of each epoch to log training and validation metrics
         self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
+        if hasattr(self.train_loader, "sampler") and hasattr(self.train_loader.sampler, "set_epoch"):
+
+            @self.trainer.on(Events.EPOCH_STARTED)
+            def set_sampler_epoch(engine: Engine) -> None:
+                self.train_loader.sampler.set_epoch(engine.state.epoch - 1)
 
         # Create run directory for outputs
-        self.run_dir = make_run_dir(config.output)
-        dump_config(self.config, self.run_dir / "config.yaml")
+        if idist.get_rank() == 0:
+            run_dir = make_run_dir(config.output)
+        else:
+            run_dir = ""
+
+        self.run_dir = Path(str(idist.broadcast(str(run_dir))))
+
+        if idist.get_rank() == 0:
+            dump_config(self.config, self.run_dir / "config.yaml")
+
+        idist.barrier()
 
         # Attach loggers for console
         self.logger = setup_console_logger(
@@ -152,23 +169,25 @@ class Trainer:
             "trainer_metric_names": ["batch_loss"],
             "evaluator_metric_names": ["loss", "token_accuracy"],
         }
-        if config.logger == "clearml":
-            self.exp_logger = setup_clearml_logging(
-                **logging_kwargs,
-                project_name=config.project_name,
-                task_name=self.run_dir.name,
-            )
-            self.exp_logger.get_task().upload_artifact(
-                name="config.yaml", artifact_object=str(self.run_dir / "config.yaml")
-            )
-        else:
-            self.exp_logger = setup_tb_logging(
-                output_path=str(self.run_dir / "tensorboard"),
-                **logging_kwargs,
-            )
+        self.exp_logger = None
+        if idist.get_rank() == 0:
+            if config.logger == "clearml":
+                self.exp_logger = setup_clearml_logging(
+                    **logging_kwargs,
+                    project_name=config.project_name,
+                    task_name=self.run_dir.name,
+                )
+                self.exp_logger.get_task().upload_artifact(
+                    name="config.yaml", artifact_object=str(self.run_dir / "config.yaml")
+                )
+            else:
+                self.exp_logger = setup_tb_logging(
+                    output_path=str(self.run_dir / "tensorboard"),
+                    **logging_kwargs,
+                )
 
         # Setup save handler
-        if config.logger == "clearml":
+        if config.logger == "clearml" and idist.get_rank() == 0:
             # Keep local checkpoints in run_dir; ClearML uses its configured output_uri for optional uploads.
             save_handler = ClearMLSaver(
                 logger=self.exp_logger,
@@ -179,18 +198,19 @@ class Trainer:
         else:
             save_handler = DiskSaver(dirname=str(self.run_dir), require_empty=False)
 
-        # Attach checkpointing
+        # Attach checkpointing (unwrapped model so saved weights don't contain 'module.' prefix)
+        unwrapped_model: torch.nn.Module = getattr(self.model, "module", self.model)
         self.best_checkpoint = setup_best_model_checkpoint(
             self.trainer,
             self.val_evaluator,
-            {"model": self.model, "optimizer": self.optimizer},
+            {"model": unwrapped_model, "optimizer": self.optimizer},
             save_handler,
             score_function=score_function,
             score_name="val_loss",
         )
         self.last_checkpoint = setup_training_checkpointing(
             self.trainer,
-            {"model": self.model, "optimizer": self.optimizer},
+            {"model": unwrapped_model, "optimizer": self.optimizer},
             save_handler,
         )
         # Attach inference logger if inference logging is enabled
@@ -292,7 +312,8 @@ class Trainer:
             if self.test_loader:
                 self.test()
         finally:
-            self.exp_logger.close()
+            if self.exp_logger is not None:
+                self.exp_logger.close()
 
     def test(self, test_loader: DataLoader | None = None) -> None:
         loader = test_loader or self.test_loader
@@ -307,7 +328,8 @@ class Trainer:
 
             self.logger.info("Loading best model for testing from %s", checkpoint_path)
             checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
-            self.model.load_state_dict(checkpoint["model"])
+            unwrapped_model: torch.nn.Module = getattr(self.model, "module", self.model)
+            unwrapped_model.load_state_dict(checkpoint["model"])
         else:
             self.logger.warning("No best model checkpoint found. Using current model for testing.")
 
@@ -351,8 +373,8 @@ class Trainer:
             ("val", self.val_evaluator),
             ("test", self.test_evaluator),
         ]:
-            loss = Loss(self.criterion, output_transform=transform_fn)
-            token_acc = Accuracy(output_transform=transform_fn)
+            loss = Loss(self.criterion, output_transform=transform_fn, device=self.device)
+            token_acc = Accuracy(output_transform=transform_fn, device=self.device)
 
             loss.attach(evaluator, "loss")
             token_acc.attach(evaluator, "token_accuracy")
@@ -380,12 +402,16 @@ class Trainer:
 
     def _log_text(self, tag: str, text: str, step: int) -> None:
         # Both backends escape HTML/text in the caller; clearml uses report_text, TB uses markdown.
+        if self.exp_logger is None:
+            return
         if self.config.logger == "clearml":
             self.exp_logger.report_text(f"[{tag}] Step {step}:\n{text}")
         else:
             self.exp_logger.writer.add_text(tag, text, global_step=step)
 
     def _log_inference(self, engine: Engine, loader: DataLoader, name: str) -> None:
+        if idist.get_rank() != 0:
+            return
         self.logger.info(f"Epoch {engine.state.epoch}: Running inference on {name} samples...")
 
         pad_token_id = getattr(self.tokenizer, "pad_token_id", 0)
@@ -492,7 +518,8 @@ class Trainer:
             Tensor containing the full token IDs (prompt + newly generated tokens)
             of shape (batch, prompt_len + new_tokens).
         """
-        self.model.eval()
+        unwrapped_model: torch.nn.Module = getattr(self.model, "module", self.model)
+        unwrapped_model.eval()
 
         eos_id = self.tokenizer.eos_token_id
 
@@ -500,7 +527,7 @@ class Trainer:
         generated = input_ids.clone()
 
         for _ in range(max_new_tokens):
-            logits = self.model(generated, attention_mask=attention_mask)
+            logits = unwrapped_model(generated, attention_mask=attention_mask)
             # Take the logits at the last position — this is the prediction for the next token
             next_token_logits = logits[:, -1, :]
             # Greedy decoding: pick the highest-probability token at each step
