@@ -29,6 +29,5 @@ extra_css:
 
 nav:
   - Home: index.md
-  - Getting Started: getting-started.md
   - CLI: cli.md
   - Training: training.md
