@@ -9,6 +9,11 @@ and declared dependencies. It does not need Trainite at runtime. Run
 `trainite init` to choose components interactively, or `trainite init --help`
 to see the currently available model, dataset, and trainer choices.
 
+See also:
+
+- [CLI Guide](cli.md) for all commands and flags.
+- [Training Guide](training.md) for `config.yaml` structure and run behavior.
+
 ## Getting Started
 
 This guide creates a small local training project with Trainite's default
@@ -58,6 +63,18 @@ trainite init my-experiment \
   --dataset string-reverse \
   --trainer decoder-trainer
 ```
+
+To scaffold multiple model templates in one project:
+
+```bash
+trainite init my-experiment \
+  --model rope-transformer basic-transformer \
+  --dataset string-reverse \
+  --trainer decoder-trainer
+```
+
+Trainite will generate both model files under `models/`; the first model listed
+is used as the default active model in `config.yaml`.
 
 The command prints the files it created:
 

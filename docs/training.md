@@ -1,6 +1,7 @@
 # Training Guide
 
 This page explains the YAML configuration that Trainite expects and how to kick off a training run.
+For CLI commands that generate and extend projects, see the [CLI Guide](cli.md).
 
 For a working example you can run right away, see the [string reversal example](https://github.com/pytorch-ignite/trainite/tree/main/examples/string_reversal).
 
@@ -80,6 +81,8 @@ The `preprocessor`, `model`, `optimizer`, `loss`, and dataset/transform blocks a
 **`project_name`** — Name of the project.
 
 **`preprocessor`** — The tokenizer or preprocessing component. Must provide a `_target_`.
+Common starter options are a character tokenizer (`preprocessors.char_tokenizer.CharTokenizer`)
+or GPT-2 tokenizer loader (`preprocessors.gpt2_tokenizer.load_gpt2_tokenizer`), depending on dataset choice.
 
 **`model`** — Model architecture and hyperparameters. The `_target_` points to the model class (such as `models.rope_transformer.RoPETransformerModel`); constructor arguments like `hidden_size`, `num_layers`, and `num_heads` are passed through. You can also specify `collate_fn_target` (e.g. `models.rope_transformer.CausalLMCollateFn`) to configure the custom batch collation function used by the data loaders.
 
@@ -103,6 +106,24 @@ Note that `dataloader` blocks accept standard PyTorch `DataLoader` options (such
 **`seed`** — Random seed for reproducibility. Defaults to `42`.
 
 **`device`** — `cpu`, `cuda`, or `null` to let Trainite pick automatically via PyTorch-Ignite's distributed utilities.
+
+### Starter component choices
+
+`trainite init` currently provides:
+
+- Models: `rope-transformer`, `basic-transformer`
+- Datasets: `string-reverse`, `counting`, `hugging-face`, `wikitext`, `ultrachat-200k`, `python-edu`
+- Trainer: `decoder-trainer`
+
+Tokenizer defaults by dataset family:
+
+- `string-reverse`, `counting` → character tokenizer (`preprocessors.char_tokenizer.CharTokenizer`)
+- `hugging-face`, `wikitext`, `ultrachat-200k`, `python-edu` → GPT-2 tokenizer (`preprocessors.gpt2_tokenizer.load_gpt2_tokenizer`)
+
+Split behavior by dataset family:
+
+- `string-reverse`, `counting`, `hugging-face`, `python-edu` use auto-split (`val_ratio` / `test_ratio`).
+- `wikitext` and `ultrachat-200k` use explicit dataset splits in config (`train` / `val` / optional `test`).
 
 ## Running training
 
