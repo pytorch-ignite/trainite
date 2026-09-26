@@ -6,7 +6,7 @@ import questionary
 import tomlkit
 import tyro
 from packaging.requirements import Requirement
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from trainite import __version__ as TRAINITE_VERSION
 from trainite.config.base import (
@@ -215,6 +215,8 @@ def _recreation_command(config: "Init", project_name: str) -> str:
     cmd_parts = ["trainite", "init", project_name]
     models = config.model if isinstance(config.model, (tuple, list)) else (config.model,)
     cmd_parts.append(f"--model {' '.join(models)}")
+    if config.primary_model and config.primary_model != models[0]:
+        cmd_parts.append(f"--primary-model {config.primary_model}")
     cmd_parts.append(f"--dataset {config.dataset}")
     cmd_parts.append(f"--trainer {config.trainer}")
     if config.output_root != "outputs":
@@ -322,6 +324,7 @@ def run_interactive_mode() -> None:
         default=[DEFAULT_MODEL],
         instruction="Select starter model template(s) to include (use space to select)",
     )
+    primary_model = models[0]
     if len(models) > 1:
         primary_model = _prompt_choice(
             "Primary active model in config.yaml:",
@@ -329,7 +332,6 @@ def run_interactive_mode() -> None:
             default=DEFAULT_MODEL if DEFAULT_MODEL in models else models[0],
             instruction="Choose which model is configured as default active in config.yaml",
         )
-        models = [primary_model] + [m for m in models if m != primary_model]
     dataset = _prompt_choice(
         "Dataset:",
         DATASET_CHOICES,
@@ -345,7 +347,7 @@ def run_interactive_mode() -> None:
     output_root = _prompt_text("Output directory:", "outputs", "Output directory for generated files \n")
     run_name = _prompt_text(
         "Run name:",
-        f"{models[0]}__{dataset}".replace("-", "_"),
+        f"{primary_model}__{dataset}".replace("-", "_"),
         "Run name for generated config (used in output paths and logging) \n",
     )
     sky = questionary.confirm(
@@ -358,6 +360,7 @@ def run_interactive_mode() -> None:
     config = Init(
         project_dir=project_dir,
         model=tuple(models),
+        primary_model=primary_model,
         dataset=dataset,
         trainer=trainer,
         output_root=output_root,
@@ -393,6 +396,7 @@ class Init(BaseModel):
     Args:
         project_dir: Directory to create the starter project in.
         model: Starter model template(s) to use.
+        primary_model: Model configured as active in config.yaml. Defaults to the first selected model.
         dataset: Starter dataset template to use.
         trainer: Starter trainer template to use.
         output_root: Output root for generated config.
@@ -403,6 +407,7 @@ class Init(BaseModel):
 
     project_dir: tyro.conf.Positional[str] = "my-cool-experiment"
     model: tuple[ModelType, ...] = (DEFAULT_MODEL,)
+    primary_model: ModelType | None = None
     dataset: DatasetType = DEFAULT_DATASET
     trainer: TrainerType = DEFAULT_TRAINER
     output_root: str = "outputs"
@@ -423,6 +428,16 @@ class Init(BaseModel):
             return tuple(v)
         return v
 
+    @model_validator(mode="after")
+    def validate_primary_model(self) -> "Init":
+        if self.primary_model is None:
+            self.primary_model = self.model[0]
+        elif self.primary_model not in self.model:
+            raise ValueError(
+                f"Primary model '{self.primary_model}' must be one of the selected models: {', '.join(self.model)}."
+            )
+        return self
+
 
 def init_project(config: Init) -> None:
     """Generate a starter training project.
@@ -439,13 +454,14 @@ def init_project(config: Init) -> None:
     run_name = config.run_name
     force = config.force
 
-    resolved_run_name = run_name or f"{models[0]}__{dataset}".replace("-", "_")
+    primary_model = config.primary_model or models[0]
+    resolved_run_name = run_name or f"{primary_model}__{dataset}".replace("-", "_")
     resolved_project_dir = _project_directory(project_dir, force)
 
     output_config = OutputConfig(root=output_root, run_name=resolved_run_name)
 
     model_specs = [MODEL_SPECS[m] for m in models]
-    primary_model_spec = model_specs[0]
+    primary_model_spec = MODEL_SPECS[primary_model]
     dataset_spec = DATASET_SPECS[dataset]
     trainer_spec = TRAINER_SPECS[trainer]
     preprocessor_spec = (
