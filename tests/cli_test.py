@@ -452,3 +452,32 @@ def test_init_without_sky_flag_default(tmp_path):
 
     pyproject_content = (project_dir / "pyproject.toml").read_text()
     assert "skypilot" not in pyproject_content
+
+
+def test_generated_project_grid_search_logic() -> None:
+    """Verifies that generated utils.py and main.py support parameter sweeping."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        project_dir = Path(temp_dir) / "sweep-test-project"
+
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "trainite.cli",
+                "init",
+                "--model",
+                "rope-transformer",
+                "--dataset",
+                "counting",
+                "--trainer",
+                "decoder-trainer",
+                str(project_dir),
+            ],
+            check=True,
+        )
+
+        generated_utils = (project_dir / "utils.py").read_text()
+        generated_main = (project_dir / "main.py").read_text()
+
+        assert "def load_grid_configs" in generated_utils
+        assert "load_grid_configs" in generated_main
