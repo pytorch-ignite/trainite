@@ -3,10 +3,11 @@ import inspect
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, TypeVar, cast
 
 import torch
 import yaml
+import ignite.distributed as idist
 from ignite.engine import Engine, Events
 from ignite.handlers import (
     Checkpoint,
@@ -187,7 +188,8 @@ def create_dataloader(
             collate_fn = target_symbol(tokenizer=tokenizer)
         else:
             collate_fn = target_symbol
-    return DataLoader(dataset, shuffle=shuffle, collate_fn=collate_fn, **dl_kwargs)
+    logging.getLogger("ignite.distributed.auto.auto_dataloader").setLevel(logging.WARNING)
+    return cast(DataLoader, idist.auto_dataloader(dataset, shuffle=shuffle, collate_fn=collate_fn, **dl_kwargs))
 
 
 def _loaders_from_splits(

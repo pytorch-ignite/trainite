@@ -647,3 +647,83 @@ def test_decoder_trainer_generate(project_config):
         generated = trainer.generate(input_ids, max_new_tokens=1, attention_mask=attention_mask)
         assert isinstance(generated, torch.Tensor)
         assert generated[0].tolist() == [5, 6, 7]
+
+
+@pytest.mark.parametrize(
+    "precision,expected_use_amp,expected_dtype,expected_scaler_enabled",
+    [
+        ("float32", False, None, False),
+        ("fp16", True, torch.float16, True),
+        ("bf16", True, torch.bfloat16, False),
+    ],
+)
+def test_decoder_trainer_amp_initialization(
+    project_config, precision, expected_use_amp, expected_dtype, expected_scaler_enabled
+):
+    project_config.trainer.precision = precision
+    trainer = create_trainer_from_config(project_config)
+    assert trainer.precision == precision
+    assert trainer.use_amp is expected_use_amp
+    assert trainer.amp_dtype == expected_dtype
+    assert trainer.scaler.is_enabled() is expected_scaler_enabled
+
+
+def test_decoder_trainer_amp_run_fp16(project_config, temp_run_dir):
+    project_config.trainer.precision = "fp16"
+    trainer = create_trainer_from_config(project_config)
+    assert trainer.use_amp is True
+    assert trainer.scaler.is_enabled() is True
+    trainer.run()
+    assert trainer.trainer.state.epoch == project_config.trainer.epochs
+
+
+def test_decoder_trainer_amp_run_bf16(project_config, temp_run_dir):
+    project_config.trainer.precision = "bf16"
+    trainer = create_trainer_from_config(project_config)
+    assert trainer.use_amp is True
+    assert trainer.scaler.is_enabled() is False
+    trainer.run()
+    assert trainer.trainer.state.epoch == project_config.trainer.epochs
+
+
+def test_decoder_trainer_amp_grad_clip_norm(project_config, temp_run_dir):
+    project_config.trainer.precision = "fp16"
+    project_config.trainer.grad_clip_norm = 1.0
+    trainer = create_trainer_from_config(project_config)
+    with mock.patch.object(trainer.scaler, "unscale_", wraps=trainer.scaler.unscale_) as mock_unscale:
+        trainer.run()
+    assert mock_unscale.called
+
+
+def test_decoder_trainer_amp_checkpoint_to_save(project_config, temp_run_dir):
+    project_config.trainer.precision = "fp16"
+    trainer_fp16 = create_trainer_from_config(project_config)
+    assert "scaler" in trainer_fp16.last_checkpoint.to_save
+    assert "scaler" in trainer_fp16.best_checkpoint.to_save
+
+    project_config.trainer.precision = "float32"
+    trainer_fp32 = create_trainer_from_config(project_config)
+    assert "scaler" not in trainer_fp32.last_checkpoint.to_save
+    assert "scaler" not in trainer_fp32.best_checkpoint.to_save
+
+
+def test_decoder_trainer_amp_generate(project_config):
+    project_config.trainer.precision = "fp16"
+    trainer = create_trainer_from_config(project_config)
+    trainer.model.eval()
+
+    with mock.patch.object(trainer.model, "forward") as mock_forward:
+
+        def mock_forward_fn(x, attention_mask=None):
+            logits = torch.zeros(x.shape[0], x.shape[1], trainer.tokenizer.vocab_size, device=idist.device())
+            logits[:, -1, 7] = 10.0
+            return logits
+
+        mock_forward.side_effect = mock_forward_fn
+
+        input_ids = torch.tensor([[5, 6]], dtype=torch.long, device=idist.device())
+        attention_mask = torch.ones_like(input_ids, dtype=torch.long, device=idist.device())
+
+        generated = trainer.generate(input_ids, max_new_tokens=1, attention_mask=attention_mask)
+        assert isinstance(generated, torch.Tensor)
+        assert generated[0].tolist() == [5, 6, 7]

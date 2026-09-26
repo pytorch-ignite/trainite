@@ -6,6 +6,7 @@ from trainite.config.base import (
     DataWithAutoSplit,
     SplitConfig,
     DatasetConfig,
+    TrainerConfig,
 )
 
 
@@ -122,3 +123,20 @@ def test_data_config_empty():
         ValidationError,
     ):
         DataWithAutoSplit()  # type: ignore
+
+
+def test_trainer_config_precision_default():
+    config = TrainerConfig()
+    assert config.precision == "float32"
+
+
+@pytest.mark.parametrize("precision", ["float32", "fp16", "bf16"])
+def test_trainer_config_precision_valid(precision):
+    config = TrainerConfig(precision=precision)
+    assert config.precision == precision
+
+
+@pytest.mark.parametrize("precision", ["int8", "fp64", "foo", "float16", "bfloat16", "FP16"])
+def test_trainer_config_precision_invalid(precision):
+    with pytest.raises(ValidationError):
+        TrainerConfig(precision=precision)
