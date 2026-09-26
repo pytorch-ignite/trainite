@@ -44,9 +44,6 @@ uv sync
 Prefix the commands below with `uv run` when using the source checkout, for
 example `uv run trainite init`.
 
-To preview changes to this documentation in a browser from the source checkout,
-run `uv run --group docs mkdocs serve` and open the local URL it prints.
-
 ### Create a project
 
 Run the interactive setup and answer each prompt:
@@ -131,3 +128,11 @@ The run writes logs, checkpoints, and TensorBoard data beneath
 
 You now have a standalone project. Change `config.yaml` to tune the experiment,
 or edit the generated Python modules to replace the starter implementation.
+
+## Case Studies & Resources
+
+Explore how Trainite is used in practical experiments and research benchmarks:
+
+- **String Reversal:** [Exploring Small Transformers with Trainite](https://pytorch-ignite.ai/blog/string-reversal-example-trainite/) — a walkthrough of training a decoder-only Transformer to reverse character strings.
+- **C-RASP Depth Hierarchy:** [Reproducing “Knee-Deep in C-RASP: A Transformer Depth Hierarchy” Experiments](https://pytorch-ignite.ai/blog/reproducing-crasp-experiments-using-trainite/) — reproducing theoretical counting limits in transformers by training a decoder-only Transformer to count through an alternating block language.
+- **Project Presentation:** [Trainite Overview & Motivation Slides](https://docs.google.com/presentation/d/101-lVqETlwTxmjt60Oylr7rPiIC8cOHzCdCSN_I9_pg/edit?usp=sharing) — slide deck covering Trainite's motivation and architecture.

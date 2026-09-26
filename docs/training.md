@@ -167,7 +167,7 @@ If you're using TensorBoard, you can visualize metrics with:
 uv run tensorboard --logdir outputs
 ```
 
-## Examples
+## Runnable Examples
 
 Working examples are the best way to understand how everything fits together:
 

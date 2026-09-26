@@ -2,7 +2,7 @@
 
 Trainite exposes a small command-line interface for scaffolding and extending standalone training projects.
 
-For project structure and first-run setup, see [Home](index.md).  
+For project structure and first-run setup, see [Home](index.md).
 For `config.yaml` details and training behavior, see [Training Guide](training.md).
 
 ## Command summary
@@ -119,3 +119,22 @@ Option:
 - `--force`: Overwrite an existing `sky.yaml`.
 
 If `config.yaml` or `main.py` is missing, the command exits with an error and asks you to run it from a valid Trainite experiment directory.
+
+### Quickstart with SkyPilot
+
+Once `sky.yaml` is generated (via `trainite init --sky` or `trainite add:sky`), launch and manage your cloud training runs using standard SkyPilot commands:
+
+```bash
+# 1. Verify cloud provider access (AWS, GCP, Azure, Lambda, etc.)
+sky check
+
+# 2. Launch the experiment
+sky launch sky.yaml
+
+# 3. Monitor active runs and view live training logs
+sky queue
+sky logs <cluster_name>
+
+# 4. Tear down the cluster when training finishes
+sky down <cluster_name>
+```
