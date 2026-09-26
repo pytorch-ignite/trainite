@@ -82,6 +82,8 @@ dev = [
     "pre-commit>=4.6.0",
     "pyrefly>=1.0.0",
     "clearml",
+    "huggingface_hub",
+    "safetensors"
 ]
 integrations = [
     "skypilot",
@@ -169,7 +171,8 @@ exclude = '''
 )
 '''
 [tool.pytest.ini_options]
-addopts = "--color=yes -m 'not integration'"
+addopts = "--color=yes -m 'not integration and not model_parity'"
 markers = [
     "integration: slow tests that build an isolated uv env and train a real step",
+    "model_parity: compare model outputs against external reference implementations",
 ]
