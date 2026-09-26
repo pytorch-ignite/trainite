@@ -11,6 +11,7 @@ from ignite.metrics import Accuracy, Loss, Metric, RunningAverage
 from ignite.utils import setup_logger
 from torch.utils.data import DataLoader
 from pathlib import Path
+from typing import Any
 
 from trainite.config.base import (
     ProjectConfig,
@@ -72,6 +73,7 @@ class Trainer:
     * **Early stopping** – halts training when validation loss stagnates.
     * **Experiment logging** – TensorBoard or ClearML depending on ``config.logger``.
     * **Inference logging** – optional qualitative sample generation every N epochs.
+    * **Automatic Mixed Precision (AMP)** – supports ``float32``, ``fp16`` (with ``GradScaler``), and ``bf16``.
 
     Typical usage::
 
@@ -91,6 +93,14 @@ class Trainer:
         self.trainer_config: TrainerConfig = config.trainer
         # Use distributed device if available, otherwise fall back to config value
         self.device: str | torch.device = idist.device() if config.device is None else config.device
+        self.device_type: str = torch.device(self.device).type
+        self.precision: str = self.trainer_config.precision
+        self.use_amp: bool = self.precision in ("fp16", "bf16")
+        self.amp_dtype: torch.dtype | None = (
+            torch.bfloat16 if self.precision == "bf16" else (torch.float16 if self.precision == "fp16" else None)
+        )
+        scaler_device = self.device_type if self.device_type in ("cuda", "cpu", "xpu") else "cuda"
+        self.scaler: torch.amp.GradScaler = torch.amp.GradScaler(scaler_device, enabled=(self.precision == "fp16"))
         # Build tokenizer from config (e.g. CharTokenizer)
         self.tokenizer = instantiate(config.preprocessor)
         # Build train/val/test DataLoaders from the data config
@@ -200,17 +210,21 @@ class Trainer:
 
         # Attach checkpointing (unwrapped model so saved weights don't contain 'module.' prefix)
         unwrapped_model: torch.nn.Module = getattr(self.model, "module", self.model)
+        to_save: dict[str, Any] = {"model": unwrapped_model, "optimizer": self.optimizer}
+        if self.scaler.is_enabled():
+            to_save["scaler"] = self.scaler
+
         self.best_checkpoint = setup_best_model_checkpoint(
             self.trainer,
             self.val_evaluator,
-            {"model": unwrapped_model, "optimizer": self.optimizer},
+            to_save,
             save_handler,
             score_function=score_function,
             score_name="val_loss",
         )
         self.last_checkpoint = setup_training_checkpointing(
             self.trainer,
-            {"model": unwrapped_model, "optimizer": self.optimizer},
+            to_save,
             save_handler,
         )
         # Attach inference logger if inference logging is enabled
@@ -223,6 +237,10 @@ class Trainer:
         This is the function passed to the Ignite training ``Engine``.  Ignite calls it
         once per batch and stores the returned dict as ``engine.state.output``, which
         the attached metrics and loggers then read.
+
+        When AMP (Automatic Mixed Precision) is enabled (``precision="fp16"`` or
+        ``precision="bf16"``), the forward pass runs inside ``torch.autocast``. For
+        ``fp16``, gradients are scaled with ``torch.amp.GradScaler`` to prevent underflow.
 
         ``set_to_none=True`` in ``zero_grad`` frees gradient memory instead of filling
         it with zeros, which is slightly faster and uses less memory.
@@ -240,14 +258,19 @@ class Trainer:
             attention_mask = attention_mask.to(self.device)
 
         self.optimizer.zero_grad(set_to_none=True)
-        logits = self.model(inputs, attention_mask=attention_mask)
-        loss = self.criterion(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
-        loss.backward()
+        with torch.autocast(device_type=self.device_type, dtype=self.amp_dtype, enabled=self.use_amp):
+            logits = self.model(inputs, attention_mask=attention_mask)
+            loss = self.criterion(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
+
+        self.scaler.scale(loss).backward()
 
         if self.grad_clip_norm is not None:
+            self.scaler.unscale_(self.optimizer)
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
 
-        self.optimizer.step()
+        self.scaler.step(self.optimizer)
+        self.scaler.update()
+
         return {
             "loss": loss.detach(),
             "logits": logits.detach(),
@@ -260,6 +283,9 @@ class Trainer:
 
         ``@torch.no_grad()`` disables gradient computation for the duration of this
         call, reducing memory usage and speeding up evaluation.
+
+        When AMP is enabled, the forward pass runs inside ``torch.autocast`` matching
+        training precision.
 
         ``loss`` is intentionally absent from the returned dict: the Ignite ``Loss``
         metric recomputes it internally via its ``output_transform`` (``_flatten``),
@@ -274,7 +300,8 @@ class Trainer:
         attention_mask = batch.get("attention_mask")
         if attention_mask is not None:
             attention_mask = attention_mask.to(self.device)
-        logits = self.model(inputs, attention_mask=attention_mask)
+        with torch.autocast(device_type=self.device_type, dtype=self.amp_dtype, enabled=self.use_amp):
+            logits = self.model(inputs, attention_mask=attention_mask)
         return {"logits": logits, "targets": targets}
 
     def _run_evaluations(self, engine: Engine) -> None:
@@ -526,39 +553,40 @@ class Trainer:
         device = self.device
         generated = input_ids.clone()
 
-        for _ in range(max_new_tokens):
-            logits = unwrapped_model(generated, attention_mask=attention_mask)
-            # Take the logits at the last position — this is the prediction for the next token
-            next_token_logits = logits[:, -1, :]
-            # Greedy decoding: pick the highest-probability token at each step
-            next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
-            if eos_id is not None:
-                # If a sequence already ended (last token is EOS), keep emitting EOS
-                # so the sequence stays frozen while other sequences in the batch finish
-                eos_mask = generated[:, -1:].eq(eos_id)
-                next_token = torch.where(eos_mask, torch.tensor(eos_id, device=device), next_token)
-            generated = torch.cat([generated, next_token], dim=-1)
+        with torch.autocast(device_type=self.device_type, dtype=self.amp_dtype, enabled=self.use_amp):
+            for _ in range(max_new_tokens):
+                logits = unwrapped_model(generated, attention_mask=attention_mask)
+                # Take the logits at the last position — this is the prediction for the next token
+                next_token_logits = logits[:, -1, :]
+                # Greedy decoding: pick the highest-probability token at each step
+                next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+                if eos_id is not None:
+                    # If a sequence already ended (last token is EOS), keep emitting EOS
+                    # so the sequence stays frozen while other sequences in the batch finish
+                    eos_mask = generated[:, -1:].eq(eos_id)
+                    next_token = torch.where(eos_mask, torch.tensor(eos_id, device=device), next_token)
+                generated = torch.cat([generated, next_token], dim=-1)
 
-            # Extend the attention mask by one column for the newly appended token
-            next_mask = torch.ones(
-                (attention_mask.shape[0], 1),
-                dtype=attention_mask.dtype,
-                device=device,
-            )
+                # Extend the attention mask by one column for the newly appended token
+                next_mask = torch.ones(
+                    (attention_mask.shape[0], 1),
+                    dtype=attention_mask.dtype,
+                    device=device,
+                )
 
-            # Once a sequence has emitted EOS we keep re-emitting it (above) and
-            # mask the appended token out of attention, so a finished sequence
-            # stays frozen while the rest of the batch keeps generating.
-            already_ended = generated[:, -2:-1].eq(eos_id)
-            next_mask = torch.where(
-                already_ended,
-                torch.tensor(0, dtype=attention_mask.dtype, device=device),
-                next_mask,
-            )
-            attention_mask = torch.cat([attention_mask, next_mask], dim=-1)
+                # Once a sequence has emitted EOS we keep re-emitting it (above) and
+                # mask the appended token out of attention, so a finished sequence
+                # stays frozen while the rest of the batch keeps generating.
+                already_ended = generated[:, -2:-1].eq(eos_id)
+                next_mask = torch.where(
+                    already_ended,
+                    torch.tensor(0, dtype=attention_mask.dtype, device=device),
+                    next_mask,
+                )
+                attention_mask = torch.cat([attention_mask, next_mask], dim=-1)
 
-            # Stop early if every sequence in the batch has produced EOS
-            if generated[:, -1].eq(eos_id).all():
-                break
+                # Stop early if every sequence in the batch has produced EOS
+                if generated[:, -1].eq(eos_id).all():
+                    break
 
         return generated

@@ -90,6 +90,13 @@ Number of random prompt samples to generate and log during the evaluation infere
 ### `max_inference_new_tokens`
 Maximum number of new tokens to generate per sample.
 
+### `precision`
+Floating-point precision for training and inference: `"float32"` (default), `"fp16"`, or `"bf16"`.
+
+- `"float32"`: Standard single-precision training.
+- `"fp16"`: 16-bit half precision with automatic gradient scaling (`torch.amp.GradScaler`). Recommended for NVIDIA GPUs with Tensor Cores (e.g. Volta, Turing, Ampere).
+- `"bf16"`: 16-bit brain floating point. Maintains the dynamic range of FP32 without needing a gradient scaler. Recommended for Ampere+ GPUs (e.g. A100, H100, RTX 3000+) and modern CPUs.
+
 ## What to tweak first
 
 If you are just getting started, the usual first changes are:
