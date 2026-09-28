@@ -99,7 +99,11 @@ class Trainer:
         self.amp_dtype: torch.dtype | None = (
             torch.bfloat16 if self.precision == "bf16" else (torch.float16 if self.precision == "fp16" else None)
         )
-        scaler_device = self.device_type if self.device_type in ("cuda", "cpu", "xpu") else "cuda"
+        scaler_device = (
+            self.device_type
+            if self.device_type in ("cuda", "cpu", "xpu", "mps")
+            else ("cuda" if torch.cuda.is_available() else "cpu")
+        )
         self.scaler: torch.amp.GradScaler = torch.amp.GradScaler(scaler_device, enabled=(self.precision == "fp16"))
         # Build tokenizer from config (e.g. CharTokenizer)
         self.tokenizer = instantiate(config.preprocessor)

@@ -727,3 +727,15 @@ def test_decoder_trainer_amp_generate(project_config):
         generated = trainer.generate(input_ids, max_new_tokens=1, attention_mask=attention_mask)
         assert isinstance(generated, torch.Tensor)
         assert generated[0].tolist() == [5, 6, 7]
+
+
+def test_decoder_trainer_amp_mps_device():
+    device_type = "mps"
+    scaler_device = (
+        device_type
+        if device_type in ("cuda", "cpu", "xpu", "mps")
+        else ("cuda" if torch.cuda.is_available() else "cpu")
+    )
+    scaler = torch.amp.GradScaler(scaler_device, enabled=True)
+    assert scaler_device == "mps"
+    assert scaler.is_enabled() is True
