@@ -51,8 +51,11 @@ Dimension of each attention head.
 ### `sliding_window`
 Context window length for local sliding-window attention layers (default: 512).
 
-### `sliding_ratio`
-Number of sliding-window layers before each global full-attention layer (default: 5, meaning 5 sliding then 1 global).
+### `layer_pattern`
+Compact string with `s` (sliding) and `g` (global) alternating attention layers (e.g. `sg` or `sssssg`), repeated to fill `num_layers` (default: `"sg"`). Mutually exclusive with `layer_types`.
+
+### `layer_types`
+Optional explicit tuple of layer types (`sliding` or `global`), one entry per layer. Mutually exclusive with `layer_pattern`.
 
 ### `rope_theta`
 Base frequency $\theta$ for local sliding-window layers (default: 10000.0).
@@ -95,8 +98,8 @@ model:
   num_key_value_heads: 2
   dense_intermediate_size: 128
   head_dim: 16
+  layer_pattern: sg
   sliding_window: 512
-  sliding_ratio: 5
   rope_theta: 10000.0
   global_rope_theta: 1000000.0
   rotary_fraction: 1.0

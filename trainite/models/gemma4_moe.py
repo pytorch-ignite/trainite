@@ -441,34 +441,18 @@ class Gemma4TextModel(nn.Module):
         final_logit_softcap: float | None = None,
     ) -> None:
         super().__init__()
-        if layer_types is not None and layer_pattern is not None:
-            raise ValueError("layer_types and layer_pattern are mutually exclusive")
-        if layer_pattern is not None:
-            mapping = {"s": "sliding", "g": "global"}
-            chars = layer_pattern.strip().lower()
-            if not chars or any(c not in mapping for c in chars):
-                raise ValueError("layer_pattern must only contain 's' (sliding) and 'g' (global)")
-            pattern = [mapping[c] for c in chars]
-            if num_layers % len(pattern) != 0:
-                raise ValueError(
-                    f"layer_pattern {layer_pattern!r} of length {len(pattern)} does not divide num_layers={num_layers}"
-                )
-            layer_types = tuple(pattern * (num_layers // len(pattern)))
-        if layer_types is None:
-            layer_types = ("global",) * num_layers
-        if len(layer_types) != num_layers:
-            raise ValueError("layer_types must contain one entry per layer")
-        if any(layer_type not in {"sliding", "global"} for layer_type in layer_types):
-            raise ValueError("layer_types entries must be 'sliding' or 'global'")
-        if "sliding" in layer_types and sliding_window is None:
-            raise ValueError("sliding_window is required for sliding layers")
+        self.layer_types = resolve_layer_types(
+            num_layers,
+            layer_types=layer_types,
+            layer_pattern=layer_pattern,
+            sliding_window=sliding_window,
+        )
 
         self.token_embedding = nn.Embedding(vocab_size, hidden_size, padding_idx=pad_token_id)
         self.embedding_scale = hidden_size**0.5
         self.final_logit_softcap = final_logit_softcap
-        self.layer_types = layer_types
         layers = []
-        for layer_type in layer_types:
+        for layer_type in self.layer_types:
             is_global = layer_type == "global"
             layers.append(
                 Gemma4TextBlock(
