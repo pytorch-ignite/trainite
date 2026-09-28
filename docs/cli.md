@@ -41,7 +41,7 @@ trainite init
 You will be prompted for:
 
 1. Project directory
-2. One or more model templates
+2. One or more model templates (press <kbd>Space</kbd> to select or deselect, <kbd>Enter</kbd> to confirm)
 3. The primary active model (when multiple models are selected)
 4. Dataset template
 5. Trainer template
@@ -95,7 +95,7 @@ When multiple models are selected:
 
 - Trainite scaffolds each model template into `models/` (for example, `models/rope_transformer.py` and `models/basic_transformer.py`).
 - The **first** model is treated as the primary model for generated `config.yaml`.
-- In interactive mode, Trainite asks which selected model should be the primary active model.
+- In interactive mode, use <kbd>Space</kbd> to select or deselect multiple checkboxes, and press <kbd>Enter</kbd> to confirm. Trainite then asks which selected model should be the primary active model in `config.yaml`.
 
 ## `trainite add:sky`
 
