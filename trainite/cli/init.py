@@ -1,4 +1,5 @@
 import re
+import shlex
 from pathlib import Path
 from typing import Any, Iterable, Literal, Sequence, TypeAlias
 
@@ -212,15 +213,15 @@ def _module_rewrites(sources: dict[str, Path]) -> list[tuple[str, str]]:
 
 
 def _recreation_command(config: "Init", project_name: str) -> str:
-    cmd_parts = ["trainite", "init", project_name]
+    cmd_parts = ["trainite", "init", shlex.quote(project_name)]
     models = config.model if isinstance(config.model, (tuple, list)) else (config.model,)
     cmd_parts.append(f"--model {' '.join(models)}")
     cmd_parts.append(f"--dataset {config.dataset}")
     cmd_parts.append(f"--trainer {config.trainer}")
     if config.output_root != "outputs":
-        cmd_parts.append(f"--output-root {config.output_root}")
+        cmd_parts.append(f"--output-root {shlex.quote(config.output_root)}")
     if config.run_name:
-        cmd_parts.append(f"--run-name {config.run_name}")
+        cmd_parts.append(f"--run-name {shlex.quote(config.run_name)}")
     if config.sky:
         cmd_parts.append("--sky")
     return " ".join(cmd_parts)
