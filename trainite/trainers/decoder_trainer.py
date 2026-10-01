@@ -1,6 +1,9 @@
 import html
 import logging
+from pathlib import Path
 
+from accelerate import Accelerator
+from accelerate.utils import gather_object
 import ignite.distributed as idist
 import torch
 from ignite.engine import Engine, Events
@@ -60,10 +63,13 @@ def _flatten(output: dict[str, torch.Tensor], ignore_index: int = -100) -> tuple
 class Trainer:
     """High-level training orchestrator for decoder-only language models.
 
-    This class wires together all PyTorch-Ignite components needed for a full
-    training run:
+    This class wires together PyTorch-Ignite engines with Hugging Face Accelerate
+    for scalable, hardware-agnostic training:
 
-    * **Engines** – ``self.trainer`` runs the training loop; ``self.train_evaluator``,
+    * **Hardware & Distributed (Accelerate)** – handles device placement (CUDA/MPS/CPU),
+      multi-GPU Distributed Data Parallel (DDP), and Automatic Mixed Precision (AMP:
+      ``float32``, ``fp16``, ``bf16``) without boilerplate.
+    * **Engines (Ignite)** – ``self.trainer`` runs the training loop; ``self.train_evaluator``,
       ``self.val_evaluator``, and ``self.test_evaluator`` run evaluation.
     * **Metrics** – loss and token-accuracy are attached to each evaluator.
     * **Learning-rate schedule** – linear warm-up + linear decay.
@@ -78,8 +84,9 @@ class Trainer:
         trainer = Trainer(config)
         trainer.run()
 
-    See the PyTorch-Ignite docs for more details on Engines and Events:
-    https://pytorch-ignite.ai/concepts/
+    References:
+    * PyTorch-Ignite: https://pytorch-ignite.ai/concepts/
+    * Hugging Face Accelerate: https://huggingface.co/docs/accelerate/index
     """
 
     def __init__(self, config: ProjectConfig) -> None:
@@ -88,8 +95,19 @@ class Trainer:
         torch.manual_seed(config.seed)
         self.config: ProjectConfig = config
         self.trainer_config: TrainerConfig = config.trainer
-        # Use distributed device if available, otherwise fall back to config value
-        self.device: str | torch.device = idist.device() if config.device is None else config.device
+
+        # Configure Hugging Face Accelerate: handles device placement (CUDA/MPS/CPU),
+        # multi-GPU distributed data parallelism (DDP), and Automatic Mixed Precision
+        # (AMP: "float32" -> "no", "fp16", "bf16") without manual boilerplate.
+        # See: https://huggingface.co/docs/accelerate/package_reference/accelerator
+        precision = getattr(self.trainer_config, "precision", "float32")
+        mixed_precision = "no" if precision == "float32" else precision
+        force_cpu = config.device == "cpu"
+        self.accelerator: Accelerator = Accelerator(cpu=force_cpu, mixed_precision=mixed_precision)
+        self.device: torch.device = self.accelerator.device
+        if torch.distributed.is_initialized():
+            idist.sync()
+
         # Build tokenizer from config (e.g. CharTokenizer)
         self.tokenizer = instantiate(config.preprocessor)
         # Build train/val/test DataLoaders from the data config
@@ -109,6 +127,30 @@ class Trainer:
         self.inference_num_samples = self.trainer_config.inference_num_samples
         self.max_inference_new_tokens = self.trainer_config.max_inference_new_tokens
         self.criterion = instantiate(config.loss)
+
+        # Prepare components with Accelerate:
+        # - Model: wraps in DistributedDataParallel (DDP) if multiple processes/GPUs are detected.
+        # - Optimizer: wraps to coordinate loss scaling and distributed parameter updates.
+        # - DataLoaders: wraps in DataLoaderShard with distributed samplers so each rank
+        #   evaluates/trains on a disjoint chunk of data without duplicate batches.
+        # See: https://huggingface.co/docs/accelerate/concept_guides/gradient_synchronization
+        loaders_to_prepare = [self.train_loader]
+        if self.val_loader is not None:
+            loaders_to_prepare.append(self.val_loader)
+        if self.test_loader is not None:
+            loaders_to_prepare.append(self.test_loader)
+
+        prepared = self.accelerator.prepare(self.model, self.optimizer, *loaders_to_prepare)
+        self.model = prepared[0]
+        self.optimizer = prepared[1]
+        self.train_loader = prepared[2]
+        idx = 3
+        if self.val_loader is not None:
+            self.val_loader = prepared[idx]
+            idx += 1
+        if self.test_loader is not None:
+            self.test_loader = prepared[idx]
+
         self.total_iters: int = len(self.train_loader) * self.epochs
         self.trainer = Engine(self._train_step)
         self.train_evaluator = Engine(self._eval_step)
@@ -119,9 +161,18 @@ class Trainer:
         # Run evaluations at the end of each epoch to log training and validation metrics
         self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
 
-        # Create run directory for outputs
-        self.run_dir = make_run_dir(config.output)
-        dump_config(self.config, self.run_dir / "config.yaml")
+        # Create run directory on rank 0 and broadcast to all ranks
+        if self.accelerator.is_main_process:
+            run_dir = make_run_dir(config.output)
+            dump_config(self.config, run_dir / "config.yaml")
+        else:
+            run_dir = None
+
+        if self.accelerator.use_distributed:
+            self.run_dir = Path(gather_object([str(run_dir) if run_dir else ""])[0])
+            self.accelerator.wait_for_everyone()
+        else:
+            self.run_dir = Path(run_dir)  # type: ignore[arg-type]
 
         # Attach loggers for console
         self.logger = setup_console_logger(
@@ -152,23 +203,25 @@ class Trainer:
             "trainer_metric_names": ["batch_loss"],
             "evaluator_metric_names": ["loss", "token_accuracy"],
         }
-        if config.logger == "clearml":
-            self.exp_logger = setup_clearml_logging(
-                **logging_kwargs,
-                project_name=config.project_name,
-                task_name=self.run_dir.name,
-            )
-            self.exp_logger.get_task().upload_artifact(
-                name="config.yaml", artifact_object=str(self.run_dir / "config.yaml")
-            )
-        else:
-            self.exp_logger = setup_tb_logging(
-                output_path=str(self.run_dir / "tensorboard"),
-                **logging_kwargs,
-            )
+        self.exp_logger = None
+        if self.accelerator.is_main_process:
+            if config.logger == "clearml":
+                self.exp_logger = setup_clearml_logging(
+                    **logging_kwargs,
+                    project_name=config.project_name,
+                    task_name=self.run_dir.name,
+                )
+                self.exp_logger.get_task().upload_artifact(
+                    name="config.yaml", artifact_object=str(self.run_dir / "config.yaml")
+                )
+            else:
+                self.exp_logger = setup_tb_logging(
+                    output_path=str(self.run_dir / "tensorboard"),
+                    **logging_kwargs,
+                )
 
         # Setup save handler
-        if config.logger == "clearml":
+        if config.logger == "clearml" and self.accelerator.is_main_process:
             # Keep local checkpoints in run_dir; ClearML uses its configured output_uri for optional uploads.
             save_handler = ClearMLSaver(
                 logger=self.exp_logger,
@@ -179,18 +232,22 @@ class Trainer:
         else:
             save_handler = DiskSaver(dirname=str(self.run_dir), require_empty=False)
 
-        # Attach checkpointing
+        # Attach checkpointing:
+        # In multi-GPU runs, the model is wrapped in DDP (DistributedDataParallel).
+        # We unwrap the model to ensure saved weights are clean and portable (no 'module.' prefixes).
+        # See: https://huggingface.co/docs/accelerate/package_reference/accelerator#accelerate.Accelerator.unwrap_model
+        unwrapped_model: torch.nn.Module = self.accelerator.unwrap_model(self.model)
         self.best_checkpoint = setup_best_model_checkpoint(
             self.trainer,
             self.val_evaluator,
-            {"model": self.model, "optimizer": self.optimizer},
+            {"model": unwrapped_model, "optimizer": self.optimizer},
             save_handler,
             score_function=score_function,
             score_name="val_loss",
         )
         self.last_checkpoint = setup_training_checkpointing(
             self.trainer,
-            {"model": self.model, "optimizer": self.optimizer},
+            {"model": unwrapped_model, "optimizer": self.optimizer},
             save_handler,
         )
         # Attach inference logger if inference logging is enabled
@@ -207,10 +264,26 @@ class Trainer:
         ``set_to_none=True`` in ``zero_grad`` frees gradient memory instead of filling
         it with zeros, which is slightly faster and uses less memory.
 
+        ``with self.accelerator.autocast():`` enables Automatic Mixed Precision (AMP).
+        Heavy operations (linear layers, self-attention) execute in 16-bit precision
+        (fp16 or bf16) on GPU Tensor Cores, roughly doubling compute throughput while
+        keeping weights in full precision to maintain stability.
+
+        ``accelerator.backward(loss)`` replaces standard ``loss.backward()``. If mixed
+        precision is ``fp16``, it automatically coordinates with ``torch.amp.GradScaler``
+        to dynamically scale loss values and prevent numerical underflow in small gradients.
+        In multi-GPU mode, it also coordinates gradient reduction across DDP ranks.
+
+        ``accelerator.clip_grad_norm_`` automatically unscales gradients before clipping
+        norm values, ensuring clipping thresholds reflect actual unscaled gradient magnitudes.
+
         The tensors in the returned dict are ``detach()``-ed so that the compute graph
         is released before they are consumed by metrics or loggers.
 
-        See: https://docs.pytorch.org/ignite/generated/ignite.engine.engine.Engine.html
+        See:
+        - PyTorch-Ignite Engine: https://docs.pytorch.org/ignite/generated/ignite.engine.engine.Engine.html
+        - Accelerate API Reference: https://huggingface.co/docs/accelerate/package_reference/accelerator
+        - Accelerate Quicktour: https://huggingface.co/docs/accelerate/quicktour
         """
         self.model.train()
         inputs = batch["input_ids"].to(self.device)
@@ -220,12 +293,14 @@ class Trainer:
             attention_mask = attention_mask.to(self.device)
 
         self.optimizer.zero_grad(set_to_none=True)
-        logits = self.model(inputs, attention_mask=attention_mask)
-        loss = self.criterion(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
-        loss.backward()
+        with self.accelerator.autocast():
+            logits = self.model(inputs, attention_mask=attention_mask)
+            loss = self.criterion(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
+
+        self.accelerator.backward(loss)
 
         if self.grad_clip_norm is not None:
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
+            self.accelerator.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
 
         self.optimizer.step()
         return {
@@ -246,7 +321,13 @@ class Trainer:
         ensuring the metric accumulates correctly over the full evaluation set rather
         than averaging pre-computed batch losses.
 
-        See: https://docs.pytorch.org/ignite/generated/ignite.engine.engine.Engine.html
+        ``with self.accelerator.autocast():`` runs the forward pass in the configured
+        precision (fp16 or bf16), matching the training environment to evaluate the
+        model under realistic inference conditions while reducing memory consumption.
+
+        See:
+        - PyTorch-Ignite Engine: https://docs.pytorch.org/ignite/generated/ignite.engine.engine.Engine.html
+        - Accelerate API Reference: https://huggingface.co/docs/accelerate/package_reference/accelerator
         """
         self.model.eval()
         inputs = batch["input_ids"].to(self.device)
@@ -254,7 +335,8 @@ class Trainer:
         attention_mask = batch.get("attention_mask")
         if attention_mask is not None:
             attention_mask = attention_mask.to(self.device)
-        logits = self.model(inputs, attention_mask=attention_mask)
+        with self.accelerator.autocast():
+            logits = self.model(inputs, attention_mask=attention_mask)
         return {"logits": logits, "targets": targets}
 
     def _run_evaluations(self, engine: Engine) -> None:
@@ -292,7 +374,8 @@ class Trainer:
             if self.test_loader:
                 self.test()
         finally:
-            self.exp_logger.close()
+            if self.exp_logger is not None:
+                self.exp_logger.close()
 
     def test(self, test_loader: DataLoader | None = None) -> None:
         loader = test_loader or self.test_loader
@@ -307,7 +390,8 @@ class Trainer:
 
             self.logger.info("Loading best model for testing from %s", checkpoint_path)
             checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
-            self.model.load_state_dict(checkpoint["model"])
+            unwrapped_model: torch.nn.Module = self.accelerator.unwrap_model(self.model)
+            unwrapped_model.load_state_dict(checkpoint["model"])
         else:
             self.logger.warning("No best model checkpoint found. Using current model for testing.")
 
@@ -351,8 +435,8 @@ class Trainer:
             ("val", self.val_evaluator),
             ("test", self.test_evaluator),
         ]:
-            loss = Loss(self.criterion, output_transform=transform_fn)
-            token_acc = Accuracy(output_transform=transform_fn)
+            loss = Loss(self.criterion, output_transform=transform_fn, device=self.device)
+            token_acc = Accuracy(output_transform=transform_fn, device=self.device)
 
             loss.attach(evaluator, "loss")
             token_acc.attach(evaluator, "token_accuracy")
@@ -379,6 +463,8 @@ class Trainer:
             )
 
     def _log_text(self, tag: str, text: str, step: int) -> None:
+        if self.exp_logger is None:
+            return
         # Both backends escape HTML/text in the caller; clearml uses report_text, TB uses markdown.
         if self.config.logger == "clearml":
             self.exp_logger.report_text(f"[{tag}] Step {step}:\n{text}")
@@ -386,6 +472,8 @@ class Trainer:
             self.exp_logger.writer.add_text(tag, text, global_step=step)
 
     def _log_inference(self, engine: Engine, loader: DataLoader, name: str) -> None:
+        if not self.accelerator.is_main_process:
+            return
         self.logger.info(f"Epoch {engine.state.epoch}: Running inference on {name} samples...")
 
         pad_token_id = getattr(self.tokenizer, "pad_token_id", 0)
@@ -492,46 +580,48 @@ class Trainer:
             Tensor containing the full token IDs (prompt + newly generated tokens)
             of shape (batch, prompt_len + new_tokens).
         """
-        self.model.eval()
+        unwrapped_model = self.accelerator.unwrap_model(self.model)
+        unwrapped_model.eval()
 
         eos_id = self.tokenizer.eos_token_id
 
         device = self.device
         generated = input_ids.clone()
 
-        for _ in range(max_new_tokens):
-            logits = self.model(generated, attention_mask=attention_mask)
-            # Take the logits at the last position — this is the prediction for the next token
-            next_token_logits = logits[:, -1, :]
-            # Greedy decoding: pick the highest-probability token at each step
-            next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
-            if eos_id is not None:
-                # If a sequence already ended (last token is EOS), keep emitting EOS
-                # so the sequence stays frozen while other sequences in the batch finish
-                eos_mask = generated[:, -1:].eq(eos_id)
-                next_token = torch.where(eos_mask, torch.tensor(eos_id, device=device), next_token)
-            generated = torch.cat([generated, next_token], dim=-1)
+        with self.accelerator.autocast():
+            for _ in range(max_new_tokens):
+                logits = unwrapped_model(generated, attention_mask=attention_mask)
+                # Take the logits at the last position — this is the prediction for the next token
+                next_token_logits = logits[:, -1, :]
+                # Greedy decoding: pick the highest-probability token at each step
+                next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+                if eos_id is not None:
+                    # If a sequence already ended (last token is EOS), keep emitting EOS
+                    # so the sequence stays frozen while other sequences in the batch finish
+                    eos_mask = generated[:, -1:].eq(eos_id)
+                    next_token = torch.where(eos_mask, torch.tensor(eos_id, device=device), next_token)
+                generated = torch.cat([generated, next_token], dim=-1)
 
-            # Extend the attention mask by one column for the newly appended token
-            next_mask = torch.ones(
-                (attention_mask.shape[0], 1),
-                dtype=attention_mask.dtype,
-                device=device,
-            )
+                # Extend the attention mask by one column for the newly appended token
+                next_mask = torch.ones(
+                    (attention_mask.shape[0], 1),
+                    dtype=attention_mask.dtype,
+                    device=device,
+                )
 
-            # Once a sequence has emitted EOS we keep re-emitting it (above) and
-            # mask the appended token out of attention, so a finished sequence
-            # stays frozen while the rest of the batch keeps generating.
-            already_ended = generated[:, -2:-1].eq(eos_id)
-            next_mask = torch.where(
-                already_ended,
-                torch.tensor(0, dtype=attention_mask.dtype, device=device),
-                next_mask,
-            )
-            attention_mask = torch.cat([attention_mask, next_mask], dim=-1)
+                # Once a sequence has emitted EOS we keep re-emitting it (above) and
+                # mask the appended token out of attention, so a finished sequence
+                # stays frozen while the rest of the batch keeps generating.
+                already_ended = generated[:, -2:-1].eq(eos_id)
+                next_mask = torch.where(
+                    already_ended,
+                    torch.tensor(0, dtype=attention_mask.dtype, device=device),
+                    next_mask,
+                )
+                attention_mask = torch.cat([attention_mask, next_mask], dim=-1)
 
-            # Stop early if every sequence in the batch has produced EOS
-            if generated[:, -1].eq(eos_id).all():
-                break
+                # Stop early if every sequence in the batch has produced EOS
+                if generated[:, -1].eq(eos_id).all():
+                    break
 
         return generated

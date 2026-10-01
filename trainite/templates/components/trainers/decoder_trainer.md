@@ -6,6 +6,8 @@ It is built on PyTorch-Ignite and already handles the things you usually want on
 
 - training and evaluation loops
 - optimizer setup
+- mixed precision (AMP: float32, fp16, bf16) via Hugging Face Accelerate
+- multi-GPU distributed data parallel (DDP) support
 - learning-rate warmup + decay
 - checkpoints
 - early stopping
@@ -70,6 +72,14 @@ Inside it you get:
 ### `epochs`
 How many full passes over the training data to run.
 
+### `precision`
+Mixed precision training mode: `"float32"` (default), `"fp16"`, or `"bf16"`.
+Managed automatically via Hugging Face Accelerate.
+
+- `"float32"`: Standard full precision.
+- `"fp16"`: Half precision with dynamic loss scaling (recommended for NVIDIA GPUs with Tensor Cores).
+- `"bf16"`: Bfloat16 mixed precision without loss scaling (recommended for Ampere+ GPUs or modern CPUs/TPUs).
+
 ### `log_every_steps`
 How often to print training updates.
 
@@ -90,11 +100,33 @@ Number of random prompt samples to generate and log during the evaluation infere
 ### `max_inference_new_tokens`
 Maximum number of new tokens to generate per sample.
 
+## Distributed Training (Multi-GPU)
+
+`Trainer` uses [Hugging Face Accelerate](https://huggingface.co/docs/accelerate/index) to scale seamlessly across multiple GPUs without code changes.
+
+Launch distributed training using `torchrun` or `accelerate launch`:
+
+```bash
+# Using torchrun
+torchrun --nproc_per_node=4 main.py
+
+# Or using accelerate launch
+accelerate launch --num_processes=4 main.py
+```
+
+Accelerate automatically handles DDP wrapping, data partitioning (distributed samplers), and metric synchronization across all processes. Checkpoints and evaluation logs are automatically isolated to the main process (rank 0).
+
+For further reading, see:
+- [Accelerate Quicktour](https://huggingface.co/docs/accelerate/quicktour)
+- [Accelerate API Reference](https://huggingface.co/docs/accelerate/package_reference/accelerator)
+- [Gradient Synchronization](https://huggingface.co/docs/accelerate/concept_guides/gradient_synchronization)
+
 ## What to tweak first
 
 If you are just getting started, the usual first changes are:
 
 - `epochs`
+- `precision`
 - `log_every_steps`
 - `grad_clip_norm`
 - `early_stopping_patience`
@@ -122,6 +154,7 @@ The main places to look are:
 ```yaml
 trainer:
   epochs: 10
+  precision: bf16  # float32, fp16, or bf16
   log_every_steps: 20
   grad_clip_norm: 1.0
 ```
