@@ -324,7 +324,7 @@ def run_interactive_mode() -> None:
         default=[DEFAULT_MODEL],
         instruction="Select starter model template(s) to include (use space to select)",
     )
-    primary_model = models[0]
+    primary_model = None
     if len(models) > 1:
         primary_model = _prompt_choice(
             "Primary active model in config.yaml:",
@@ -345,9 +345,17 @@ def run_interactive_mode() -> None:
         "Starter trainer template to use",
     )
     output_root = _prompt_text("Output directory:", "outputs", "Output directory for generated files \n")
-    run_name = _prompt_text(
+    config = Init(
+        project_dir=project_dir,
+        model=tuple(models),
+        primary_model=primary_model,
+        dataset=dataset,
+        trainer=trainer,
+        output_root=output_root,
+    )
+    config.run_name = _prompt_text(
         "Run name:",
-        f"{primary_model}__{dataset}".replace("-", "_"),
+        f"{config.primary_model}__{dataset}".replace("-", "_"),
         "Run name for generated config (used in output paths and logging) \n",
     )
     sky = questionary.confirm(
@@ -357,17 +365,7 @@ def run_interactive_mode() -> None:
     if sky is None:
         raise SystemExit(0)
 
-    config = Init(
-        project_dir=project_dir,
-        model=tuple(models),
-        primary_model=primary_model,
-        dataset=dataset,
-        trainer=trainer,
-        output_root=output_root,
-        run_name=run_name,
-        sky=sky,
-        force=False,
-    )
+    config.sky = sky
 
     init_project(config)
 
@@ -454,7 +452,8 @@ def init_project(config: Init) -> None:
     run_name = config.run_name
     force = config.force
 
-    primary_model = config.primary_model or models[0]
+    primary_model = config.primary_model
+    assert primary_model is not None  # Resolved by Init.validate_primary_model.
     resolved_run_name = run_name or f"{primary_model}__{dataset}".replace("-", "_")
     resolved_project_dir = _project_directory(project_dir, force)
 
