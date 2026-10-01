@@ -465,6 +465,47 @@ def test_primary_model_not_in_selection_raises_error():
         Init(model=("rope-transformer",), primary_model="basic-transformer")
 
 
+@pytest.mark.parametrize(
+    "models, selected_primary",
+    [
+        (("basic-transformer",), None),
+        (("rope-transformer", "basic-transformer"), "basic-transformer"),
+    ],
+)
+def test_interactive_run_name_uses_validated_primary_model(monkeypatch, models, selected_primary):
+    from trainite.cli import init
+
+    captured = {}
+    monkeypatch.setattr(init, "_prompt_multi_choice", lambda *args, **kwargs: list(models))
+
+    def fake_prompt_choice(prompt, choices, default, instruction=None):
+        if prompt == "Primary active model in config.yaml:":
+            return selected_primary
+        return default
+
+    def fake_prompt_text(prompt, default, instruction=None):
+        captured[prompt] = default
+        return default
+
+    monkeypatch.setattr(init, "_prompt_choice", fake_prompt_choice)
+    monkeypatch.setattr(init, "_prompt_text", fake_prompt_text)
+    monkeypatch.setattr(
+        init.questionary,
+        "confirm",
+        lambda *args, **kwargs: type("Prompt", (), {"ask": lambda self: False})(),
+    )
+    monkeypatch.setattr(init, "init_project", lambda config: captured.update(config=config))
+
+    init.run_interactive_mode()
+
+    expected_primary = selected_primary or models[0]
+    expected_run_name = f"{expected_primary}__{DEFAULT_DATASET}".replace("-", "_")
+    assert captured["config"].model == models
+    assert captured["config"].primary_model == expected_primary
+    assert captured["Run name:"] == expected_run_name
+    assert captured["config"].run_name == expected_run_name
+
+
 def test_primary_model_drives_generated_config(tmp_path):
     project_dir = tmp_path / "primary-model-experiment"
     config = Init(
