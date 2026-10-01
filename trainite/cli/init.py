@@ -379,7 +379,7 @@ def _update_targets(config: Any, rewrites: Sequence[tuple[str, str]]) -> None:
                     if val.startswith(old_module + "."):
                         setattr(config, attr, new_module + val[len(old_module) :])
                         break
-        for field in config.model_fields:
+        for field in type(config).model_fields:
             if (val := getattr(config, field)) is not None:
                 _update_targets(val, rewrites)
 
