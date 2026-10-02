@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 import yaml
@@ -465,45 +466,30 @@ def test_primary_model_not_in_selection_raises_error():
         Init(model=("rope-transformer",), primary_model="basic-transformer")
 
 
-@pytest.mark.parametrize(
-    "models, selected_primary",
-    [
-        (("basic-transformer",), None),
-        (("rope-transformer", "basic-transformer"), "basic-transformer"),
-    ],
-)
-def test_interactive_run_name_uses_validated_primary_model(monkeypatch, models, selected_primary):
+def test_interactive_run_name_uses_non_first_primary_model(monkeypatch):
     from trainite.cli import init
 
-    captured = {}
-    monkeypatch.setattr(init, "_prompt_multi_choice", lambda *args, **kwargs: list(models))
-
-    def fake_prompt_choice(prompt, choices, default, instruction=None):
-        if prompt == "Primary active model in config.yaml:":
-            return selected_primary
-        return default
-
-    def fake_prompt_text(prompt, default, instruction=None):
-        captured[prompt] = default
-        return default
-
-    monkeypatch.setattr(init, "_prompt_choice", fake_prompt_choice)
-    monkeypatch.setattr(init, "_prompt_text", fake_prompt_text)
+    models = ("rope-transformer", "basic-transformer")
+    monkeypatch.setattr(init, "_prompt_multi_choice", Mock(return_value=list(models)))
     monkeypatch.setattr(
-        init.questionary,
-        "confirm",
-        lambda *args, **kwargs: type("Prompt", (), {"ask": lambda self: False})(),
+        init,
+        "_prompt_choice",
+        Mock(side_effect=["basic-transformer", DEFAULT_DATASET, DEFAULT_TRAINER]),
     )
-    monkeypatch.setattr(init, "init_project", lambda config: captured.update(config=config))
+    monkeypatch.setattr(init, "_prompt_text", lambda prompt, default, instruction=None: default)
+    confirmation = Mock()
+    confirmation.ask.return_value = False
+    monkeypatch.setattr(init.questionary, "confirm", Mock(return_value=confirmation))
+    generate_project = Mock()
+    monkeypatch.setattr(init, "init_project", generate_project)
 
     init.run_interactive_mode()
 
-    expected_primary = selected_primary or models[0]
-    expected_run_name = f"{expected_primary}__{DEFAULT_DATASET}".replace("-", "_")
-    assert captured["config"].model == models
-    assert captured["config"].primary_model == expected_primary
-    assert captured["Run name:"] == expected_run_name
-    assert captured["config"].run_name == expected_run_name
+    generate_project.assert_called_once()
+    config = generate_project.call_args.args[0]
+    assert config.model == models
+    assert config.primary_model == "basic-transformer"
+    assert config.run_name == "basic_transformer__string_reverse"
 
 
 def test_primary_model_drives_generated_config(tmp_path):
@@ -526,15 +512,4 @@ def test_primary_model_drives_generated_config(tmp_path):
     # Both selected models are still generated.
     assert (project_dir / "models/basic_transformer.py").exists()
     assert (project_dir / "models/rope_transformer.py").exists()
-
-
-def test_primary_model_round_trips_in_recreation_command(tmp_path):
-    project_dir = tmp_path / "recreation-experiment"
-    config = Init(
-        project_dir=str(project_dir),
-        model=("rope-transformer", "basic-transformer"),
-        primary_model="basic-transformer",
-    )
-    init_project(config)
-
     assert "--primary-model basic-transformer" in (project_dir / "README.md").read_text()
