@@ -131,7 +131,8 @@ def dump_config(config: BaseModel, path: str | Path) -> None:
 
 def load_config(path: str | Path, config_cls: type[T]) -> T:
     raw_conf = OmegaConf.load(path)
-    return config_cls.model_validate(raw_conf)
+    # PyYAML cannot serialize OmegaConf's DictConfig and ListConfig objects when the resolved config is saved.
+    return config_cls.model_validate(OmegaConf.to_container(raw_conf, resolve=True))
 
 
 # ==========================================

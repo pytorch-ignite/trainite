@@ -59,6 +59,25 @@ MODEL_SPECS = {
         collate_fn_target="trainite.models.rope_transformer.CausalLMCollateFn",
         readme_template_path=Path("trainite/templates/components/models/rope_transformer.md"),
     ),
+    "gemma4-moe": ModelSpec(
+        name="gemma4_moe",
+        implementation_path=Path("trainite/models/gemma4_moe.py"),
+        config_cls_path="trainite.config.models.Gemma4MoEModelConfig",
+        implementation_symbol="Gemma4TextModel",
+        builder_symbol="Gemma4TextModel",
+        collate_fn_target="trainite.models.gemma4_moe.CausalLMCollateFn",
+        readme_template_path=Path("trainite/templates/components/models/gemma4_moe.md"),
+        dependencies=["transformers"],
+    ),
+    "gemma4-dense": ModelSpec(
+        name="gemma4_dense",
+        implementation_path=Path("trainite/models/gemma4_dense.py"),
+        config_cls_path="trainite.config.models.Gemma4DenseModelConfig",
+        implementation_symbol="Gemma4DenseModel",
+        builder_symbol="Gemma4DenseModel",
+        collate_fn_target="trainite.models.gemma4_dense.CausalLMCollateFn",
+        readme_template_path=Path("trainite/templates/components/models/gemma4_dense.md"),
+    ),
 }
 
 DATASET_SPECS = {
