@@ -446,8 +446,7 @@ def test_decoder_trainer_explicit_split_shuffle(project_config):
     trainer = create_trainer_from_config(project_config)
     # PyTorch DataLoader uses RandomSampler when shuffle is True;
     # Accelerate wraps it in DataLoaderShard with batch_sampler.sampler as RandomSampler
-    train_sampler = getattr(trainer.train_loader.batch_sampler, "sampler", trainer.train_loader.sampler)
-    assert isinstance(train_sampler, torch.utils.data.RandomSampler)
+    assert isinstance(trainer.train_loader.batch_sampler.sampler, torch.utils.data.RandomSampler)
 
 
 def test_decoder_trainer_builds_train_and_val_loaders_from_ratios(tmp_path):
@@ -521,8 +520,7 @@ def test_decoder_trainer_builds_train_val_and_test_loaders_from_ratios(tmp_path)
     assert len(trainer.val_loader.dataset) == 20
     assert len(trainer.test_loader.dataset) == 20
 
-    train_sampler = getattr(trainer.train_loader.batch_sampler, "sampler", trainer.train_loader.sampler)
-    assert isinstance(train_sampler, torch.utils.data.RandomSampler)
+    assert isinstance(trainer.train_loader.batch_sampler.sampler, torch.utils.data.RandomSampler)
     assert isinstance(trainer.val_loader.sampler, torch.utils.data.SequentialSampler)
     assert isinstance(trainer.test_loader.sampler, torch.utils.data.SequentialSampler)
 
