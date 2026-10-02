@@ -453,7 +453,6 @@ def init_project(config: Init) -> None:
     force = config.force
 
     primary_model = config.primary_model
-    assert primary_model is not None  # Resolved by Init.validate_primary_model.
     resolved_run_name = run_name or f"{primary_model}__{dataset}".replace("-", "_")
     resolved_project_dir = _project_directory(project_dir, force)
 
