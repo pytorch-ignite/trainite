@@ -4,7 +4,6 @@ from pathlib import Path
 
 from accelerate import Accelerator
 from accelerate.utils import gather_object
-import ignite.distributed as idist
 import torch
 from ignite.engine import Engine, Events
 from ignite.handlers import DiskSaver
@@ -100,13 +99,11 @@ class Trainer:
         # multi-GPU distributed data parallelism (DDP), and Automatic Mixed Precision
         # (AMP: "float32" -> "no", "fp16", "bf16") without manual boilerplate.
         # See: https://huggingface.co/docs/accelerate/package_reference/accelerator
-        precision = getattr(self.trainer_config, "precision", "float32")
+        precision = self.trainer_config.precision
         mixed_precision = "no" if precision == "float32" else precision
         force_cpu = config.device == "cpu"
         self.accelerator: Accelerator = Accelerator(cpu=force_cpu, mixed_precision=mixed_precision)
         self.device: torch.device = self.accelerator.device
-        if torch.distributed.is_initialized():
-            idist.sync()
 
         # Build tokenizer from config (e.g. CharTokenizer)
         self.tokenizer = instantiate(config.preprocessor)
@@ -163,16 +160,16 @@ class Trainer:
 
         # Create run directory on rank 0 and broadcast to all ranks
         if self.accelerator.is_main_process:
-            run_dir = make_run_dir(config.output)
-            dump_config(self.config, run_dir / "config.yaml")
+            created_dir = make_run_dir(config.output)
+            dump_config(self.config, created_dir / "config.yaml")
         else:
-            run_dir = None
+            created_dir = None
 
         if self.accelerator.use_distributed:
-            self.run_dir = Path(gather_object([str(run_dir) if run_dir else ""])[0])
+            self.run_dir = Path(gather_object([str(created_dir) if created_dir else ""])[0])
             self.accelerator.wait_for_everyone()
         else:
-            self.run_dir = Path(run_dir)  # type: ignore[arg-type]
+            self.run_dir = Path(created_dir)  # type: ignore[arg-type]
 
         # Attach loggers for console
         self.logger = setup_console_logger(

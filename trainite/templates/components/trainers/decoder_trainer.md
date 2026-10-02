@@ -7,7 +7,7 @@ It is built on PyTorch-Ignite and already handles the things you usually want on
 - training and evaluation loops
 - optimizer setup
 - mixed precision (AMP: float32, fp16, bf16) via Hugging Face Accelerate
-- multi-GPU distributed data parallel (DDP) support
+- multi-GPU distributed data parallel (DDP) support via Hugging Face Accelerate
 - learning-rate warmup + decay
 - checkpoints
 - early stopping
@@ -104,22 +104,23 @@ Maximum number of new tokens to generate per sample.
 
 `Trainer` uses [Hugging Face Accelerate](https://huggingface.co/docs/accelerate/index) to scale seamlessly across multiple GPUs without code changes.
 
-Launch distributed training using `torchrun` or `accelerate launch`:
+Launch distributed training using `accelerate launch`:
 
 ```bash
-# Using torchrun
-torchrun --nproc_per_node=4 main.py
+# Launch directly specifying the number of processes:
+accelerate launch --num_processes=4 main.py config.yaml
 
-# Or using accelerate launch
-accelerate launch --num_processes=4 main.py
+# Or configure your environment interactively once:
+accelerate config
+# And launch with saved settings:
+accelerate launch main.py config.yaml
 ```
 
 Accelerate automatically handles DDP wrapping, data partitioning (distributed samplers), and metric synchronization across all processes. Checkpoints and evaluation logs are automatically isolated to the main process (rank 0).
 
 For further reading, see:
-- [Accelerate Quicktour](https://huggingface.co/docs/accelerate/quicktour)
-- [Accelerate API Reference](https://huggingface.co/docs/accelerate/package_reference/accelerator)
-- [Gradient Synchronization](https://huggingface.co/docs/accelerate/concept_guides/gradient_synchronization)
+- [Launching Distributed Code](https://huggingface.co/docs/accelerate/basic_tutorials/launch)
+- [Accelerate Command Line Reference](https://huggingface.co/docs/accelerate/package_reference/cli)
 
 ## What to tweak first
 
