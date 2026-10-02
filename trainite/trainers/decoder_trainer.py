@@ -130,7 +130,7 @@ class Trainer:
         # - Optimizer: wraps to coordinate loss scaling and distributed parameter updates.
         # - DataLoaders: wraps in DataLoaderShard with distributed samplers so each rank
         #   evaluates/trains on a disjoint chunk of data without duplicate batches.
-        # See: https://huggingface.co/docs/accelerate/concept_guides/gradient_synchronization
+        # See: https://huggingface.co/docs/accelerate/package_reference/accelerator#accelerate.Accelerator.prepare
         loaders_to_prepare = [self.train_loader]
         if self.val_loader is not None:
             loaders_to_prepare.append(self.val_loader)
