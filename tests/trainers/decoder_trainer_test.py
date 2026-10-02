@@ -715,14 +715,13 @@ def test_checkpoint_uses_unwrapped_model(project_config):
         assert to_save_last["model"] is unwrapped
 
 
-def test_eval_step_autocast_invoked(project_config):
+def test_eval_step_returns_expected_outputs(project_config):
     trainer = create_trainer_from_config(project_config)
     batch = {
         "input_ids": torch.randint(0, 10, (2, 4), device=trainer.device),
         "labels": torch.randint(0, 10, (2, 4), device=trainer.device),
     }
-    with mock.patch.object(trainer.accelerator, "autocast", wraps=trainer.accelerator.autocast) as spy_autocast:
-        output = trainer._eval_step(trainer.val_evaluator, batch)
-        assert spy_autocast.called
-        assert "logits" in output
-        assert "targets" in output
+    output = trainer._eval_step(trainer.val_evaluator, batch)
+    assert "logits" in output
+    assert "targets" in output
+    assert output["logits"].shape[:2] == (2, 4)

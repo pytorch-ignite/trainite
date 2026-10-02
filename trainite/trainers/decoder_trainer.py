@@ -290,9 +290,8 @@ class Trainer:
             attention_mask = attention_mask.to(self.device)
 
         self.optimizer.zero_grad(set_to_none=True)
-        with self.accelerator.autocast():
-            logits = self.model(inputs, attention_mask=attention_mask)
-            loss = self.criterion(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
+        logits = self.model(inputs, attention_mask=attention_mask)
+        loss = self.criterion(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
 
         self.accelerator.backward(loss)
 
@@ -318,8 +317,8 @@ class Trainer:
         ensuring the metric accumulates correctly over the full evaluation set rather
         than averaging pre-computed batch losses.
 
-        ``with self.accelerator.autocast():`` runs the forward pass in the configured
-        precision (fp16 or bf16), matching the training environment to evaluate the
+        Accelerate automatically handles mixed-precision forward evaluation (fp16 or bf16)
+        on the prepared model, matching the training environment to evaluate the
         model under realistic inference conditions while reducing memory consumption.
 
         See:
@@ -332,8 +331,7 @@ class Trainer:
         attention_mask = batch.get("attention_mask")
         if attention_mask is not None:
             attention_mask = attention_mask.to(self.device)
-        with self.accelerator.autocast():
-            logits = self.model(inputs, attention_mask=attention_mask)
+        logits = self.model(inputs, attention_mask=attention_mask)
         return {"logits": logits, "targets": targets}
 
     def _run_evaluations(self, engine: Engine) -> None:
