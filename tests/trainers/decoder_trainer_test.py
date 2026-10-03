@@ -188,10 +188,10 @@ def dummy_collate_fn(batch):
 
 @pytest.fixture(autouse=True)
 def reset_accelerator_state():
-    AcceleratorState._reset_state()
+    AcceleratorState._reset_state(reset_partial_state=True)
     os.environ.pop("ACCELERATE_TORCH_DEVICE", None)
     yield
-    AcceleratorState._reset_state()
+    AcceleratorState._reset_state(reset_partial_state=True)
     os.environ.pop("ACCELERATE_TORCH_DEVICE", None)
 
 
