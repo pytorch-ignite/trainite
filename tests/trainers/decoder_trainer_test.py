@@ -731,7 +731,7 @@ def test_eval_step_returns_expected_outputs(project_config):
 
 
 def test_run_dir_broadcast_object_list_called(project_config):
-    with mock.patch("trainite.trainers.decoder_trainer.broadcast_object_list") as mock_broadcast:
+    with mock.patch("trainite.shared.utils.broadcast_object_list") as mock_broadcast:
         trainer = create_trainer_from_config(project_config)
         mock_broadcast.assert_called_once()
         args, kwargs = mock_broadcast.call_args
@@ -746,35 +746,30 @@ def test_trainer_respects_user_selected_device(project_config):
     assert os.environ.get("ACCELERATE_TORCH_DEVICE") is None
     assert trainer.device.type == "cpu"
 
-    # When device="cuda:1", ACCELERATE_TORCH_DEVICE is set to "cuda:1" in single-process mode
+    # When device="cuda:1", ACCELERATE_TORCH_DEVICE is set during init and restored after
     project_config.device = "cuda:1"
-    with mock.patch("trainite.trainers.decoder_trainer.Accelerator") as mock_accel_cls:
+    with mock.patch("trainite.shared.utils.Accelerator") as mock_accel_cls:
         mock_accel = mock.MagicMock()
         mock_accel.device = torch.device("cpu")
         mock_accel.is_main_process = True
         mock_accel.use_distributed = False
         mock_accel.prepare.side_effect = lambda *args: args
-        mock_accel_cls.return_value = mock_accel
+
+        def check_env(*args, **kwargs):
+            assert os.environ.get("ACCELERATE_TORCH_DEVICE") == "cuda:1"
+            return mock_accel
+
+        mock_accel_cls.side_effect = check_env
 
         Trainer(project_config)
-        assert os.environ.get("ACCELERATE_TORCH_DEVICE") == "cuda:1"
         mock_accel_cls.assert_called_once_with(cpu=False, mixed_precision="no")
-
-    # In distributed mode (LOCAL_RANK present), ACCELERATE_TORCH_DEVICE must not be set
-    # so Accelerate can manage per-rank device assignments.
-    with (
-        mock.patch.dict(os.environ, {"LOCAL_RANK": "0"}),
-        mock.patch("trainite.trainers.decoder_trainer.Accelerator") as mock_accel_cls,
-    ):
-        mock_accel = mock.MagicMock()
-        mock_accel.device = torch.device("cpu")
-        mock_accel.is_main_process = True
-        mock_accel.use_distributed = False
-        mock_accel.prepare.side_effect = lambda *args: args
-        mock_accel_cls.return_value = mock_accel
-
-        Trainer(project_config)
         assert os.environ.get("ACCELERATE_TORCH_DEVICE") is None
+
+    # In distributed mode (WORLD_SIZE > 1), setting a specific GPU device raises ValueError
+    project_config.device = "cuda:1"
+    with mock.patch.dict(os.environ, {"WORLD_SIZE": "2"}):
+        with pytest.raises(ValueError, match="Choose distributed GPUs through the launcher"):
+            Trainer(project_config)
 
 
 def test_eval_step_calls_gather_for_metrics(project_config):

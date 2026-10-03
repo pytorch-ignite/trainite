@@ -1,10 +1,13 @@
 import importlib
 import inspect
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, TypeVar
 
+from accelerate import Accelerator
+from accelerate.utils import broadcast_object_list
 import torch
 import yaml
 from ignite.engine import Engine, Events
@@ -27,6 +30,7 @@ from torch.utils.data import DataLoader, Dataset, random_split
 from trainite.config.base import (
     DataConfigBase,
     DataWithAutoSplit,
+    ProjectConfig,
 )
 from trainite.datasets.transformed import TransformedDataset
 
@@ -272,12 +276,56 @@ def build_dataloaders(
 # ==========================================
 
 
+def create_accelerator(config: ProjectConfig) -> Accelerator:
+    """Initialize an Accelerator instance configured from project settings.
+
+    Resolves device placement, mixed precision, and distributed constraints.
+    In distributed environments, explicit GPU device targets are disallowed in favor
+    of launcher-managed rank placement.
+    """
+    requested = config.device
+    distributed = int(os.environ.get("WORLD_SIZE", "1")) > 1
+
+    if distributed and requested not in (None, "auto", "cpu"):
+        raise ValueError("Choose distributed GPUs through the launcher; leave device unset in the training config.")
+
+    precision = config.trainer.precision
+    previous = os.environ.get("ACCELERATE_TORCH_DEVICE")
+
+    try:
+        if requested not in (None, "auto"):
+            os.environ["ACCELERATE_TORCH_DEVICE"] = str(torch.device(requested))
+
+        return Accelerator(
+            cpu=requested == "cpu",
+            mixed_precision="no" if precision == "float32" else precision,
+        )
+    finally:
+        if previous is None:
+            os.environ.pop("ACCELERATE_TORCH_DEVICE", None)
+        else:
+            os.environ["ACCELERATE_TORCH_DEVICE"] = previous
+
+
 def make_run_dir(output_config: Any) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_name = output_config.run_name
     run_dir = Path(output_config.root) / run_name / timestamp
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
+
+
+def create_run_dir(config: ProjectConfig, accelerator: Accelerator | None = None) -> Path:
+    """Create a unique run directory on rank 0 and broadcast the path across all ranks."""
+    accel = accelerator or Accelerator()
+    run_dir = [None]
+    if accel.is_main_process:
+        created_dir = make_run_dir(config.output)
+        dump_config(config, created_dir / "config.yaml")
+        run_dir[0] = created_dir
+
+    broadcast_object_list(run_dir, from_process=0)
+    return Path(run_dir[0])  # type: ignore[arg-type]
 
 
 def attach_lr_scheduler(

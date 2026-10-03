@@ -1,10 +1,7 @@
 import html
 import logging
-import os
-from pathlib import Path
 
 from accelerate import Accelerator
-from accelerate.utils import broadcast_object_list
 import torch
 from ignite.engine import Engine, Events
 from ignite.handlers import DiskSaver
@@ -24,9 +21,9 @@ from trainite.shared.utils import (
     attach_lr_scheduler,
     build_dataloaders,
     build_model,
-    dump_config,
+    create_accelerator,
+    create_run_dir,
     instantiate,
-    make_run_dir,
     setup_best_model_checkpoint,
     setup_console_logger,
     setup_training_checkpointing,
@@ -97,20 +94,7 @@ class Trainer:
         self.trainer_config: TrainerConfig = config.trainer
 
         # Setup Accelerate for device placement, mixed precision, and distributed training
-        precision = self.trainer_config.precision
-        mixed_precision = "no" if precision == "float32" else precision
-        force_cpu = False
-        is_distributed_env = int(os.environ.get("LOCAL_RANK", -1)) != -1
-
-        if config.device == "cpu":
-            force_cpu = True
-            os.environ.pop("ACCELERATE_TORCH_DEVICE", None)
-        elif config.device is not None and not is_distributed_env:
-            os.environ["ACCELERATE_TORCH_DEVICE"] = str(config.device)
-        else:
-            os.environ.pop("ACCELERATE_TORCH_DEVICE", None)
-
-        self.accelerator: Accelerator = Accelerator(cpu=force_cpu, mixed_precision=mixed_precision)
+        self.accelerator: Accelerator = create_accelerator(config)
         self.device: torch.device = self.accelerator.device
 
         # Build tokenizer from config (e.g. CharTokenizer)
@@ -153,14 +137,7 @@ class Trainer:
         self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
 
         # Create run directory on rank 0 and broadcast to all ranks
-        run_dir = [None]
-        if self.accelerator.is_main_process:
-            created_dir = make_run_dir(config.output)
-            dump_config(self.config, created_dir / "config.yaml")
-            run_dir[0] = created_dir
-
-        broadcast_object_list(run_dir, from_process=0)
-        self.run_dir = Path(run_dir[0])  # type: ignore[arg-type]
+        self.run_dir = create_run_dir(config, self.accelerator)
 
         # Attach loggers for console
         self.logger = setup_console_logger(
