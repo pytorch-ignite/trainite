@@ -1,4 +1,5 @@
 import logging
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -188,8 +189,10 @@ def dummy_collate_fn(batch):
 @pytest.fixture(autouse=True)
 def reset_accelerator_state():
     AcceleratorState._reset_state()
+    os.environ.pop("ACCELERATE_TORCH_DEVICE", None)
     yield
     AcceleratorState._reset_state()
+    os.environ.pop("ACCELERATE_TORCH_DEVICE", None)
 
 
 @pytest.fixture
@@ -725,3 +728,105 @@ def test_eval_step_returns_expected_outputs(project_config):
     assert "logits" in output
     assert "targets" in output
     assert output["logits"].shape[:2] == (2, 4)
+
+
+def test_run_dir_broadcast_object_list_called(project_config):
+    with mock.patch("trainite.trainers.decoder_trainer.broadcast_object_list") as mock_broadcast:
+        trainer = create_trainer_from_config(project_config)
+        mock_broadcast.assert_called_once()
+        args, kwargs = mock_broadcast.call_args
+        assert args[0][0] == trainer.run_dir
+        assert kwargs.get("from_process") == 0
+
+
+def test_trainer_respects_user_selected_device(project_config):
+    # When device="cpu", force_cpu is True and ACCELERATE_TORCH_DEVICE is cleared
+    project_config.device = "cpu"
+    trainer = create_trainer_from_config(project_config)
+    assert os.environ.get("ACCELERATE_TORCH_DEVICE") is None
+    assert trainer.device.type == "cpu"
+
+    # When device="cuda:1", ACCELERATE_TORCH_DEVICE is set to "cuda:1" in single-process mode
+    project_config.device = "cuda:1"
+    with mock.patch("trainite.trainers.decoder_trainer.Accelerator") as mock_accel_cls:
+        mock_accel = mock.MagicMock()
+        mock_accel.device = torch.device("cpu")
+        mock_accel.is_main_process = True
+        mock_accel.use_distributed = False
+        mock_accel.prepare.side_effect = lambda *args: args
+        mock_accel_cls.return_value = mock_accel
+
+        Trainer(project_config)
+        assert os.environ.get("ACCELERATE_TORCH_DEVICE") == "cuda:1"
+        mock_accel_cls.assert_called_once_with(cpu=False, mixed_precision="no")
+
+    # In distributed mode (LOCAL_RANK present), ACCELERATE_TORCH_DEVICE must not be set
+    # so Accelerate can manage per-rank device assignments.
+    with (
+        mock.patch.dict(os.environ, {"LOCAL_RANK": "0"}),
+        mock.patch("trainite.trainers.decoder_trainer.Accelerator") as mock_accel_cls,
+    ):
+        mock_accel = mock.MagicMock()
+        mock_accel.device = torch.device("cpu")
+        mock_accel.is_main_process = True
+        mock_accel.use_distributed = False
+        mock_accel.prepare.side_effect = lambda *args: args
+        mock_accel_cls.return_value = mock_accel
+
+        Trainer(project_config)
+        assert os.environ.get("ACCELERATE_TORCH_DEVICE") is None
+
+
+def test_eval_step_calls_gather_for_metrics(project_config):
+    trainer = create_trainer_from_config(project_config)
+    batch = {
+        "input_ids": torch.randint(0, 10, (2, 4), device=trainer.device),
+        "labels": torch.randint(0, 10, (2, 4), device=trainer.device),
+    }
+    with mock.patch.object(
+        trainer.accelerator, "gather_for_metrics", wraps=trainer.accelerator.gather_for_metrics
+    ) as spy_gather:
+        output = trainer._eval_step(trainer.val_evaluator, batch)
+        spy_gather.assert_called_once()
+        assert "logits" in output
+        assert "targets" in output
+
+
+def test_eval_step_deduplicates_uneven_batches(project_config):
+    trainer = create_trainer_from_config(project_config)
+    batch = {
+        "input_ids": torch.randint(0, 10, (4, 6), device=trainer.device),
+        "labels": torch.randint(0, 10, (4, 6), device=trainer.device),
+    }
+
+    # Simulate distributed gather where the last batch had 4 items due to even_batches=True padding,
+    # but gather_for_metrics drops the duplicate items and returns 2 items.
+    def mock_gather_for_metrics(tensors):
+        logits, targets = tensors
+        return logits[:2], targets[:2]
+
+    with mock.patch.object(trainer.accelerator, "gather_for_metrics", side_effect=mock_gather_for_metrics):
+        output = trainer._eval_step(trainer.val_evaluator, batch)
+        assert output["logits"].shape[0] == 2
+        assert output["targets"].shape[0] == 2
+        assert output["logits"].shape[1:] == (6, 10)
+
+
+def test_eval_step_pads_across_processes_in_distributed(project_config):
+    trainer = create_trainer_from_config(project_config)
+    batch = {
+        "input_ids": torch.randint(0, 10, (2, 4), device=trainer.device),
+        "labels": torch.randint(0, 10, (2, 4), device=trainer.device),
+    }
+    with (
+        mock.patch("accelerate.Accelerator.use_distributed", new_callable=mock.PropertyMock(return_value=True)),
+        mock.patch.object(
+            trainer.accelerator, "pad_across_processes", wraps=trainer.accelerator.pad_across_processes
+        ) as spy_pad,
+    ):
+        output = trainer._eval_step(trainer.val_evaluator, batch)
+        assert spy_pad.call_count == 2
+        assert spy_pad.call_args_list[0].kwargs.get("pad_index") == 0
+        assert spy_pad.call_args_list[1].kwargs.get("pad_index") == -100
+        assert "logits" in output
+        assert "targets" in output

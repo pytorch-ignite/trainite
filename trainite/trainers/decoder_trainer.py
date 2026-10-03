@@ -1,9 +1,10 @@
 import html
 import logging
+import os
 from pathlib import Path
 
 from accelerate import Accelerator
-from accelerate.utils import gather_object
+from accelerate.utils import broadcast_object_list
 import torch
 from ignite.engine import Engine, Events
 from ignite.handlers import DiskSaver
@@ -98,7 +99,17 @@ class Trainer:
         # Setup Accelerate for device placement, mixed precision, and distributed training
         precision = self.trainer_config.precision
         mixed_precision = "no" if precision == "float32" else precision
-        force_cpu = config.device == "cpu"
+        force_cpu = False
+        is_distributed_env = int(os.environ.get("LOCAL_RANK", -1)) != -1
+
+        if config.device == "cpu":
+            force_cpu = True
+            os.environ.pop("ACCELERATE_TORCH_DEVICE", None)
+        elif config.device is not None and not is_distributed_env:
+            os.environ["ACCELERATE_TORCH_DEVICE"] = str(config.device)
+        else:
+            os.environ.pop("ACCELERATE_TORCH_DEVICE", None)
+
         self.accelerator: Accelerator = Accelerator(cpu=force_cpu, mixed_precision=mixed_precision)
         self.device: torch.device = self.accelerator.device
 
@@ -142,17 +153,14 @@ class Trainer:
         self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
 
         # Create run directory on rank 0 and broadcast to all ranks
+        run_dir = [None]
         if self.accelerator.is_main_process:
             created_dir = make_run_dir(config.output)
             dump_config(self.config, created_dir / "config.yaml")
-        else:
-            created_dir = None
+            run_dir[0] = created_dir
 
-        if self.accelerator.use_distributed:
-            self.run_dir = Path(gather_object([str(created_dir) if created_dir else ""])[0])
-            self.accelerator.wait_for_everyone()
-        else:
-            self.run_dir = Path(created_dir)  # type: ignore[arg-type]
+        broadcast_object_list(run_dir, from_process=0)
+        self.run_dir = Path(run_dir[0])  # type: ignore[arg-type]
 
         # Attach loggers for console
         self.logger = setup_console_logger(
@@ -293,6 +301,14 @@ class Trainer:
         if attention_mask is not None:
             attention_mask = attention_mask.to(self.device)
         logits = self.model(inputs, attention_mask=attention_mask)
+
+        # Pad across processes along sequence dimension (dim=1) if variable lengths exist across ranks
+        if self.accelerator.use_distributed:
+            logits = self.accelerator.pad_across_processes(logits, dim=1, pad_index=0)
+            targets = self.accelerator.pad_across_processes(targets, dim=1, pad_index=-100)
+
+        # Gather across all ranks and drop duplicated padding samples on the last batch
+        logits, targets = self.accelerator.gather_for_metrics((logits, targets))
         return {"logits": logits, "targets": targets}
 
     def _run_evaluations(self, engine: Engine) -> None:
