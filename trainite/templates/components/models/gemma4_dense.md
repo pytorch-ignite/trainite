@@ -94,7 +94,7 @@ Optional $\tanh$-based soft-capping bound for logits to prevent overconfidence (
 
 ```yaml
 model:
-  _target_: trainite.models.gemma4_dense.Gemma4DenseModel
+  _target_: models.gemma4_dense.Gemma4DenseModel
   hidden_size: 64
   num_layers: 2
   num_attention_heads: 4
