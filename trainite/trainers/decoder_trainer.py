@@ -185,33 +185,37 @@ class Trainer:
                     **logging_kwargs,
                 )
 
-        # Setup save handler
-        if config.logger == "clearml" and self.accelerator.is_main_process:
-            # Keep local checkpoints in run_dir; ClearML uses its configured output_uri for optional uploads.
-            save_handler = ClearMLSaver(
-                logger=self.exp_logger,
-                dirname=str(self.run_dir),
-                output_uri=True,
-                require_empty=False,
+        # Setup save handler and checkpointing on main process only
+        if self.accelerator.is_main_process:
+            if config.logger == "clearml":
+                # Keep local checkpoints in run_dir; ClearML uses its configured output_uri for optional uploads.
+                save_handler = ClearMLSaver(
+                    logger=self.exp_logger,
+                    dirname=str(self.run_dir),
+                    output_uri=True,
+                    require_empty=False,
+                )
+            else:
+                save_handler = DiskSaver(dirname=str(self.run_dir), require_empty=False)
+
+            # Unwrap model before checkpointing to save clean weights without distributed ('module.') prefixes
+            unwrapped_model: torch.nn.Module = self.accelerator.unwrap_model(self.model)
+            self.best_checkpoint = setup_best_model_checkpoint(
+                self.trainer,
+                self.val_evaluator,
+                {"model": unwrapped_model, "optimizer": self.optimizer},
+                save_handler,
+                score_function=score_function,
+                score_name="val_loss",
+            )
+            self.last_checkpoint = setup_training_checkpointing(
+                self.trainer,
+                {"model": unwrapped_model, "optimizer": self.optimizer},
+                save_handler,
             )
         else:
-            save_handler = DiskSaver(dirname=str(self.run_dir), require_empty=False)
-
-        # Unwrap model before checkpointing to save clean weights without distributed ('module.') prefixes
-        unwrapped_model: torch.nn.Module = self.accelerator.unwrap_model(self.model)
-        self.best_checkpoint = setup_best_model_checkpoint(
-            self.trainer,
-            self.val_evaluator,
-            {"model": unwrapped_model, "optimizer": self.optimizer},
-            save_handler,
-            score_function=score_function,
-            score_name="val_loss",
-        )
-        self.last_checkpoint = setup_training_checkpointing(
-            self.trainer,
-            {"model": unwrapped_model, "optimizer": self.optimizer},
-            save_handler,
-        )
+            self.best_checkpoint = None
+            self.last_checkpoint = None
         # Attach inference logger if inference logging is enabled
         if self.inference_every_epochs is not None:
             self.attach_inference_logger()
@@ -335,9 +339,13 @@ class Trainer:
         self.accelerator.wait_for_everyone()
         # Load best model if available
         checkpoint_handler = self.best_checkpoint
+        checkpoint_path = None
         if checkpoint_handler and checkpoint_handler.last_checkpoint:
             checkpoint_path = checkpoint_handler.last_checkpoint
+        elif (self.run_dir / "best.pt").exists():
+            checkpoint_path = self.run_dir / "best.pt"
 
+        if checkpoint_path is not None:
             self.logger.info("Loading best model for testing from %s", checkpoint_path)
             map_location = torch.device("cpu") if self.device.type == "cpu" else self.device
             checkpoint = torch.load(checkpoint_path, map_location=map_location, weights_only=True)
