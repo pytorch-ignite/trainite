@@ -292,12 +292,15 @@ def create_accelerator(config: ProjectConfig) -> Accelerator:
     precision = config.trainer.precision
     previous = os.environ.get("ACCELERATE_TORCH_DEVICE")
 
+    has_gpu = torch.cuda.is_available() or torch.backends.mps.is_available()
+    cpu = requested == "cpu" or (requested in (None, "auto") and not has_gpu)
+
     try:
         if requested not in (None, "auto"):
             os.environ["ACCELERATE_TORCH_DEVICE"] = str(torch.device(requested))
 
         return Accelerator(
-            cpu=requested == "cpu",
+            cpu=cpu,
             mixed_precision="no" if precision == "float32" else precision,
         )
     finally:

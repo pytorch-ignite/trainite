@@ -1,6 +1,8 @@
 import logging
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Sized, Any, Callable
@@ -825,3 +827,64 @@ def test_eval_step_pads_across_processes_in_distributed(project_config):
         assert spy_pad.call_args_list[1].kwargs.get("pad_index") == -100
         assert "logits" in output
         assert "targets" in output
+
+
+def test_decoder_trainer_distributed_two_workers(tmp_path):
+    worker_script = """
+import sys
+from trainite.trainers.decoder_trainer import Trainer
+from trainite.config.base import (
+    ProjectConfig, ModelConfig, PreprocessorConfig, DatasetConfig,
+    OutputConfig, OptimizerConfig, LossConfig,
+    SplitConfig, DataLoaderConfig, TrainerConfig, DataConfigBase
+)
+
+def run():
+    run_dir = sys.argv[1]
+    cfg = ProjectConfig(
+        project_name="dist_test",
+        preprocessor=PreprocessorConfig(_target_="tests.trainers.decoder_trainer_test.DummyTokenizer"),
+        model=ModelConfig(_target_="tests.trainers.decoder_trainer_test.SimpleModel"),
+        optimizer=OptimizerConfig(_target_="torch.optim.SGD", lr=0.01),
+        loss=LossConfig(_target_="torch.nn.CrossEntropyLoss"),
+        data=DataConfigBase(
+            train=SplitConfig(
+                dataset=DatasetConfig(_target_="tests.trainers.decoder_trainer_test.SimpleDataset", size=8),
+                dataloader=DataLoaderConfig(batch_size=4, num_workers=0)
+            ),
+            val=SplitConfig(
+                dataset=DatasetConfig(_target_="tests.trainers.decoder_trainer_test.SimpleDataset", size=4),
+                dataloader=DataLoaderConfig(batch_size=4, num_workers=0)
+            ),
+            test=SplitConfig(
+                dataset=DatasetConfig(_target_="tests.trainers.decoder_trainer_test.SimpleDataset", size=4),
+                dataloader=DataLoaderConfig(batch_size=4, num_workers=0)
+            ),
+        ),
+        trainer=TrainerConfig(epochs=1, log_every_steps=1),
+        output=OutputConfig(root=run_dir, run_name="run"),
+        logger="tensorboard",
+        device=None,
+    )
+    trainer = Trainer(cfg)
+    trainer.run()
+    if trainer.accelerator.is_main_process:
+        assert (trainer.run_dir / "best.pt").exists()
+
+if __name__ == "__main__":
+    run()
+"""
+    script_path = tmp_path / "worker.py"
+    script_path.write_text(worker_script)
+    output_dir = tmp_path / "outputs"
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "torch.distributed.run",
+        "--nproc_per_node=2",
+        str(script_path),
+        str(output_dir),
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    assert res.returncode == 0, f"Distributed run failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"

@@ -332,13 +332,15 @@ class Trainer:
             self.logger.warning("No test loader provided. Skipping testing.")
             return
 
+        self.accelerator.wait_for_everyone()
         # Load best model if available
         checkpoint_handler = self.best_checkpoint
         if checkpoint_handler and checkpoint_handler.last_checkpoint:
             checkpoint_path = checkpoint_handler.last_checkpoint
 
             self.logger.info("Loading best model for testing from %s", checkpoint_path)
-            checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
+            map_location = torch.device("cpu") if self.device.type == "cpu" else self.device
+            checkpoint = torch.load(checkpoint_path, map_location=map_location, weights_only=True)
             unwrapped_model: torch.nn.Module = self.accelerator.unwrap_model(self.model)
             unwrapped_model.load_state_dict(checkpoint["model"])
         else:
