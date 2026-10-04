@@ -2,6 +2,12 @@
 
 It is a decoder-only causal Transformer model based on Google DeepMind's Gemma 4 architecture: given a sequence of token IDs, it predicts the next token at every position.
 
+## Helpful reference
+
+This implementation was developed with
+[rwightman/gemma4_pytorch_codex](https://github.com/rwightman/gemma4_pytorch_codex)
+as an architecture reference.
+
 ## What goes in / out
 
 - **Input**:
