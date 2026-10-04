@@ -1,5 +1,3 @@
-import json
-from pathlib import Path
 from typing import Any
 
 # Architecture reference: https://github.com/rwightman/gemma4_pytorch_codex
@@ -443,86 +441,6 @@ class Gemma4DenseModel(nn.Module):
             logits = torch.tanh(logits / self.final_logit_softcap) * self.final_logit_softcap
 
         return logits
-
-
-def load_hf_gemma4_dense_model(checkpoint_dir: str | Path) -> Gemma4DenseModel:
-    """Load an unsharded Hugging Face Gemma 4 Dense text checkpoint."""
-    try:
-        from safetensors.torch import load_file
-    except ImportError as error:
-        raise ImportError("Loading Hugging Face weights requires safetensors") from error
-
-    checkpoint_dir = Path(checkpoint_dir)
-    with (checkpoint_dir / "config.json").open(encoding="utf-8") as file:
-        raw_config = json.load(file)
-        config = raw_config.get("text_config", raw_config)
-
-    rope = config["rope_parameters"]
-    local_rope = rope["sliding_attention"]
-    global_rope = rope["full_attention"]
-    layer_types = tuple(
-        "sliding" if layer_type == "sliding_attention" else "global" for layer_type in config["layer_types"]
-    )
-    tie_word_embeddings = config.get("tie_word_embeddings", True)
-    model = Gemma4DenseModel(
-        vocab_size=config["vocab_size"],
-        hidden_size=config["hidden_size"],
-        num_layers=config["num_hidden_layers"],
-        num_attention_heads=config["num_attention_heads"],
-        num_key_value_heads=config["num_key_value_heads"],
-        dense_intermediate_size=config["intermediate_size"],
-        head_dim=config["head_dim"],
-        rope_theta=local_rope["rope_theta"],
-        rope_scaling_factor=local_rope.get("factor", 1.0),
-        rotary_fraction=local_rope.get("partial_rotary_factor", 1.0),
-        pad_token_id=config.get("pad_token_id"),
-        layer_types=layer_types,
-        sliding_window=config["sliding_window"],
-        global_num_key_value_heads=config["num_global_key_value_heads"],
-        global_head_dim=config["global_head_dim"],
-        global_rope_theta=global_rope["rope_theta"],
-        global_rope_scaling_factor=global_rope.get("factor", 1.0),
-        global_rotary_fraction=global_rope.get("partial_rotary_factor", 1.0),
-        global_key_equals_value=config.get("attention_k_eq_v", False),
-        tie_word_embeddings=tie_word_embeddings,
-        final_logit_softcap=config.get("final_logit_softcapping"),
-    )
-
-    source = load_file(checkpoint_dir / "model.safetensors", device="cpu")
-    converted = {
-        "token_embedding.weight": source["model.language_model.embed_tokens.weight"],
-        "final_norm.weight": source["model.language_model.norm.weight"],
-    }
-    if not tie_word_embeddings and "lm_head.weight" in source:
-        converted["lm_head.weight"] = source["lm_head.weight"]
-
-    layer_key_map = {
-        "layer_scalar": "layer_scale",
-        "self_attn.q_proj.weight": "attention.q_proj.weight",
-        "self_attn.k_proj.weight": "attention.k_proj.weight",
-        "self_attn.v_proj.weight": "attention.v_proj.weight",
-        "self_attn.o_proj.weight": "attention.o_proj.weight",
-        "self_attn.q_norm.weight": "attention.q_norm.weight",
-        "self_attn.k_norm.weight": "attention.k_norm.weight",
-        "input_layernorm.weight": "pre_attention_norm.weight",
-        "post_attention_layernorm.weight": "post_attention_norm.weight",
-        "pre_feedforward_layernorm.weight": "pre_dense_norm.weight",
-        "mlp.gate_proj.weight": "dense_mlp.gate_proj.weight",
-        "mlp.up_proj.weight": "dense_mlp.up_proj.weight",
-        "mlp.down_proj.weight": "dense_mlp.down_proj.weight",
-        "post_feedforward_layernorm.weight": "post_dense_norm.weight",
-    }
-    for layer_index in range(config["num_hidden_layers"]):
-        source_prefix = f"model.language_model.layers.{layer_index}."
-        target_prefix = f"layers.{layer_index}."
-        for source_suffix, target_suffix in layer_key_map.items():
-            source_key = source_prefix + source_suffix
-            if source_key in source:
-                converted[target_prefix + target_suffix] = source[source_key]
-
-    model.to(dtype=converted["token_embedding.weight"].dtype)
-    model.load_state_dict(converted, strict=True)
-    return model
 
 
 class CausalLMCollateFn:
