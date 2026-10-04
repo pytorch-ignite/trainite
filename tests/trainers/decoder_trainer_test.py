@@ -803,8 +803,8 @@ def test_eval_step_pads_across_processes_in_distributed(project_config):
 
 
 @pytest.mark.skipif(
-    sys.platform.startswith("win"),
-    reason="Distributed multi-process training is not supported on Windows due to PyTorch TCPStore/libuv limitations",
+    sys.platform.startswith("win") or sys.platform.startswith("darwin"),
+    reason="Distributed multi-process training is not supported on Windows/macOS in CI",
 )
 def test_decoder_trainer_distributed_two_workers(tmp_path):
     worker_script = """
