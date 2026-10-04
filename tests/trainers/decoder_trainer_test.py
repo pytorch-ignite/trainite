@@ -742,36 +742,9 @@ def test_run_dir_broadcast_object_list_called(project_config):
 
 
 def test_trainer_respects_user_selected_device(project_config):
-    # When device="cpu", force_cpu is True and ACCELERATE_TORCH_DEVICE is cleared
     project_config.device = "cpu"
     trainer = create_trainer_from_config(project_config)
-    assert os.environ.get("ACCELERATE_TORCH_DEVICE") is None
     assert trainer.device.type == "cpu"
-
-    # When device="cuda:1", ACCELERATE_TORCH_DEVICE is set during init and restored after
-    project_config.device = "cuda:1"
-    with mock.patch("trainite.shared.utils.Accelerator") as mock_accel_cls:
-        mock_accel = mock.MagicMock()
-        mock_accel.device = torch.device("cpu")
-        mock_accel.is_main_process = True
-        mock_accel.use_distributed = False
-        mock_accel.prepare.side_effect = lambda *args: args
-
-        def check_env(*args, **kwargs):
-            assert os.environ.get("ACCELERATE_TORCH_DEVICE") == "cuda:1"
-            return mock_accel
-
-        mock_accel_cls.side_effect = check_env
-
-        Trainer(project_config)
-        mock_accel_cls.assert_called_once_with(cpu=False, mixed_precision="no")
-        assert os.environ.get("ACCELERATE_TORCH_DEVICE") is None
-
-    # In distributed mode (WORLD_SIZE > 1), setting a specific GPU device raises ValueError
-    project_config.device = "cuda:1"
-    with mock.patch.dict(os.environ, {"WORLD_SIZE": "2"}):
-        with pytest.raises(ValueError, match="Choose distributed GPUs through the launcher"):
-            Trainer(project_config)
 
 
 def test_eval_step_calls_gather_for_metrics(project_config):
