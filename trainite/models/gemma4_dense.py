@@ -424,7 +424,7 @@ class Gemma4DenseModel(nn.Module):
         attention_mask: torch.Tensor | None = None,
         position_ids: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        if position_ids is None and attention_mask is not None:
+        if position_ids is None and attention_mask is not None and attention_mask.ndim == 2:
             position_ids = (attention_mask.cumsum(dim=-1) - 1).clamp(min=0)
 
         hidden_states = self.token_embedding(input_ids) * self.embedding_scale

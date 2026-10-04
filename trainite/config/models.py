@@ -76,7 +76,6 @@ class Gemma4DenseModelConfig(ModelConfig):
     global_key_equals_value: bool = True
     tie_word_embeddings: bool = True
     final_logit_softcap: float | None = None
-    max_seq_len: int = Field(default=512, gt=0)
 
     @model_validator(mode="after")
     def _default_layer_layout(self):

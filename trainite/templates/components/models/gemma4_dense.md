@@ -84,9 +84,6 @@ Whether to tie the output projection weights to the input embedding table (defau
 ### `final_logit_softcap`
 Optional $\tanh$-based soft-capping bound for logits to prevent overconfidence (default: null).
 
-### `max_seq_len`
-Maximum sequence length constraint for the model and trainer (default: 512).
-
 ## Minimal config example
 
 ```yaml
@@ -107,5 +104,4 @@ model:
   global_key_equals_value: true
   tie_word_embeddings: true
   final_logit_softcap: null
-  max_seq_len: 512
 ```
