@@ -292,11 +292,14 @@ def create_accelerator(config: ProjectConfig) -> Accelerator:
     precision = config.trainer.precision
     previous = os.environ.get("ACCELERATE_TORCH_DEVICE")
 
+    # In distributed environments (WORLD_SIZE > 1), Accelerate requires cpu=True
+    # to initialize Gloo for multi-CPU training; with cpu=False on a CPU system
+    # it defaults to DistributedType.NO and disables distributed execution.
     has_gpu = torch.cuda.is_available() or torch.backends.mps.is_available()
     cpu = requested == "cpu" or (requested in (None, "auto") and not has_gpu)
 
     try:
-        if requested not in (None, "auto"):
+        if requested not in (None, "auto", "cpu"):
             os.environ["ACCELERATE_TORCH_DEVICE"] = str(torch.device(requested))
 
         return Accelerator(
