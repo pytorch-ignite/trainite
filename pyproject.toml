@@ -71,6 +71,7 @@ generated = [
     "pytorch-ignite",
     "tensorboard",
     "clearml",
+    "accelerate>=1.0.0",
 ]
 dev = [
     "datasets>=4",
@@ -82,6 +83,7 @@ dev = [
     "pre-commit>=4.6.0",
     "pyrefly>=1.0.0",
     "clearml",
+    "accelerate>=1.0.0",
 ]
 integrations = [
     "skypilot",

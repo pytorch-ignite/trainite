@@ -1,14 +1,26 @@
+import os
+from pathlib import Path
+from unittest import mock
 import pytest
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from trainite.config.base import (
+    DataConfigBase,
+    DatasetConfig,
+    ModelConfig,
+    OutputConfig,
+    PreprocessorConfig,
+    ProjectConfig,
+    SplitConfig,
+    TrainerConfig,
+)
+from trainite.shared.utils import create_accelerator, create_run_dir, get_target, instantiate
 
 
 class MockComponent(BaseModel):
     model_config = ConfigDict(extra="allow")
     target: str = Field(alias="_target_")
-
-
-from trainite.shared.utils import get_target, instantiate
 
 
 def cc(target: str | None = None, **kwargs: object) -> MockComponent:
@@ -63,3 +75,54 @@ def test_instantiate_kwargs_override():
     config = cc("builtins.dict", key="value")
     result = instantiate(config, key="override")
     assert result == {"key": "override"}
+
+
+def make_dummy_config(root_dir: Path, device: str | None = None) -> ProjectConfig:
+    return ProjectConfig(
+        project_name="test_proj",
+        preprocessor=PreprocessorConfig(_target_="builtins.dict"),
+        model=ModelConfig(_target_="builtins.dict"),
+        output=OutputConfig(root=str(root_dir), run_name="test_run"),
+        trainer=TrainerConfig(),
+        data=DataConfigBase(
+            train=SplitConfig(dataset=DatasetConfig(_target_="builtins.dict")),
+            val=SplitConfig(dataset=DatasetConfig(_target_="builtins.dict")),
+        ),
+        device=device,
+    )
+
+
+def test_create_accelerator_cpu(tmp_path):
+    cfg = make_dummy_config(tmp_path, device="cpu")
+    accel = create_accelerator(cfg)
+    assert accel.device.type == "cpu"
+    assert os.environ.get("ACCELERATE_TORCH_DEVICE") is None
+
+
+def test_create_accelerator_cuda_restores_env(tmp_path):
+    cfg = make_dummy_config(tmp_path, device="cuda:1")
+    with mock.patch("trainite.shared.utils.Accelerator") as mock_accel_cls:
+        mock_accel = mock.MagicMock()
+
+        def check_env(*args, **kwargs):
+            assert os.environ.get("ACCELERATE_TORCH_DEVICE") == "cuda:1"
+            return mock_accel
+
+        mock_accel_cls.side_effect = check_env
+        create_accelerator(cfg)
+        mock_accel_cls.assert_called_once_with(cpu=False, mixed_precision="no")
+        assert os.environ.get("ACCELERATE_TORCH_DEVICE") is None
+
+
+def test_create_accelerator_distributed_guard(tmp_path):
+    cfg = make_dummy_config(tmp_path, device="cuda:1")
+    with mock.patch.dict(os.environ, {"WORLD_SIZE": "2"}):
+        with pytest.raises(ValueError, match="Choose distributed GPUs through the launcher"):
+            create_accelerator(cfg)
+
+
+def test_create_run_dir(tmp_path):
+    cfg = make_dummy_config(tmp_path, device="cpu")
+    run_dir = create_run_dir(cfg)
+    assert run_dir.exists()
+    assert (run_dir / "config.yaml").exists()

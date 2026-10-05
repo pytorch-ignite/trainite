@@ -1,5 +1,8 @@
 import logging
+import os
 import shutil
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Sized, Any, Callable
@@ -8,6 +11,7 @@ from unittest import mock
 import pytest
 import torch
 import torch.nn as nn
+from accelerate.state import AcceleratorState
 from pydantic import ValidationError
 from trainite.config.base import (
     DataConfigBase,
@@ -182,6 +186,15 @@ class GenerativeModelNoTokenizer(SimpleModel):
 
 def dummy_collate_fn(batch):
     return batch
+
+
+@pytest.fixture(autouse=True)
+def reset_accelerator_state():
+    AcceleratorState._reset_state(reset_partial_state=True)
+    os.environ.pop("ACCELERATE_TORCH_DEVICE", None)
+    yield
+    AcceleratorState._reset_state(reset_partial_state=True)
+    os.environ.pop("ACCELERATE_TORCH_DEVICE", None)
 
 
 @pytest.fixture
@@ -436,9 +449,9 @@ def test_decoder_trainer_dataloader_collate_fn(project_config):
 def test_decoder_trainer_explicit_split_shuffle(project_config):
     project_config.data.train.dataloader.shuffle = True
     trainer = create_trainer_from_config(project_config)
-    assert trainer.train_loader is not None
-    # PyTorch DataLoader uses RandomSampler when shuffle is True
-    assert isinstance(trainer.train_loader.sampler, torch.utils.data.RandomSampler)
+    # PyTorch DataLoader uses RandomSampler when shuffle is True;
+    # Accelerate wraps it in DataLoaderShard with batch_sampler.sampler as RandomSampler
+    assert isinstance(trainer.train_loader.batch_sampler.sampler, torch.utils.data.RandomSampler)
 
 
 def test_decoder_trainer_builds_train_and_val_loaders_from_ratios(tmp_path):
@@ -512,7 +525,7 @@ def test_decoder_trainer_builds_train_val_and_test_loaders_from_ratios(tmp_path)
     assert len(trainer.val_loader.dataset) == 20
     assert len(trainer.test_loader.dataset) == 20
 
-    assert isinstance(trainer.train_loader.sampler, torch.utils.data.RandomSampler)
+    assert isinstance(trainer.train_loader.batch_sampler.sampler, torch.utils.data.RandomSampler)
     assert isinstance(trainer.val_loader.sampler, torch.utils.data.SequentialSampler)
     assert isinstance(trainer.test_loader.sampler, torch.utils.data.SequentialSampler)
 
@@ -647,3 +660,165 @@ def test_decoder_trainer_generate(project_config):
         generated = trainer.generate(input_ids, max_new_tokens=1, attention_mask=attention_mask)
         assert isinstance(generated, torch.Tensor)
         assert generated[0].tolist() == [5, 6, 7]
+
+
+@pytest.mark.parametrize(
+    "precision,expected_mixed_precision",
+    [
+        ("float32", "no"),
+        ("fp16", "fp16"),
+        ("bf16", "bf16"),
+    ],
+)
+def test_accelerator_initialization_precisions(project_config, precision, expected_mixed_precision):
+    project_config.trainer.precision = precision
+    trainer = create_trainer_from_config(project_config)
+    assert trainer.accelerator.mixed_precision == expected_mixed_precision
+
+
+def test_accelerator_backward_called_in_train_step(project_config):
+    trainer = create_trainer_from_config(project_config)
+    batch = {
+        "input_ids": torch.randint(0, 10, (2, 4), device=trainer.device),
+        "labels": torch.randint(0, 10, (2, 4), device=trainer.device),
+    }
+    with mock.patch.object(trainer.accelerator, "backward", wraps=trainer.accelerator.backward) as spy_backward:
+        output = trainer._train_step(trainer.trainer, batch)
+        assert spy_backward.called
+        assert "loss" in output
+        assert "logits" in output
+
+
+def test_accelerator_clip_grad_norm_called(project_config):
+    project_config.trainer.grad_clip_norm = 1.0
+    trainer = create_trainer_from_config(project_config)
+    batch = {
+        "input_ids": torch.randint(0, 10, (2, 4), device=trainer.device),
+        "labels": torch.randint(0, 10, (2, 4), device=trainer.device),
+    }
+    with mock.patch.object(trainer.accelerator, "clip_grad_norm_") as mock_clip:
+        trainer._train_step(trainer.trainer, batch)
+        mock_clip.assert_called_once()
+        args, kwargs = mock_clip.call_args
+        assert args[1] == 1.0
+
+
+def test_checkpoint_uses_unwrapped_model(project_config):
+    with (
+        mock.patch("trainite.trainers.decoder_trainer.setup_best_model_checkpoint") as mock_best,
+        mock.patch("trainite.trainers.decoder_trainer.setup_training_checkpointing") as mock_last,
+    ):
+        trainer = create_trainer_from_config(project_config)
+        unwrapped = trainer.accelerator.unwrap_model(trainer.model)
+
+        assert mock_best.called
+        to_save_best = mock_best.call_args[0][2]
+        assert to_save_best["model"] is unwrapped
+
+        assert mock_last.called
+        to_save_last = mock_last.call_args[0][1]
+        assert to_save_last["model"] is unwrapped
+
+
+def test_eval_step_returns_expected_outputs(project_config):
+    trainer = create_trainer_from_config(project_config)
+    batch = {
+        "input_ids": torch.randint(0, 10, (2, 4), device=trainer.device),
+        "labels": torch.randint(0, 10, (2, 4), device=trainer.device),
+    }
+    output = trainer._eval_step(trainer.val_evaluator, batch)
+    assert "logits" in output
+    assert "targets" in output
+    assert output["logits"].shape[:2] == (2, 4)
+
+
+def test_run_dir_broadcast_object_list_called(project_config):
+    with mock.patch("trainite.shared.utils.broadcast_object_list") as mock_broadcast:
+        trainer = create_trainer_from_config(project_config)
+        mock_broadcast.assert_called_once()
+        args, kwargs = mock_broadcast.call_args
+        assert args[0][0] == trainer.run_dir
+        assert kwargs.get("from_process") == 0
+
+
+def test_trainer_respects_user_selected_device(project_config):
+    project_config.device = "cpu"
+    trainer = create_trainer_from_config(project_config)
+    assert trainer.device.type == "cpu"
+
+
+def test_eval_step_calls_gather_for_metrics(project_config):
+    trainer = create_trainer_from_config(project_config)
+    batch = {
+        "input_ids": torch.randint(0, 10, (2, 4), device=trainer.device),
+        "labels": torch.randint(0, 10, (2, 4), device=trainer.device),
+    }
+    with mock.patch.object(
+        trainer.accelerator, "gather_for_metrics", wraps=trainer.accelerator.gather_for_metrics
+    ) as spy_gather:
+        output = trainer._eval_step(trainer.val_evaluator, batch)
+        spy_gather.assert_called_once()
+        assert "logits" in output
+        assert "targets" in output
+
+
+def test_eval_step_deduplicates_uneven_batches(project_config):
+    trainer = create_trainer_from_config(project_config)
+    batch = {
+        "input_ids": torch.randint(0, 10, (4, 6), device=trainer.device),
+        "labels": torch.randint(0, 10, (4, 6), device=trainer.device),
+    }
+
+    # Simulate distributed gather where the last batch had 4 items due to even_batches=True padding,
+    # but gather_for_metrics drops the duplicate items and returns 2 items.
+    def mock_gather_for_metrics(tensors):
+        logits, targets = tensors
+        return logits[:2], targets[:2]
+
+    with mock.patch.object(trainer.accelerator, "gather_for_metrics", side_effect=mock_gather_for_metrics):
+        output = trainer._eval_step(trainer.val_evaluator, batch)
+        assert output["logits"].shape[0] == 2
+        assert output["targets"].shape[0] == 2
+        assert output["logits"].shape[1:] == (6, 10)
+
+
+def test_eval_step_pads_across_processes_in_distributed(project_config):
+    trainer = create_trainer_from_config(project_config)
+    batch = {
+        "input_ids": torch.randint(0, 10, (2, 4), device=trainer.device),
+        "labels": torch.randint(0, 10, (2, 4), device=trainer.device),
+    }
+    with (
+        mock.patch("accelerate.Accelerator.use_distributed", new_callable=mock.PropertyMock(return_value=True)),
+        mock.patch.object(
+            trainer.accelerator, "pad_across_processes", wraps=trainer.accelerator.pad_across_processes
+        ) as spy_pad,
+    ):
+        output = trainer._eval_step(trainer.val_evaluator, batch)
+        assert spy_pad.call_count == 2
+        assert spy_pad.call_args_list[0].kwargs.get("pad_index") == 0
+        assert spy_pad.call_args_list[1].kwargs.get("pad_index") == -100
+        assert "logits" in output
+        assert "targets" in output
+
+
+@pytest.mark.skipif(
+    sys.platform.startswith("win") or sys.platform.startswith("darwin"),
+    reason="Distributed multi-process training is not supported on Windows/macOS in CI",
+)
+def test_decoder_trainer_distributed_two_workers(tmp_path):
+    worker_script = (Path(__file__).parent / "distributed_worker_test.py").read_text()
+    script_path = tmp_path / "worker.py"
+    script_path.write_text(worker_script)
+    output_dir = tmp_path / "outputs"
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "torch.distributed.run",
+        "--nproc_per_node=2",
+        str(script_path),
+        str(output_dir),
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    assert res.returncode == 0, f"Distributed run failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
