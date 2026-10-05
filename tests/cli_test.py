@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 import yaml
@@ -464,6 +465,10 @@ def test_recreation_command_quotes_values_containing_spaces(tmp_path):
     project_dir = tmp_path / "quoted-experiment"
     init_project(Init(project_dir=str(project_dir), run_name="my great run", output_root="my outputs"))
 
+    readme = (project_dir / "README.md").read_text()
+    assert "Windows Command Prompt (`cmd.exe`)" in readme
+    assert "replace single quotes around argument values with double quotes" in readme
+
     command = _recreation_command(project_dir)
 
     assert "--run-name 'my great run'" in command
@@ -501,3 +506,63 @@ def test_recreation_command_is_replayable(tmp_path):
     replayed_config = yaml.safe_load((replay_dir / "config.yaml").read_text())
     assert replayed_config["output"]["run_name"] == "my great run"
     assert replayed_config["output"]["root"] == "my outputs"
+
+
+def test_primary_model_defaults_to_first_selected_model():
+    config = Init(model=("rope-transformer", "basic-transformer"))
+
+    assert config.primary_model == "rope-transformer"
+
+
+def test_primary_model_not_in_selection_raises_error():
+    with pytest.raises(ValueError, match="must be one of the selected models"):
+        Init(model=("rope-transformer",), primary_model="basic-transformer")
+
+
+def test_interactive_run_name_uses_non_first_primary_model(monkeypatch):
+    from trainite.cli import init
+
+    models = ("rope-transformer", "basic-transformer")
+    monkeypatch.setattr(init, "_prompt_multi_choice", Mock(return_value=list(models)))
+    monkeypatch.setattr(
+        init,
+        "_prompt_choice",
+        Mock(side_effect=["basic-transformer", DEFAULT_DATASET, DEFAULT_TRAINER]),
+    )
+    monkeypatch.setattr(init, "_prompt_text", lambda prompt, default, instruction=None: default)
+    confirmation = Mock()
+    confirmation.ask.return_value = False
+    monkeypatch.setattr(init.questionary, "confirm", Mock(return_value=confirmation))
+    generate_project = Mock()
+    monkeypatch.setattr(init, "init_project", generate_project)
+
+    init.run_interactive_mode()
+
+    generate_project.assert_called_once()
+    config = generate_project.call_args.args[0]
+    assert config.model == models
+    assert config.primary_model == "basic-transformer"
+    assert config.run_name == "basic_transformer__string_reverse"
+
+
+def test_primary_model_drives_generated_config(tmp_path):
+    project_dir = tmp_path / "primary-model-experiment"
+    config = Init(
+        project_dir=str(project_dir),
+        model=("rope-transformer", "basic-transformer"),
+        primary_model="basic-transformer",
+    )
+    init_project(config)
+
+    generated_config = yaml.safe_load((project_dir / "config.yaml").read_text())
+
+    # The primary model drives config.yaml and the run name even though it is
+    # not first in the selection.
+    assert "basic_transformer" in generated_config["model"]["_target_"]
+    assert "basic_transformer" in generated_config["model"]["collate_fn_target"]
+    assert generated_config["output"]["run_name"] == "basic_transformer__string_reverse"
+
+    # Both selected models are still generated.
+    assert (project_dir / "models/basic_transformer.py").exists()
+    assert (project_dir / "models/rope_transformer.py").exists()
+    assert "--primary-model basic-transformer" in (project_dir / "README.md").read_text()

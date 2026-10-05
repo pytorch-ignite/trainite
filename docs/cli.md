@@ -56,6 +56,7 @@ Pass all options directly:
 ```bash
 trainite init my-experiment \
   --model rope-transformer basic-transformer \
+  --primary-model basic-transformer \
   --dataset string-reverse \
   --trainer decoder-trainer \
   --output-root outputs \
@@ -67,10 +68,11 @@ trainite init my-experiment \
 
 - `PROJECT_DIR` (positional): Output directory for the generated project (default: `my-cool-experiment`).
 - `--model`: One or more model templates. At least one is required.
+- `--primary-model`: Active model in generated `config.yaml`. Must be one of the selected models; defaults to the first selected model.
 - `--dataset`: Dataset template.
 - `--trainer`: Trainer template.
 - `--output-root`: Value written to `output.root` in generated `config.yaml` (default: `outputs`).
-- `--run-name`: Value written to `output.run_name` in generated `config.yaml` (default: `<first_model>__<dataset>`, with `-` replaced by `_`).
+- `--run-name`: Value written to `output.run_name` in generated `config.yaml` (default: `<primary_model>__<dataset>`, with `-` replaced by `_`).
 - `--sky`: Also generate `sky.yaml` and include SkyPilot dependency in generated `pyproject.toml`.
 - `--force`: Overwrite starter files in a non-empty existing directory.
 
@@ -94,7 +96,7 @@ trainite init my-experiment \
 When multiple models are selected:
 
 - Trainite scaffolds each model template into `models/` (for example, `models/rope_transformer.py` and `models/basic_transformer.py`).
-- The **first** model is treated as the primary model for generated `config.yaml`.
+- The **first** model is the default primary model for generated `config.yaml`. Use `--primary-model` to choose a different selected model without changing the model list order.
 - In interactive mode, use <kbd>Space</kbd> to select or deselect multiple checkboxes, and press <kbd>Enter</kbd> to confirm. Trainite then asks which selected model should be the primary active model in `config.yaml`.
 
 ## `trainite add:sky`
