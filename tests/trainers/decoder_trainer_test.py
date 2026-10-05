@@ -807,52 +807,7 @@ def test_eval_step_pads_across_processes_in_distributed(project_config):
     reason="Distributed multi-process training is not supported on Windows/macOS in CI",
 )
 def test_decoder_trainer_distributed_two_workers(tmp_path):
-    worker_script = """
-import sys
-from trainite.trainers.decoder_trainer import Trainer
-from trainite.config.base import (
-    ProjectConfig, ModelConfig, PreprocessorConfig, DatasetConfig,
-    OutputConfig, OptimizerConfig, LossConfig,
-    SplitConfig, DataLoaderConfig, TrainerConfig, DataConfigBase
-)
-
-def run():
-    run_dir = sys.argv[1]
-    cfg = ProjectConfig(
-        project_name="dist_test",
-        preprocessor=PreprocessorConfig(_target_="tests.trainers.decoder_trainer_test.DummyTokenizer"),
-        model=ModelConfig(_target_="tests.trainers.decoder_trainer_test.SimpleModel"),
-        optimizer=OptimizerConfig(_target_="torch.optim.SGD", lr=0.01),
-        loss=LossConfig(_target_="torch.nn.CrossEntropyLoss"),
-        data=DataConfigBase(
-            train=SplitConfig(
-                dataset=DatasetConfig(_target_="tests.trainers.decoder_trainer_test.SimpleDataset", size=8),
-                dataloader=DataLoaderConfig(batch_size=4, num_workers=0)
-            ),
-            val=SplitConfig(
-                dataset=DatasetConfig(_target_="tests.trainers.decoder_trainer_test.SimpleDataset", size=4),
-                dataloader=DataLoaderConfig(batch_size=4, num_workers=0)
-            ),
-            test=SplitConfig(
-                dataset=DatasetConfig(_target_="tests.trainers.decoder_trainer_test.SimpleDataset", size=4),
-                dataloader=DataLoaderConfig(batch_size=4, num_workers=0)
-            ),
-        ),
-        trainer=TrainerConfig(epochs=1, log_every_steps=1),
-        output=OutputConfig(root=run_dir, run_name="run"),
-        logger="tensorboard",
-        device=None,
-    )
-    trainer = Trainer(cfg)
-    assert trainer.accelerator.use_distributed
-    assert trainer.accelerator.num_processes == 2
-    trainer.run()
-    if trainer.accelerator.is_main_process:
-        assert (trainer.run_dir / "best.pt").exists()
-
-if __name__ == "__main__":
-    run()
-"""
+    worker_script = (Path(__file__).parent / "distributed_worker_test.py").read_text()
     script_path = tmp_path / "worker.py"
     script_path.write_text(worker_script)
     output_dir = tmp_path / "outputs"
