@@ -30,7 +30,7 @@ class RoPETransformerModelConfig(ModelConfig):
 class Gemma4MoEModelConfig(ModelConfig):
     """Small Gemma 4 MoE configuration suitable for training from scratch."""
 
-    target: str = Field(default="trainite.models.gemma4_moe.Gemma4TextModel", alias="_target_")
+    target: str = Field(default="trainite.models.gemma4_moe.Gemma4MoEModel", alias="_target_")
     hidden_size: int = Field(default=64, gt=0)
     num_layers: int = Field(default=2, gt=0)
     num_attention_heads: int = Field(default=4, gt=0)
@@ -43,9 +43,14 @@ class Gemma4MoEModelConfig(ModelConfig):
     layer_types: tuple[str, ...] | None = None
     layer_pattern: str | None = None
     sliding_window: int = Field(default=64, gt=0)
+    rope_theta: float = Field(default=10000.0, gt=0.0)
+    global_rope_theta: float = Field(default=1000000.0, gt=0.0)
+    rotary_fraction: float = Field(default=1.0, gt=0.0, le=1.0)
+    global_rotary_fraction: float = Field(default=0.25, gt=0.0, le=1.0)
     global_num_key_value_heads: int = Field(default=2, gt=0)
     global_head_dim: int = Field(default=16, gt=0)
     global_key_equals_value: bool = True
+    attention_dropout: float = Field(default=0.0, ge=0.0, lt=1.0)
 
     @model_validator(mode="after")
     def _default_layer_layout(self):
@@ -74,6 +79,7 @@ class Gemma4DenseModelConfig(ModelConfig):
     global_num_key_value_heads: int = Field(default=2, gt=0)
     global_head_dim: int = Field(default=16, gt=0)
     global_key_equals_value: bool = True
+    attention_dropout: float = Field(default=0.0, ge=0.0, lt=1.0)
     tie_word_embeddings: bool = True
     final_logit_softcap: float | None = None
 

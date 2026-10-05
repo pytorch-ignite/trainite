@@ -10,7 +10,7 @@ from huggingface_hub import snapshot_download
 from transformers import Gemma4ForConditionalGeneration
 
 from trainite.models.gemma4_dense import Gemma4DenseModel
-from trainite.models.gemma4_moe import Gemma4TextModel
+from trainite.models.gemma4_moe import Gemma4MoEModel
 
 
 def _load_hf_gemma4_dense_model(checkpoint_dir: str | Path) -> Gemma4DenseModel:
@@ -39,6 +39,7 @@ def _load_hf_gemma4_dense_model(checkpoint_dir: str | Path) -> Gemma4DenseModel:
         rope_theta=local_rope["rope_theta"],
         rope_scaling_factor=local_rope.get("factor", 1.0),
         rotary_fraction=local_rope.get("partial_rotary_factor", 1.0),
+        attention_dropout=config.get("attention_dropout", 0.0),
         pad_token_id=config.get("pad_token_id"),
         layer_types=layer_types,
         sliding_window=config["sliding_window"],
@@ -89,7 +90,7 @@ def _load_hf_gemma4_dense_model(checkpoint_dir: str | Path) -> Gemma4DenseModel:
     return model
 
 
-def _load_hf_gemma4_text_model(checkpoint_dir: str | Path) -> Gemma4TextModel:
+def _load_hf_gemma4_text_model(checkpoint_dir: str | Path) -> Gemma4MoEModel:
     """Load an unsharded Hugging Face Gemma 4 MoE text checkpoint."""
 
     checkpoint_dir = Path(checkpoint_dir)
@@ -102,7 +103,7 @@ def _load_hf_gemma4_text_model(checkpoint_dir: str | Path) -> Gemma4TextModel:
     layer_types = tuple(
         "sliding" if layer_type == "sliding_attention" else "global" for layer_type in config["layer_types"]
     )
-    model = Gemma4TextModel(
+    model = Gemma4MoEModel(
         vocab_size=config["vocab_size"],
         hidden_size=config["hidden_size"],
         num_layers=config["num_hidden_layers"],
@@ -116,6 +117,7 @@ def _load_hf_gemma4_text_model(checkpoint_dir: str | Path) -> Gemma4TextModel:
         rope_theta=local_rope["rope_theta"],
         rope_scaling_factor=local_rope.get("factor", 1.0),
         rotary_fraction=local_rope.get("partial_rotary_factor", 1.0),
+        attention_dropout=config.get("attention_dropout", 0.0),
         pad_token_id=config.get("pad_token_id"),
         layer_types=layer_types,
         sliding_window=config["sliding_window"],

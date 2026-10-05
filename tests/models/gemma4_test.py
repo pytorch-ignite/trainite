@@ -10,7 +10,7 @@ import trainite.models.gemma4_moe as gemma4_moe
 from trainite.config.models import Gemma4DenseModelConfig, Gemma4MoEModelConfig
 from trainite.config.registry import MODEL_SPECS
 from trainite.models.gemma4_dense import Gemma4DenseBlock, Gemma4DenseModel
-from trainite.models.gemma4_moe import Gemma4MoE, Gemma4TextBlock, Gemma4TextModel
+from trainite.models.gemma4_moe import Gemma4MoE, Gemma4TextBlock, Gemma4MoEModel
 from trainite.shared.utils import build_model, instantiate
 
 
@@ -27,15 +27,13 @@ def make_dense_model(**overrides) -> Gemma4DenseModel:
         "sliding_window": 2,
         "global_num_key_value_heads": 1,
         "global_head_dim": 6,
-        "global_rope_theta": 1_000_000,
-        "global_rotary_fraction": 0.25,
         "global_key_equals_value": True,
     }
     options.update(overrides)
     return Gemma4DenseModel(**options)
 
 
-def make_moe_model(**overrides) -> Gemma4TextModel:
+def make_moe_model(**overrides) -> Gemma4MoEModel:
     options = {
         "vocab_size": 32,
         "hidden_size": 8,
@@ -51,12 +49,10 @@ def make_moe_model(**overrides) -> Gemma4TextModel:
         "sliding_window": 2,
         "global_num_key_value_heads": 1,
         "global_head_dim": 6,
-        "global_rope_theta": 1_000_000,
-        "global_rotary_fraction": 0.25,
         "global_key_equals_value": True,
     }
     options.update(overrides)
-    return Gemma4TextModel(**options)
+    return Gemma4MoEModel(**options)
 
 
 # ---------------------------------------------------------------------------
@@ -433,14 +429,20 @@ def test_model_expands_compact_layer_pattern(model_factory):
     ],
 )
 def test_gemma4_config_defaults_to_sg_pattern(config_cls):
-    assert config_cls().layer_pattern == "sg"
+    config = config_cls()
+    assert config.layer_pattern == "sg"
+    assert config.rope_theta == 10_000
+    assert config.global_rope_theta == 1_000_000
+    assert config.rotary_fraction == 1.0
+    assert config.global_rotary_fraction == 0.25
+    assert config.attention_dropout == 0.0
 
 
 @pytest.mark.parametrize(
     ("spec_name", "model_cls"),
     [
         ("gemma4-dense", Gemma4DenseModel),
-        ("gemma4-moe", Gemma4TextModel),
+        ("gemma4-moe", Gemma4MoEModel),
     ],
 )
 def test_gemma4_model_instantiate_from_config(spec_name, model_cls):
@@ -458,3 +460,32 @@ def test_gemma4_model_instantiate_from_config(spec_name, model_cls):
     assert isinstance(built, model_cls)
     assert built.token_embedding.num_embeddings == 17
     assert built.token_embedding.padding_idx == 3
+
+
+@pytest.mark.parametrize("spec_name", ["gemma4-dense", "gemma4-moe"])
+def test_attention_dropout_only_applies_during_training(spec_name):
+    config = MODEL_SPECS[spec_name].config_cls(attention_dropout=0.25)
+    model = instantiate(config, vocab_size=32)
+    input_ids = torch.tensor([[1, 2, 3]])
+
+    with patch(
+        "torch.nn.functional.scaled_dot_product_attention",
+        side_effect=lambda query, *args, **kwargs: torch.zeros_like(query),
+    ) as sdpa:
+        model(input_ids)
+        assert len(sdpa.call_args_list) == config.num_layers
+        assert all(call.kwargs["dropout_p"] == 0.25 for call in sdpa.call_args_list)
+        sdpa.reset_mock()
+        model.eval()
+        model(input_ids)
+        assert len(sdpa.call_args_list) == config.num_layers
+        assert all(call.kwargs["dropout_p"] == 0.0 for call in sdpa.call_args_list)
+
+    model(input_ids).sum().backward()
+    assert model.token_embedding.weight.grad is not None
+
+    for invalid in (-0.1, 1.0):
+        with pytest.raises(ValueError):
+            MODEL_SPECS[spec_name].config_cls(attention_dropout=invalid)
+        with pytest.raises(ValueError, match="attention_dropout"):
+            model.layers[0].attention.__class__(8, 2, 1, head_dim=4, attention_dropout=invalid)

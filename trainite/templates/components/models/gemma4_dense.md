@@ -87,6 +87,9 @@ Whether key projection is reused as value projection in global attention layers 
 ### `tie_word_embeddings`
 Whether to tie the output projection weights to the input embedding table (default: true).
 
+### `attention_dropout`
+Attention dropout probability during training (default: 0.0, matching Gemma). Disabled during evaluation.
+
 ### `final_logit_softcap`
 Optional $\tanh$-based soft-capping bound for logits to prevent overconfidence (default: null).
 
@@ -108,6 +111,7 @@ model:
   rotary_fraction: 1.0
   global_rotary_fraction: 0.25
   global_key_equals_value: true
+  attention_dropout: 0.0
   tie_word_embeddings: true
   final_logit_softcap: null
 ```

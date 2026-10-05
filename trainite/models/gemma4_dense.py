@@ -162,6 +162,7 @@ class Gemma4TextAttention(nn.Module):
         rope_theta: float = 10_000.0,
         rope_scaling_factor: float = 1.0,
         rotary_fraction: float = 1.0,
+        attention_dropout: float = 0.0,
         sliding_window: int | None = None,
         key_equals_value: bool = False,
     ) -> None:
@@ -174,6 +175,8 @@ class Gemma4TextAttention(nn.Module):
             raise ValueError("num_attention_heads must be divisible by num_key_value_heads")
         if sliding_window is not None and sliding_window <= 0:
             raise ValueError("sliding_window must be positive")
+        if not 0.0 <= attention_dropout < 1.0:
+            raise ValueError("attention_dropout must be between 0 (inclusive) and 1 (exclusive)")
 
         # Query asks what each token should attend to: [hidden -> query heads].
         self.q_proj = nn.Linear(hidden_size, num_attention_heads * self.head_dim, bias=False)
@@ -193,6 +196,7 @@ class Gemma4TextAttention(nn.Module):
         self.rope_scaling_factor = rope_scaling_factor
         self.rotary_fraction = rotary_fraction
         self.sliding_window = sliding_window
+        self.attention_dropout = attention_dropout
 
     def forward(
         self,
@@ -249,6 +253,7 @@ class Gemma4TextAttention(nn.Module):
             key,
             value,
             attn_mask=allowed[:, None, :, :],
+            dropout_p=self.attention_dropout if self.training else 0.0,
             enable_gqa=self.num_key_value_groups > 1,
             scale=1.0,
         )
@@ -313,6 +318,7 @@ class Gemma4DenseBlock(nn.Module):
         rope_theta: float = 10_000.0,
         rope_scaling_factor: float = 1.0,
         rotary_fraction: float = 1.0,
+        attention_dropout: float = 0.0,
         sliding_window: int | None = None,
         key_equals_value: bool = False,
     ) -> None:
@@ -325,6 +331,7 @@ class Gemma4DenseBlock(nn.Module):
             rope_theta=rope_theta,
             rope_scaling_factor=rope_scaling_factor,
             rotary_fraction=rotary_fraction,
+            attention_dropout=attention_dropout,
             sliding_window=sliding_window,
             key_equals_value=key_equals_value,
         )
@@ -366,6 +373,7 @@ class Gemma4DenseModel(nn.Module):
         rope_theta: float = 10_000.0,
         rope_scaling_factor: float = 1.0,
         rotary_fraction: float = 1.0,
+        attention_dropout: float = 0.0,
         pad_token_id: int | None = None,
         layer_types: tuple[str, ...] | None = None,
         layer_pattern: str | None = None,
@@ -410,6 +418,7 @@ class Gemma4DenseModel(nn.Module):
                     rotary_fraction=(
                         global_rotary_fraction if is_global and global_rotary_fraction is not None else rotary_fraction
                     ),
+                    attention_dropout=attention_dropout,
                     sliding_window=None if is_global else sliding_window,
                     key_equals_value=is_global and global_key_equals_value,
                 )
