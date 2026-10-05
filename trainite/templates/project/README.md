@@ -4,6 +4,10 @@
 > ```bash
 > {{recreation_command}}
 > ```
+>
+> The command above uses POSIX shell quoting. In Windows Command Prompt (`cmd.exe`),
+> replace single quotes around argument values with double quotes (for example,
+> `--run-name 'my great run'` becomes `--run-name "my great run"`).
 
 Welcome to your new Trainite-generated training project!
 
