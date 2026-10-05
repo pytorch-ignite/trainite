@@ -95,7 +95,10 @@ class Trainer:
 
         # Setup Accelerate for device placement, mixed precision, and distributed training
         self.accelerator: Accelerator = create_accelerator(config)
-        self.device: torch.device = self.accelerator.device
+        # Strip ordinal index for CPU (e.g. 'cpu:1' on rank 1) to prevent torch.load errors
+        self.device: torch.device = (
+            torch.device("cpu") if self.accelerator.device.type == "cpu" else self.accelerator.device
+        )
 
         # Build tokenizer from config (e.g. CharTokenizer)
         self.tokenizer = instantiate(config.preprocessor)
@@ -116,6 +119,7 @@ class Trainer:
         self.inference_num_samples = self.trainer_config.inference_num_samples
         self.max_inference_new_tokens = self.trainer_config.max_inference_new_tokens
         self.criterion = instantiate(config.loss)
+        self.ignore_index: int = getattr(self.criterion, "ignore_index", -100)
 
         # Prepare components for distributed execution and mixed precision
         self.model, self.optimizer, self.train_loader, self.val_loader, self.test_loader = self.accelerator.prepare(
@@ -286,7 +290,7 @@ class Trainer:
         # Pad across processes along sequence dimension (dim=1) if variable lengths exist across ranks
         if self.accelerator.use_distributed:
             logits = self.accelerator.pad_across_processes(logits, dim=1, pad_index=0)
-            targets = self.accelerator.pad_across_processes(targets, dim=1, pad_index=-100)
+            targets = self.accelerator.pad_across_processes(targets, dim=1, pad_index=self.ignore_index)
 
         # Gather across all ranks and drop duplicated padding samples on the last batch
         logits, targets = self.accelerator.gather_for_metrics((logits, targets))
@@ -347,10 +351,7 @@ class Trainer:
 
         if checkpoint_path is not None:
             self.logger.info("Loading best model for testing from %s", checkpoint_path)
-            # Strip device index on CPU (e.g. 'cpu:1' on rank 1) because torch.load
-            # fails with RuntimeError: don't know how to restore data location (... tagged with cpu:1)
-            map_location = torch.device("cpu") if self.device.type == "cpu" else self.device
-            checkpoint = torch.load(checkpoint_path, map_location=map_location, weights_only=True)
+            checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
             unwrapped_model: torch.nn.Module = self.accelerator.unwrap_model(self.model)
             unwrapped_model.load_state_dict(checkpoint["model"])
         else:
@@ -384,11 +385,9 @@ class Trainer:
         # Running average loss tracked per training iteration (logged in console)
         RunningAverage(output_transform=lambda output: output["loss"]).attach(self.trainer, "batch_loss")
 
-        ignore_index = getattr(self.criterion, "ignore_index", -100)
-
         # Shared transform: flatten and filter out ignored positions for both metrics
         def transform_fn(output):
-            return _flatten(output, ignore_index=ignore_index)
+            return _flatten(output, ignore_index=self.ignore_index)
 
         metrics = {}
         for prefix, evaluator in [
