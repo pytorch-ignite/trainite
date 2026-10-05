@@ -844,6 +844,8 @@ def run():
         device=None,
     )
     trainer = Trainer(cfg)
+    assert trainer.accelerator.use_distributed
+    assert trainer.accelerator.num_processes == 2
     trainer.run()
     if trainer.accelerator.is_main_process:
         assert (trainer.run_dir / "best.pt").exists()
