@@ -347,6 +347,8 @@ class Trainer:
 
         if checkpoint_path is not None:
             self.logger.info("Loading best model for testing from %s", checkpoint_path)
+            # Strip device index on CPU (e.g. 'cpu:1' on rank 1) because torch.load
+            # fails with RuntimeError: don't know how to restore data location (... tagged with cpu:1)
             map_location = torch.device("cpu") if self.device.type == "cpu" else self.device
             checkpoint = torch.load(checkpoint_path, map_location=map_location, weights_only=True)
             unwrapped_model: torch.nn.Module = self.accelerator.unwrap_model(self.model)
