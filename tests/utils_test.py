@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from unittest import mock
 import pytest
+import yaml
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -15,7 +16,7 @@ from trainite.config.base import (
     SplitConfig,
     TrainerConfig,
 )
-from trainite.shared.utils import create_accelerator, create_run_dir, get_target, instantiate
+from trainite.shared.utils import create_accelerator, create_run_dir, get_target, instantiate, dump_config, load_config
 
 
 class MockComponent(BaseModel):
@@ -126,3 +127,14 @@ def test_create_run_dir(tmp_path):
     run_dir = create_run_dir(cfg)
     assert run_dir.exists()
     assert (run_dir / "config.yaml").exists()
+
+
+def test_loaded_list_config_can_be_dumped(tmp_path):
+    source = tmp_path / "config.yaml"
+    output = tmp_path / "output.yaml"
+    source.write_text("_target_: builtins.dict\nlayer_types: [sliding, global]\n")
+
+    config = load_config(source, MockComponent)
+    dump_config(config, output)
+
+    assert yaml.safe_load(output.read_text())["layer_types"] == ["sliding", "global"]
