@@ -127,6 +127,8 @@ def test_create_run_dir(tmp_path):
     run_dir = create_run_dir(cfg)
     assert run_dir.exists()
     assert (run_dir / "config.yaml").exists()
+
+
 def test_loaded_list_config_can_be_dumped(tmp_path):
     source = tmp_path / "config.yaml"
     output = tmp_path / "output.yaml"

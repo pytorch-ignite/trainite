@@ -443,7 +443,7 @@ class Gemma4MoEModel(nn.Module):
         global_rope_theta: float | None = 1_000_000.0,
         global_rope_scaling_factor: float | None = None,
         global_rotary_fraction: float | None = 0.25,
-        global_key_equals_value: bool = False,
+        global_key_equals_value: bool = True,
         final_logit_softcap: float | None = None,
     ) -> None:
         super().__init__()
