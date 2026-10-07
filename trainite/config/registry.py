@@ -67,6 +67,7 @@ MODEL_SPECS = {
         builder_symbol="Gemma4MoEModel",
         collate_fn_target="trainite.models.gemma4_moe.CausalLMCollateFn",
         readme_template_path=Path("trainite/templates/components/models/gemma4_moe.md"),
+        loss_config_cls_path="trainite.config.loss.Gemma4MoELossConfig",
     ),
     "gemma4-dense": ModelSpec(
         name="gemma4_dense",

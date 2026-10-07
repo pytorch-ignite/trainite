@@ -172,7 +172,13 @@ class Gemma4MoE(nn.Module):
         for weight in self.down_proj:
             nn.init.kaiming_uniform_(weight, a=5**0.5)
 
-    def forward(self, x: torch.Tensor, router_input: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        router_input: torch.Tensor | None = None,
+        return_router_info: bool = False,
+        token_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
         router_input = x if router_input is None else router_input
         router_input = self.router_norm(router_input) * self.router_scale * (self.hidden_size**-0.5)
         router_logits = self.router(router_input).float()
@@ -189,6 +195,22 @@ class Gemma4MoE(nn.Module):
             expert_output = F.linear(gelu_tanh(gate) * up, self.down_proj[expert_idx])
             expert_output = expert_output * topk_weights[token_indices, topk_positions, None].to(x.dtype)
             output.index_add_(0, token_indices, expert_output)
+
+        if return_router_info:
+            # One weight per flattened token: 1 for real tokens, 0 for padding.
+            mask = torch.ones_like(router_probs[:, 0]) if token_mask is None else token_mask.to(router_probs)
+            num_tokens = mask.sum().clamp(min=1)  # All-padding inputs contribute zero, without dividing by zero.
+            mean_probs = (router_probs * mask[:, None]).sum(dim=0) / num_tokens
+
+            # Repeat each token's weight for its top-k expert assignments.
+            assignment_weights = mask[:, None].expand_as(topk_indices).flatten()
+            expert_ids = topk_indices.flatten()
+            counts = torch.zeros_like(mean_probs)
+            # Add each assignment's weight to its expert's bucket; padding adds zero.
+            counts.scatter_add_(0, expert_ids, assignment_weights)
+            # Normalize over all top-k assignments: balanced routing has loss 1.
+            fractions = counts / (num_tokens * self.top_k)
+            return output, (mean_probs, fractions)
 
         return output
 
@@ -398,7 +420,8 @@ class Gemma4TextBlock(nn.Module):
         hidden_states: torch.Tensor,
         position_ids: torch.Tensor | None = None,
         attention_mask: torch.Tensor | None = None,
-    ) -> torch.Tensor:
+        return_router_info: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
         residual = hidden_states
         hidden_states = self.attention(self.pre_attention_norm(hidden_states), position_ids, attention_mask)
         hidden_states = residual + self.post_attention_norm(hidden_states)
@@ -406,12 +429,22 @@ class Gemma4TextBlock(nn.Module):
         residual = hidden_states
         dense = self.post_dense_norm(self.dense_mlp(self.pre_dense_norm(hidden_states)))
         moe_input = self.pre_moe_norm(hidden_states)
-        moe = self.moe(
+        # Flatten the padding mask in the same token order as the MoE inputs.
+        token_mask = attention_mask.reshape(-1) if attention_mask is not None and attention_mask.ndim == 2 else None
+        moe_result = self.moe(
             moe_input.reshape(-1, moe_input.shape[-1]),
             router_input=residual.reshape(-1, residual.shape[-1]),
-        ).reshape_as(moe_input)
+            return_router_info=return_router_info,
+            token_mask=token_mask,
+        )
+        if return_router_info:
+            moe, router_info = moe_result
+        else:
+            moe = moe_result
+        moe = moe.reshape_as(moe_input)
         hidden_states = self.post_feedforward_norm(dense + self.post_moe_norm(moe))
-        return (residual + hidden_states) * self.layer_scale
+        output = (residual + hidden_states) * self.layer_scale
+        return (output, router_info) if return_router_info else output
 
 
 class Gemma4MoEModel(nn.Module):
@@ -492,19 +525,27 @@ class Gemma4MoEModel(nn.Module):
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor | None = None,
         position_ids: torch.Tensor | None = None,
-    ) -> torch.Tensor:
+        return_router_info: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        """Return logits, optionally with statistics [layers, 2, experts] (probabilities, fractions)."""
+        router_infos = []
         if position_ids is None and attention_mask is not None and attention_mask.ndim == 2:
             position_ids = (attention_mask.cumsum(dim=-1) - 1).clamp(min=0)
 
         hidden_states = self.token_embedding(input_ids) * self.embedding_scale
         for layer in self.layers:
-            hidden_states = layer(hidden_states, position_ids, attention_mask)
+            layer_output = layer(hidden_states, position_ids, attention_mask, return_router_info=return_router_info)
+            if return_router_info:
+                hidden_states, router_info = layer_output
+                router_infos.append(torch.stack(router_info))
+            else:
+                hidden_states = layer_output
 
         hidden_states = self.final_norm(hidden_states)
         logits = F.linear(hidden_states, self.token_embedding.weight)
         if self.final_logit_softcap is not None:
             logits = torch.tanh(logits / self.final_logit_softcap) * self.final_logit_softcap
-        return logits
+        return (logits, torch.stack(router_infos)) if return_router_info else logits
 
 
 class CausalLMCollateFn:
@@ -526,3 +567,38 @@ class CausalLMCollateFn:
             "attention_mask": left_pad([item.attention_mask for item in batch], 0),
             "labels": left_pad([item.train_label_ids for item in batch], -100),
         }
+
+
+def load_balancing_loss(router_infos: torch.Tensor) -> torch.Tensor:
+    """Mean balancing loss from statistics shaped [layers, 2, experts]."""
+    if router_infos.ndim != 3 or router_infos.shape[1] != 2 or router_infos.shape[0] == 0:
+        raise ValueError("router_infos must have shape [layers, 2, experts] with at least one layer")
+    mean_probs = router_infos[:, 0, :]
+    fractions = router_infos[:, 1, :]
+    num_experts = router_infos.shape[-1]
+    return num_experts * (mean_probs * fractions).sum(dim=-1).mean()
+
+
+class LoadBalancingLoss(nn.Module):
+    """Mean per-layer top-k balancing loss, without coefficient scaling."""
+
+    def forward(self, router_infos: torch.Tensor) -> torch.Tensor:
+        return load_balancing_loss(router_infos)
+
+
+class GemmaMoECausalLMLoss(nn.Module):
+    """Cross-entropy plus router balancing loss; labels must already align with logits."""
+
+    def __init__(self, aux_loss_coef: float = 0.01, ignore_index: int = -100) -> None:
+        super().__init__()
+        self.aux_loss_coef = aux_loss_coef
+        self.cross_entropy = nn.CrossEntropyLoss(ignore_index=ignore_index)
+
+    def forward(
+        self,
+        logits: torch.Tensor,
+        labels: torch.Tensor,
+        router_infos: torch.Tensor,
+    ) -> torch.Tensor:
+        lm_loss = self.cross_entropy(logits.reshape(-1, logits.shape[-1]), labels.reshape(-1))
+        return lm_loss + self.aux_loss_coef * load_balancing_loss(router_infos)
