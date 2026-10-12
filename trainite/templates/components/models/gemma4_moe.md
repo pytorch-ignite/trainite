@@ -40,6 +40,10 @@ model:
   rotary_fraction: 1.0
   global_rotary_fraction: 0.25
   attention_dropout: 0.0
+loss:
+  _target_: models.gemma4_moe.GemmaMoECausalLMLoss
+  aux_loss_coef: 0.01
+  ignore_index: -100
 ```
 
 `layer_types` (one entry per layer) and `layer_pattern` are mutually exclusive.
@@ -50,3 +54,6 @@ Keep `top_k <= num_experts`.
 
 `attention_dropout` defaults to 0.0, matching Gemma. It applies only during training,
 never during evaluation. Local/global RoPE defaults match the dense model.
+
+Training adds the router balancing loss to cross-entropy. Evaluation reports
+cross-entropy alone, so validation loss measures language modeling quality.

@@ -589,9 +589,12 @@ class LoadBalancingLoss(nn.Module):
 class GemmaMoECausalLMLoss(nn.Module):
     """Cross-entropy plus router balancing loss; labels must already align with logits."""
 
+    requires_router_info = True
+
     def __init__(self, aux_loss_coef: float = 0.01, ignore_index: int = -100) -> None:
         super().__init__()
         self.aux_loss_coef = aux_loss_coef
+        self.ignore_index = ignore_index
         self.cross_entropy = nn.CrossEntropyLoss(ignore_index=ignore_index)
 
     def forward(
