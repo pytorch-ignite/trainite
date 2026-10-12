@@ -475,14 +475,28 @@ def test_recreation_command_quotes_values_containing_spaces(tmp_path):
     assert "--output-root 'my outputs'" in command
 
 
-def test_recreation_command_leaves_simple_values_unquoted(tmp_path):
+@pytest.mark.parametrize("run_name", ["", "plain_run"])
+def test_recreation_command_leaves_simple_values_unquoted(tmp_path, run_name):
     project_dir = tmp_path / "plain-experiment"
-    init_project(Init(project_dir=str(project_dir), run_name="plain_run"))
+    init_project(Init(project_dir=str(project_dir), run_name=run_name))
+
+    readme = (project_dir / "README.md").read_text()
+    assert "POSIX shell quoting" not in readme
+    assert "Windows Command Prompt (`cmd.exe`)" not in readme
 
     command = _recreation_command(project_dir)
 
-    assert "--run-name plain_run" in command
+    if run_name:
+        assert "--run-name plain_run" in command
     assert "'" not in command
+
+
+def test_recreation_command_quoting_note_for_output_root(tmp_path):
+    project_dir = tmp_path / "plain-project"
+    init_project(Init(project_dir=str(project_dir), run_name="plain_run", output_root="my outputs"))
+
+    readme = (project_dir / "README.md").read_text()
+    assert "Windows Command Prompt (`cmd.exe`)" in readme
 
 
 def test_recreation_command_is_replayable(tmp_path):
