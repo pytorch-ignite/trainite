@@ -83,6 +83,7 @@ class DataWithAutoSplit(BaseModel):
 class TrainerConfig(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     epochs: int = Field(default=3, gt=0)
+    precision: Literal["float32", "fp16", "bf16"] = "float32"
     log_every_steps: int = Field(default=10, gt=0)
     early_stopping_patience: int | None = Field(default=3, gt=0)
     inference_every_epochs: int | None = Field(default=None, gt=0)

@@ -1,7 +1,7 @@
 import html
 import logging
 
-import ignite.distributed as idist
+from accelerate import Accelerator
 import torch
 from ignite.engine import Engine, Events
 from ignite.handlers import DiskSaver
@@ -21,9 +21,9 @@ from trainite.shared.utils import (
     attach_lr_scheduler,
     build_dataloaders,
     build_model,
-    dump_config,
+    create_accelerator,
+    create_run_dir,
     instantiate,
-    make_run_dir,
     setup_best_model_checkpoint,
     setup_console_logger,
     setup_training_checkpointing,
@@ -60,10 +60,13 @@ def _flatten(output: dict[str, torch.Tensor], ignore_index: int = -100) -> tuple
 class Trainer:
     """High-level training orchestrator for decoder-only language models.
 
-    This class wires together all PyTorch-Ignite components needed for a full
-    training run:
+    This class wires together PyTorch-Ignite engines with Hugging Face Accelerate
+    for scalable, hardware-agnostic training:
 
-    * **Engines** – ``self.trainer`` runs the training loop; ``self.train_evaluator``,
+    * **Hardware & Distributed (Accelerate)** – handles device placement (CUDA/MPS/CPU),
+      multi-GPU Distributed Data Parallel (DDP), and Automatic Mixed Precision (AMP:
+      ``float32``, ``fp16``, ``bf16``) without boilerplate.
+    * **Engines (Ignite)** – ``self.trainer`` runs the training loop; ``self.train_evaluator``,
       ``self.val_evaluator``, and ``self.test_evaluator`` run evaluation.
     * **Metrics** – loss and token-accuracy are attached to each evaluator.
     * **Learning-rate schedule** – linear warm-up + linear decay.
@@ -78,8 +81,9 @@ class Trainer:
         trainer = Trainer(config)
         trainer.run()
 
-    See the PyTorch-Ignite docs for more details on Engines and Events:
-    https://pytorch-ignite.ai/concepts/
+    References:
+    * PyTorch-Ignite: https://pytorch-ignite.ai/concepts/
+    * Hugging Face Accelerate: https://huggingface.co/docs/accelerate/index
     """
 
     def __init__(self, config: ProjectConfig) -> None:
@@ -88,8 +92,14 @@ class Trainer:
         torch.manual_seed(config.seed)
         self.config: ProjectConfig = config
         self.trainer_config: TrainerConfig = config.trainer
-        # Use distributed device if available, otherwise fall back to config value
-        self.device: str | torch.device = idist.device() if config.device is None else config.device
+
+        # Setup Accelerate for device placement, mixed precision, and distributed training
+        self.accelerator: Accelerator = create_accelerator(config)
+        # Strip ordinal index for CPU (e.g. 'cpu:1' on rank 1) to prevent torch.load errors
+        self.device: torch.device = (
+            torch.device("cpu") if self.accelerator.device.type == "cpu" else self.accelerator.device
+        )
+
         # Build tokenizer from config (e.g. CharTokenizer)
         self.tokenizer = instantiate(config.preprocessor)
         # Build train/val/test DataLoaders from the data config
@@ -109,6 +119,17 @@ class Trainer:
         self.inference_num_samples = self.trainer_config.inference_num_samples
         self.max_inference_new_tokens = self.trainer_config.max_inference_new_tokens
         self.criterion = instantiate(config.loss)
+        self.ignore_index: int = getattr(self.criterion, "ignore_index", -100)
+
+        # Prepare components for distributed execution and mixed precision
+        self.model, self.optimizer, self.train_loader, self.val_loader, self.test_loader = self.accelerator.prepare(
+            self.model,
+            self.optimizer,
+            self.train_loader,
+            self.val_loader,
+            self.test_loader,
+        )
+
         self.total_iters: int = len(self.train_loader) * self.epochs
         self.trainer = Engine(self._train_step)
         self.train_evaluator = Engine(self._eval_step)
@@ -119,9 +140,8 @@ class Trainer:
         # Run evaluations at the end of each epoch to log training and validation metrics
         self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self._run_evaluations)
 
-        # Create run directory for outputs
-        self.run_dir = make_run_dir(config.output)
-        dump_config(self.config, self.run_dir / "config.yaml")
+        # Create run directory on rank 0 and broadcast to all ranks
+        self.run_dir = create_run_dir(config, self.accelerator)
 
         # Attach loggers for console
         self.logger = setup_console_logger(
@@ -152,47 +172,54 @@ class Trainer:
             "trainer_metric_names": ["batch_loss"],
             "evaluator_metric_names": ["loss", "token_accuracy"],
         }
-        if config.logger == "clearml":
-            self.exp_logger = setup_clearml_logging(
-                **logging_kwargs,
-                project_name=config.project_name,
-                task_name=self.run_dir.name,
+        self.exp_logger = None
+        if self.accelerator.is_main_process:
+            if config.logger == "clearml":
+                self.exp_logger = setup_clearml_logging(
+                    **logging_kwargs,
+                    project_name=config.project_name,
+                    task_name=self.run_dir.name,
+                )
+                self.exp_logger.get_task().upload_artifact(
+                    name="config.yaml", artifact_object=str(self.run_dir / "config.yaml")
+                )
+            else:
+                self.exp_logger = setup_tb_logging(
+                    output_path=str(self.run_dir / "tensorboard"),
+                    **logging_kwargs,
+                )
+
+        # Setup save handler and checkpointing on main process only
+        if self.accelerator.is_main_process:
+            if config.logger == "clearml":
+                # Keep local checkpoints in run_dir; ClearML uses its configured output_uri for optional uploads.
+                save_handler = ClearMLSaver(
+                    logger=self.exp_logger,
+                    dirname=str(self.run_dir),
+                    output_uri=True,
+                    require_empty=False,
+                )
+            else:
+                save_handler = DiskSaver(dirname=str(self.run_dir), require_empty=False)
+
+            # Unwrap model before checkpointing to save clean weights without distributed ('module.') prefixes
+            unwrapped_model: torch.nn.Module = self.accelerator.unwrap_model(self.model)
+            self.best_checkpoint = setup_best_model_checkpoint(
+                self.trainer,
+                self.val_evaluator,
+                {"model": unwrapped_model, "optimizer": self.optimizer},
+                save_handler,
+                score_function=score_function,
+                score_name="val_loss",
             )
-            self.exp_logger.get_task().upload_artifact(
-                name="config.yaml", artifact_object=str(self.run_dir / "config.yaml")
+            self.last_checkpoint = setup_training_checkpointing(
+                self.trainer,
+                {"model": unwrapped_model, "optimizer": self.optimizer},
+                save_handler,
             )
         else:
-            self.exp_logger = setup_tb_logging(
-                output_path=str(self.run_dir / "tensorboard"),
-                **logging_kwargs,
-            )
-
-        # Setup save handler
-        if config.logger == "clearml":
-            # Keep local checkpoints in run_dir; ClearML uses its configured output_uri for optional uploads.
-            save_handler = ClearMLSaver(
-                logger=self.exp_logger,
-                dirname=str(self.run_dir),
-                output_uri=True,
-                require_empty=False,
-            )
-        else:
-            save_handler = DiskSaver(dirname=str(self.run_dir), require_empty=False)
-
-        # Attach checkpointing
-        self.best_checkpoint = setup_best_model_checkpoint(
-            self.trainer,
-            self.val_evaluator,
-            {"model": self.model, "optimizer": self.optimizer},
-            save_handler,
-            score_function=score_function,
-            score_name="val_loss",
-        )
-        self.last_checkpoint = setup_training_checkpointing(
-            self.trainer,
-            {"model": self.model, "optimizer": self.optimizer},
-            save_handler,
-        )
+            self.best_checkpoint = None
+            self.last_checkpoint = None
         # Attach inference logger if inference logging is enabled
         if self.inference_every_epochs is not None:
             self.attach_inference_logger()
@@ -206,6 +233,9 @@ class Trainer:
 
         ``set_to_none=True`` in ``zero_grad`` frees gradient memory instead of filling
         it with zeros, which is slightly faster and uses less memory.
+
+        ``accelerator.backward(loss)`` and ``accelerator.clip_grad_norm_`` handle loss
+        scaling and gradient synchronization across distributed processes.
 
         The tensors in the returned dict are ``detach()``-ed so that the compute graph
         is released before they are consumed by metrics or loggers.
@@ -222,10 +252,11 @@ class Trainer:
         self.optimizer.zero_grad(set_to_none=True)
         logits = self.model(inputs, attention_mask=attention_mask)
         loss = self.criterion(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
-        loss.backward()
+
+        self.accelerator.backward(loss)
 
         if self.grad_clip_norm is not None:
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
+            self.accelerator.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
 
         self.optimizer.step()
         return {
@@ -255,6 +286,14 @@ class Trainer:
         if attention_mask is not None:
             attention_mask = attention_mask.to(self.device)
         logits = self.model(inputs, attention_mask=attention_mask)
+
+        # Pad across processes along sequence dimension (dim=1) if variable lengths exist across ranks
+        if self.accelerator.use_distributed:
+            logits = self.accelerator.pad_across_processes(logits, dim=1, pad_index=0)
+            targets = self.accelerator.pad_across_processes(targets, dim=1, pad_index=self.ignore_index)
+
+        # Gather across all ranks and drop duplicated padding samples on the last batch
+        logits, targets = self.accelerator.gather_for_metrics((logits, targets))
         return {"logits": logits, "targets": targets}
 
     def _run_evaluations(self, engine: Engine) -> None:
@@ -292,7 +331,8 @@ class Trainer:
             if self.test_loader:
                 self.test()
         finally:
-            self.exp_logger.close()
+            if self.exp_logger is not None:
+                self.exp_logger.close()
 
     def test(self, test_loader: DataLoader | None = None) -> None:
         loader = test_loader or self.test_loader
@@ -300,14 +340,20 @@ class Trainer:
             self.logger.warning("No test loader provided. Skipping testing.")
             return
 
+        self.accelerator.wait_for_everyone()
         # Load best model if available
         checkpoint_handler = self.best_checkpoint
+        checkpoint_path = None
         if checkpoint_handler and checkpoint_handler.last_checkpoint:
             checkpoint_path = checkpoint_handler.last_checkpoint
+        elif (self.run_dir / "best.pt").exists():
+            checkpoint_path = self.run_dir / "best.pt"
 
+        if checkpoint_path is not None:
             self.logger.info("Loading best model for testing from %s", checkpoint_path)
             checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
-            self.model.load_state_dict(checkpoint["model"])
+            unwrapped_model: torch.nn.Module = self.accelerator.unwrap_model(self.model)
+            unwrapped_model.load_state_dict(checkpoint["model"])
         else:
             self.logger.warning("No best model checkpoint found. Using current model for testing.")
 
@@ -339,11 +385,9 @@ class Trainer:
         # Running average loss tracked per training iteration (logged in console)
         RunningAverage(output_transform=lambda output: output["loss"]).attach(self.trainer, "batch_loss")
 
-        ignore_index = getattr(self.criterion, "ignore_index", -100)
-
         # Shared transform: flatten and filter out ignored positions for both metrics
         def transform_fn(output):
-            return _flatten(output, ignore_index=ignore_index)
+            return _flatten(output, ignore_index=self.ignore_index)
 
         metrics = {}
         for prefix, evaluator in [
@@ -351,8 +395,8 @@ class Trainer:
             ("val", self.val_evaluator),
             ("test", self.test_evaluator),
         ]:
-            loss = Loss(self.criterion, output_transform=transform_fn)
-            token_acc = Accuracy(output_transform=transform_fn)
+            loss = Loss(self.criterion, output_transform=transform_fn, device=self.device)
+            token_acc = Accuracy(output_transform=transform_fn, device=self.device)
 
             loss.attach(evaluator, "loss")
             token_acc.attach(evaluator, "token_accuracy")
@@ -379,6 +423,8 @@ class Trainer:
             )
 
     def _log_text(self, tag: str, text: str, step: int) -> None:
+        if self.exp_logger is None:
+            return
         # Both backends escape HTML/text in the caller; clearml uses report_text, TB uses markdown.
         if self.config.logger == "clearml":
             self.exp_logger.report_text(f"[{tag}] Step {step}:\n{text}")
@@ -386,6 +432,8 @@ class Trainer:
             self.exp_logger.writer.add_text(tag, text, global_step=step)
 
     def _log_inference(self, engine: Engine, loader: DataLoader, name: str) -> None:
+        if not self.accelerator.is_main_process:
+            return
         self.logger.info(f"Epoch {engine.state.epoch}: Running inference on {name} samples...")
 
         pad_token_id = getattr(self.tokenizer, "pad_token_id", 0)
@@ -492,7 +540,8 @@ class Trainer:
             Tensor containing the full token IDs (prompt + newly generated tokens)
             of shape (batch, prompt_len + new_tokens).
         """
-        self.model.eval()
+        unwrapped_model = self.accelerator.unwrap_model(self.model)
+        unwrapped_model.eval()
 
         eos_id = self.tokenizer.eos_token_id
 
@@ -500,7 +549,7 @@ class Trainer:
         generated = input_ids.clone()
 
         for _ in range(max_new_tokens):
-            logits = self.model(generated, attention_mask=attention_mask)
+            logits = unwrapped_model(generated, attention_mask=attention_mask)
             # Take the logits at the last position — this is the prediction for the next token
             next_token_logits = logits[:, -1, :]
             # Greedy decoding: pick the highest-probability token at each step
