@@ -3,11 +3,7 @@
 > Generated with Trainite v{{trainite_version}} using:
 > ```bash
 > {{recreation_command}}
-> ```
->
-> The command above uses POSIX shell quoting. In Windows Command Prompt (`cmd.exe`),
-> replace single quotes around argument values with double quotes (for example,
-> `--run-name 'my great run'` becomes `--run-name "my great run"`).
+> ```{{recreation_command_quoting_note}}
 
 Welcome to your new Trainite-generated training project!
 
