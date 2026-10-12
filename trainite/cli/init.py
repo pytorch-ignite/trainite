@@ -290,10 +290,19 @@ def _build_templates(
     model_names_str = ", ".join(spec.name for spec in model_specs)
     model_docs_str = "\n\n".join(f"#### {spec.name}\n{_docs(spec)}" for spec in model_specs)
 
+    quoting_note = ""
+    if "'" in recreation_command:
+        quoting_note = (
+            "\n>\n> The command above uses POSIX shell quoting. In Windows Command Prompt (`cmd.exe`),\n"
+            "> replace single quotes around argument values with double quotes (for example,\n"
+            "> `--run-name 'my great run'` becomes `--run-name \"my great run\"`)."
+        )
+
     readme_replacements = [
         ("{{project_name}}", project_name),
         ("{{trainite_version}}", TRAINITE_VERSION),
         ("{{recreation_command}}", recreation_command),
+        ("{{recreation_command_quoting_note}}", quoting_note),
         ("{{model_name}}", model_names_str),
         ("{{model_docs}}", model_docs_str),
         ("{{dataset_name}}", dataset_spec.name),
