@@ -826,7 +826,7 @@ def test_decoder_trainer_distributed_two_workers(tmp_path):
 
 @pytest.mark.parametrize("ignore_index", [-100, -1])
 def test_gemma_moe_loss_training_and_evaluation(project_config, ignore_index):
-    from trainite.config.loss import Gemma4MoELossConfig
+    from trainite.config.loss import Gemma4MoELoss
     from trainite.models.gemma4_moe import Gemma4MoEModel, GemmaMoECausalLMLoss, load_balancing_loss
 
     project_config.model = cc(
@@ -840,7 +840,7 @@ def test_gemma_moe_loss_training_and_evaluation(project_config, ignore_index):
         num_experts=3,
         top_k=2,
     )
-    project_config.loss = Gemma4MoELossConfig(ignore_index=ignore_index)
+    project_config.loss = Gemma4MoELoss(ignore_index=ignore_index)
     trainer = create_trainer_from_config(project_config)
     assert isinstance(trainer.criterion, GemmaMoECausalLMLoss)
     assert trainer.criterion.aux_loss_coef == GemmaMoECausalLMLoss().aux_loss_coef == 0.01

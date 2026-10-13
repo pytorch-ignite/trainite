@@ -2,7 +2,7 @@ from trainite.config.base import LossConfig
 from pydantic import Field
 
 
-class Gemma4MoELossConfig(LossConfig):
+class Gemma4MoELoss(LossConfig):
     target: str = Field(
         default="trainite.models.gemma4_moe.GemmaMoECausalLMLoss",
         alias="_target_",
