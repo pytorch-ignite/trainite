@@ -822,3 +822,47 @@ def test_decoder_trainer_distributed_two_workers(tmp_path):
     ]
     res = subprocess.run(cmd, capture_output=True, text=True)
     assert res.returncode == 0, f"Distributed run failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+
+
+@pytest.mark.parametrize("ignore_index", [-100, -1])
+def test_gemma_moe_loss_training_and_evaluation(project_config, ignore_index):
+    from trainite.config.loss import Gemma4MoELoss
+    from trainite.models.gemma4_moe import Gemma4MoEModel, GemmaMoECausalLMLoss, load_balancing_loss
+
+    project_config.model = cc(
+        Gemma4MoEModel,
+        hidden_size=8,
+        num_layers=1,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        dense_intermediate_size=12,
+        expert_dim=4,
+        num_experts=3,
+        top_k=2,
+    )
+    project_config.loss = Gemma4MoELoss(ignore_index=ignore_index)
+    trainer = create_trainer_from_config(project_config)
+    assert isinstance(trainer.criterion, GemmaMoECausalLMLoss)
+    assert trainer.criterion.aux_loss_coef == GemmaMoECausalLMLoss().aux_loss_coef == 0.01
+    assert trainer.ignore_index == ignore_index
+    batch = {
+        "input_ids": torch.randint(1, 10, (2, 4), device=trainer.device),
+        "labels": torch.randint(1, 10, (2, 4), device=trainer.device),
+        "attention_mask": torch.ones(2, 4, device=trainer.device, dtype=torch.long),
+    }
+    batch["attention_mask"][0, 0] = 0
+    batch["labels"][0, 0] = ignore_index
+    with mock.patch.object(trainer.criterion, "forward", wraps=trainer.criterion.forward) as loss_spy:
+        output = trainer._train_step(trainer.trainer, batch)
+    logits, labels, infos = loss_spy.call_args.args
+    expected = trainer.criterion.cross_entropy(logits.reshape(-1, 10), labels.reshape(-1))
+    expected += trainer.criterion.aux_loss_coef * load_balancing_loss(infos)
+    torch.testing.assert_close(output["loss"], expected.detach())
+    router_grad = trainer.accelerator.unwrap_model(trainer.model).layers[0].moe.router.weight.grad
+    assert router_grad is not None and torch.isfinite(router_grad).all() and router_grad.abs().sum() > 0
+    trainer.val_evaluator.run([batch])
+    evaluated = trainer.val_evaluator.state.output
+    flat_logits, flat_targets = _flatten(evaluated, ignore_index=ignore_index)
+    expected_eval = trainer.criterion.cross_entropy(flat_logits, flat_targets).item()
+    assert trainer.val_evaluator.state.metrics["loss"] == pytest.approx(expected_eval)
+    assert "token_accuracy" in trainer.val_evaluator.state.metrics

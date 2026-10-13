@@ -236,6 +236,65 @@ def test_gemma4_moe_routes_and_combines_top_k_experts():
     assert torch.allclose(actual, expected)
 
 
+@pytest.mark.parametrize("top_k", [1, 2, 3])
+def test_moe_router_statistics_mask_padding(top_k):
+    torch.manual_seed(0)
+    moe = Gemma4MoE(hidden_size=8, expert_dim=4, num_experts=3, top_k=top_k)
+    x = torch.randn(5, 8)
+    mask = torch.tensor([0, 1, 1, 0, 1], dtype=torch.bool)
+    output, (probs, fractions) = moe(x, return_router_info=True, token_mask=mask)
+    logits = moe.router(moe.router_norm(x) * moe.router_scale * (8**-0.5)).float()
+    indices = logits.topk(top_k, dim=-1).indices
+    expected = F.one_hot(indices[mask], num_classes=3).float().mean(dim=(0, 1))
+    assert torch.allclose(output, moe(x))
+    assert torch.allclose(probs, logits[mask].softmax(-1).mean(0))
+    assert torch.allclose(fractions, expected)
+    infos = torch.stack((probs, fractions)).unsqueeze(0)
+    loss = gemma4_moe.LoadBalancingLoss()(infos)
+    assert torch.allclose(loss, gemma4_moe.load_balancing_loss(infos))
+    assert torch.allclose(loss, 3 * (probs * expected).sum())
+    loss.backward()
+    assert moe.router.weight.grad is not None
+    assert torch.isfinite(moe.router.weight.grad).all()
+    _, empty_info = moe(x, return_router_info=True, token_mask=torch.zeros_like(mask))
+    assert gemma4_moe.load_balancing_loss(torch.stack(empty_info).unsqueeze(0)).item() == 0
+
+
+def test_moe_causal_lm_loss_combines_cross_entropy_and_balancing():
+    torch.manual_seed(0)
+    logits = torch.randn(2, 3, 5, requires_grad=True)
+    labels = torch.tensor([[-100, 1, 2], [3, 4, 0]])
+    router_logits = torch.randn(4, 3, requires_grad=True)
+    probs = router_logits.softmax(-1).mean(0)
+    infos = torch.stack((probs, torch.tensor([0.5, 0.25, 0.25]))).unsqueeze(0)
+    criterion = gemma4_moe.GemmaMoECausalLMLoss(aux_loss_coef=0.02)
+    loss = criterion(logits, labels, infos)
+    expected = F.cross_entropy(logits.reshape(-1, 5), labels.reshape(-1))
+    expected = expected + 0.02 * gemma4_moe.load_balancing_loss(infos)
+    assert torch.allclose(loss, expected)
+    loss.backward()
+    assert logits.grad is not None
+    assert router_logits.grad is not None
+    assert router_logits.grad.abs().sum() > 0
+
+
+def test_model_returns_per_layer_router_statistics():
+    model = make_moe_model()
+    input_ids = torch.tensor([[0, 1, 2], [3, 4, 5]])
+    mask = input_ids != 0
+    logits, infos = model(input_ids, mask, return_router_info=True)
+    assert torch.allclose(logits, model(input_ids, mask))
+    assert isinstance(infos, torch.Tensor)
+    assert infos.shape == (len(model.layers), 2, 3)
+    for probs, fractions in infos:
+        assert probs.shape == fractions.shape == (3,)
+        assert torch.allclose(probs.sum(), torch.tensor(1.0))
+        assert torch.allclose(fractions.sum(), torch.tensor(1.0))
+    gemma4_moe.load_balancing_loss(infos).backward()
+    for layer in model.layers:
+        assert layer.moe.router.weight.grad.abs().sum() > 0
+
+
 def test_gemma4_dense_block_forward():
     block = Gemma4DenseBlock(
         hidden_size=32,
