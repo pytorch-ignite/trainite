@@ -245,8 +245,7 @@ sky launch sky.yaml
 
 | Name              | Description                                                                                                                                                                |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `decoder-trainer` | Standard supervised training (next-token prediction). Includes LR warmup + linear decay, checkpointing, early stopping, TensorBoard logging, and inference sample logging. |
-
+| `decoder-trainer` | Standard supervised training (next-token prediction). Includes LR warmup + linear decay, checkpointing, early stopping, TensorBoard logging, inference sample logging, and mixed precision (`fp16`/`bf16`) with Hugging Face Accelerate for distributed training. See the [training guide](docs/training.md) for details. |
 ---
 
 ## Configuration

@@ -107,11 +107,18 @@ Note that `dataloader` blocks accept standard PyTorch `DataLoader` options (such
 
 **`device`** — `cpu`, `cuda`, or `null` to let Trainite pick automatically via PyTorch-Ignite's distributed utilities.
 
+### Mixed precision and distributed training
+
+The `decoder-trainer` supports mixed precision through Hugging Face Accelerate. Set `trainer.precision` in `config.yaml` to `float32` (default), `fp16`, or `bf16`. Choose a precision supported by your hardware.
+
+Accelerate also supports multi-GPU distributed training. See the trainer template for launch instructions.
+
 ### Starter component choices
 
 `trainite init` currently provides:
 
-- Models: `rope-transformer`, `basic-transformer`
+- Models: `rope-transformer`, `basic-transformer`, `gemma4-dense`, `gemma4-moe`
+
 - Datasets: `string-reverse`, `counting`, `hugging-face`, `wikitext`, `ultrachat-200k`, `python-edu`
 - Trainer: `decoder-trainer`
 
