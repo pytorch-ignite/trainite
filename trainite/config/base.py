@@ -37,7 +37,7 @@ class OptimizerConfig(BaseModel):
 
 class LossConfig(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
-    target: str = Field(alias="_target_", default="torch.nn.CrossEntropyLoss")
+    target: str = Field(alias="_target_", default="trainite.models.basic_transformer.CausalLMCrossEntropyLoss")
     ignore_index: int = -100
 
 

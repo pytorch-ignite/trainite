@@ -218,6 +218,9 @@ def test_init_generates_valid_project(models: list[str], dataset: str, trainer: 
         assert generated_config["output"]["run_name"] == (f"{models[0]}__{dataset}".replace("-", "_"))
         assert generated_config["model"]["_target_"].startswith("models.")
         assert generated_config["model"]["collate_fn_target"].startswith("models.")
+        loss_symbol = "GemmaMoECausalLMLoss" if models[0] == "gemma4-moe" else "CausalLMCrossEntropyLoss"
+        assert generated_config["loss"]["_target_"] == f"models.{model_specs[0].name}.{loss_symbol}"
+        assert not (project_dir / "losses").exists()
 
         # Check if python files are parseable
         python_files = [
@@ -507,6 +510,7 @@ def test_primary_model_drives_generated_config(tmp_path):
     # not first in the selection.
     assert "basic_transformer" in generated_config["model"]["_target_"]
     assert "basic_transformer" in generated_config["model"]["collate_fn_target"]
+    assert generated_config["loss"]["_target_"] == "models.basic_transformer.CausalLMCrossEntropyLoss"
     assert generated_config["output"]["run_name"] == "basic_transformer__string_reverse"
 
     # Both selected models are still generated.

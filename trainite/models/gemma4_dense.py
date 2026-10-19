@@ -471,3 +471,10 @@ class CausalLMCollateFn:
             "attention_mask": left_pad([item.attention_mask for item in batch], 0),
             "labels": left_pad([item.train_label_ids for item in batch], -100),
         }
+
+
+class CausalLMCrossEntropyLoss(nn.CrossEntropyLoss):
+    """Cross-entropy for logits with vocabulary in the last dimension."""
+
+    def forward(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        return super().forward(logits.reshape(-1, logits.size(-1)), labels.reshape(-1))

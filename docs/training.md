@@ -32,7 +32,7 @@ optimizer:
   lr: 0.0003
 
 loss:
-  _target_: torch.nn.CrossEntropyLoss
+  _target_: models.rope_transformer.CausalLMCrossEntropyLoss
   ignore_index: -100
 
 data:
@@ -88,7 +88,7 @@ or GPT-2 tokenizer loader (`preprocessors.gpt2_tokenizer.load_gpt2_tokenizer`), 
 
 **`optimizer`** — Defaults to `torch.optim.AdamW` with `lr=0.001` if not specified.
 
-**`loss`** — Defaults to `torch.nn.CrossEntropyLoss` with `ignore_index=-100` if not specified. Point `_target_` at a custom loss (defined next to its model or in an installed package) to override it; remaining keys are passed to its constructor.
+**`loss`** — Defaults to the primary model’s loss wrapper with `ignore_index=-100` if not specified. Point `_target_` at a custom loss (defined next to its model or in an installed package) to override it; remaining keys are passed to its constructor. Custom losses receive unflattened model outputs and labels. When generating multiple models, the primary model selects the default loss. If you switch the model later, update the loss target to the class in that model’s file too.
 
 **`data`** — Datasets, transforms, and dataloaders. Trainite supports two ways to set up your data splits:
 

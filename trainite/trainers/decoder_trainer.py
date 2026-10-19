@@ -121,6 +121,7 @@ class Trainer:
         self.criterion = instantiate(config.loss)
         self.ignore_index: int = getattr(self.criterion, "ignore_index", -100)
         self.requires_router_info = getattr(self.criterion, "requires_router_info", False)
+        self.train_forward_kwargs = {"return_router_info": True} if self.requires_router_info else {}
 
         # Prepare components for distributed execution and mixed precision
         self.model, self.optimizer, self.train_loader, self.val_loader, self.test_loader = self.accelerator.prepare(
@@ -251,13 +252,9 @@ class Trainer:
             attention_mask = attention_mask.to(self.device)
 
         self.optimizer.zero_grad(set_to_none=True)
-        if self.requires_router_info:
-            outputs = self.model(inputs, attention_mask=attention_mask, return_router_info=True)
-            loss = self.criterion(outputs, targets)
-            logits = outputs[0]
-        else:
-            logits = self.model(inputs, attention_mask=attention_mask)
-            loss = self.criterion(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
+        outputs = self.model(inputs, attention_mask=attention_mask, **self.train_forward_kwargs)
+        logits = outputs if isinstance(outputs, torch.Tensor) else outputs[0]
+        loss = self.criterion(outputs, targets)
 
         self.accelerator.backward(loss)
 

@@ -49,6 +49,7 @@ MODEL_SPECS = {
         builder_symbol="BasicTransformerModel",
         collate_fn_target="trainite.models.basic_transformer.CausalLMCollateFn",
         readme_template_path=Path("trainite/templates/components/models/basic_transformer.md"),
+        loss_config_cls_path="trainite.config.loss.BasicTransformerLoss",
     ),
     "rope-transformer": ModelSpec(
         name="rope_transformer",
@@ -58,6 +59,7 @@ MODEL_SPECS = {
         builder_symbol="RoPETransformerModel",
         collate_fn_target="trainite.models.rope_transformer.CausalLMCollateFn",
         readme_template_path=Path("trainite/templates/components/models/rope_transformer.md"),
+        loss_config_cls_path="trainite.config.loss.RoPETransformerLoss",
     ),
     "gemma4-moe": ModelSpec(
         name="gemma4_moe",
@@ -77,6 +79,7 @@ MODEL_SPECS = {
         builder_symbol="Gemma4DenseModel",
         collate_fn_target="trainite.models.gemma4_dense.CausalLMCollateFn",
         readme_template_path=Path("trainite/templates/components/models/gemma4_dense.md"),
+        loss_config_cls_path="trainite.config.loss.Gemma4DenseLoss",
     ),
 }
 

@@ -23,7 +23,7 @@ def run() -> None:
         preprocessor=PreprocessorConfig(_target_="tests.trainers.decoder_trainer_test.DummyTokenizer"),
         model=ModelConfig(_target_="tests.trainers.decoder_trainer_test.SimpleModel"),
         optimizer=OptimizerConfig(_target_="torch.optim.SGD", lr=0.01),
-        loss=LossConfig(_target_="torch.nn.CrossEntropyLoss"),
+        loss=LossConfig(),
         data=DataConfigBase(
             train=SplitConfig(
                 dataset=DatasetConfig(_target_="tests.trainers.decoder_trainer_test.SimpleDataset", size=8),

@@ -277,7 +277,9 @@ class DoubleCELoss(nn.Module):
     def __init__(self, ignore_index=-100):
         super().__init__()
         self.ignore_index = ignore_index
-        self.ce = nn.CrossEntropyLoss(ignore_index=ignore_index)
+        from trainite.models.basic_transformer import CausalLMCrossEntropyLoss
+
+        self.ce = CausalLMCrossEntropyLoss(ignore_index=ignore_index)
 
     def forward(self, logits, targets):
         return 2 * self.ce(logits, targets)
@@ -845,6 +847,7 @@ def test_gemma_moe_loss_training_and_evaluation(project_config, ignore_index):
     assert isinstance(trainer.criterion, GemmaMoECausalLMLoss)
     assert trainer.criterion.aux_loss_coef == GemmaMoECausalLMLoss().aux_loss_coef == 0.01
     assert trainer.ignore_index == ignore_index
+    assert trainer.train_forward_kwargs == {"return_router_info": True}
     batch = {
         "input_ids": torch.randint(1, 10, (2, 4), device=trainer.device),
         "labels": torch.randint(1, 10, (2, 4), device=trainer.device),
