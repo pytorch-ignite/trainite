@@ -579,13 +579,6 @@ def load_balancing_loss(router_infos: torch.Tensor) -> torch.Tensor:
     return num_experts * (mean_probs * fractions).sum(dim=-1).mean()
 
 
-class LoadBalancingLoss(nn.Module):
-    """Mean per-layer top-k balancing loss, without coefficient scaling."""
-
-    def forward(self, router_infos: torch.Tensor) -> torch.Tensor:
-        return load_balancing_loss(router_infos)
-
-
 class GemmaMoECausalLMLoss(nn.Module):
     """Cross-entropy plus router balancing loss; labels must already align with logits."""
 
@@ -599,9 +592,9 @@ class GemmaMoECausalLMLoss(nn.Module):
 
     def forward(
         self,
-        logits: torch.Tensor,
+        outputs: tuple[torch.Tensor, torch.Tensor],
         labels: torch.Tensor,
-        router_infos: torch.Tensor,
     ) -> torch.Tensor:
+        logits, router_infos = outputs
         lm_loss = self.cross_entropy(logits.reshape(-1, logits.shape[-1]), labels.reshape(-1))
         return lm_loss + self.aux_loss_coef * load_balancing_loss(router_infos)

@@ -252,8 +252,9 @@ class Trainer:
 
         self.optimizer.zero_grad(set_to_none=True)
         if self.requires_router_info:
-            logits, router_infos = self.model(inputs, attention_mask=attention_mask, return_router_info=True)
-            loss = self.criterion(logits, targets, router_infos)
+            outputs = self.model(inputs, attention_mask=attention_mask, return_router_info=True)
+            loss = self.criterion(outputs, targets)
+            logits = outputs[0]
         else:
             logits = self.model(inputs, attention_mask=attention_mask)
             loss = self.criterion(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))

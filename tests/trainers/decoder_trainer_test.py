@@ -854,7 +854,9 @@ def test_gemma_moe_loss_training_and_evaluation(project_config, ignore_index):
     batch["labels"][0, 0] = ignore_index
     with mock.patch.object(trainer.criterion, "forward", wraps=trainer.criterion.forward) as loss_spy:
         output = trainer._train_step(trainer.trainer, batch)
-    logits, labels, infos = loss_spy.call_args.args
+    outputs, labels = loss_spy.call_args.args
+    assert isinstance(outputs, tuple)
+    logits, infos = outputs
     expected = trainer.criterion.cross_entropy(logits.reshape(-1, 10), labels.reshape(-1))
     expected += trainer.criterion.aux_loss_coef * load_balancing_loss(infos)
     torch.testing.assert_close(output["loss"], expected.detach())

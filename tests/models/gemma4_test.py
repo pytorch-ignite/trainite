@@ -250,8 +250,7 @@ def test_moe_router_statistics_mask_padding(top_k):
     assert torch.allclose(probs, logits[mask].softmax(-1).mean(0))
     assert torch.allclose(fractions, expected)
     infos = torch.stack((probs, fractions)).unsqueeze(0)
-    loss = gemma4_moe.LoadBalancingLoss()(infos)
-    assert torch.allclose(loss, gemma4_moe.load_balancing_loss(infos))
+    loss = gemma4_moe.load_balancing_loss(infos)
     assert torch.allclose(loss, 3 * (probs * expected).sum())
     loss.backward()
     assert moe.router.weight.grad is not None
@@ -268,7 +267,7 @@ def test_moe_causal_lm_loss_combines_cross_entropy_and_balancing():
     probs = router_logits.softmax(-1).mean(0)
     infos = torch.stack((probs, torch.tensor([0.5, 0.25, 0.25]))).unsqueeze(0)
     criterion = gemma4_moe.GemmaMoECausalLMLoss(aux_loss_coef=0.02)
-    loss = criterion(logits, labels, infos)
+    loss = criterion((logits, infos), labels)
     expected = F.cross_entropy(logits.reshape(-1, 5), labels.reshape(-1))
     expected = expected + 0.02 * gemma4_moe.load_balancing_loss(infos)
     assert torch.allclose(loss, expected)
