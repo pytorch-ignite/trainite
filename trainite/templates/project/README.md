@@ -3,7 +3,7 @@
 > Generated with Trainite v{{trainite_version}} using:
 > ```bash
 > {{recreation_command}}
-> ```
+> ```{{recreation_command_quoting_note}}
 
 Welcome to your new Trainite-generated training project!
 

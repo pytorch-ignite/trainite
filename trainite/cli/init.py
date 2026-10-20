@@ -1,4 +1,5 @@
 import re
+import shlex
 from pathlib import Path
 from typing import Any, Iterable, Literal, Sequence, TypeAlias
 
@@ -212,7 +213,7 @@ def _module_rewrites(sources: dict[str, Path]) -> list[tuple[str, str]]:
 
 
 def _recreation_command(config: "Init", project_name: str) -> str:
-    cmd_parts = ["trainite", "init", project_name]
+    cmd_parts = ["trainite", "init", shlex.quote(project_name)]
     models = config.model if isinstance(config.model, (tuple, list)) else (config.model,)
     cmd_parts.append(f"--model {' '.join(models)}")
     if config.primary_model and config.primary_model != models[0]:
@@ -220,9 +221,9 @@ def _recreation_command(config: "Init", project_name: str) -> str:
     cmd_parts.append(f"--dataset {config.dataset}")
     cmd_parts.append(f"--trainer {config.trainer}")
     if config.output_root != "outputs":
-        cmd_parts.append(f"--output-root {config.output_root}")
+        cmd_parts.append(f"--output-root {shlex.quote(config.output_root)}")
     if config.run_name:
-        cmd_parts.append(f"--run-name {config.run_name}")
+        cmd_parts.append(f"--run-name {shlex.quote(config.run_name)}")
     if config.sky:
         cmd_parts.append("--sky")
     return " ".join(cmd_parts)
@@ -289,10 +290,19 @@ def _build_templates(
     model_names_str = ", ".join(spec.name for spec in model_specs)
     model_docs_str = "\n\n".join(f"#### {spec.name}\n{_docs(spec)}" for spec in model_specs)
 
+    quoting_note = ""
+    if "'" in recreation_command:
+        quoting_note = (
+            "\n>\n> The command above uses POSIX shell quoting. In Windows Command Prompt (`cmd.exe`),\n"
+            "> replace single quotes around argument values with double quotes (for example,\n"
+            "> `--run-name 'my great run'` becomes `--run-name \"my great run\"`)."
+        )
+
     readme_replacements = [
         ("{{project_name}}", project_name),
         ("{{trainite_version}}", TRAINITE_VERSION),
         ("{{recreation_command}}", recreation_command),
+        ("{{recreation_command_quoting_note}}", quoting_note),
         ("{{model_name}}", model_names_str),
         ("{{model_docs}}", model_docs_str),
         ("{{dataset_name}}", dataset_spec.name),
