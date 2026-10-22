@@ -1,0 +1,64 @@
+project_name: py-edu-gemma-moe
+preprocessor:
+  _target_: preprocessors.gpt2_tokenizer.load_gpt2_tokenizer
+model:
+  _target_: models.gemma4_moe.Gemma4MoEModel
+  collate_fn_target: models.gemma4_moe.CausalLMCollateFn
+  hidden_size: 64
+  num_layers: 2
+  num_attention_heads: 4
+  num_key_value_heads: 2
+  dense_intermediate_size: 128
+  expert_dim: 64
+  num_experts: 4
+  top_k: 2
+  head_dim: 16
+  layer_types: null
+  layer_pattern: sg
+  sliding_window: 64
+  rope_theta: 10000.0
+  global_rope_theta: 1000000.0
+  rotary_fraction: 1.0
+  global_rotary_fraction: 0.25
+  global_num_key_value_heads: 2
+  global_head_dim: 16
+  global_key_equals_value: true
+  attention_dropout: 0.0
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 0.001
+loss:
+  _target_: models.gemma4_moe.GemmaMoECausalLMLoss
+  ignore_index: -100
+  aux_loss_coef: 0.01
+data:
+  dataset:
+    _target_: dataset_impl.python_edu.load_function_dataset
+    path: Avelina/python-edu-cleaned
+    dataset_size: 10000 # Maximum usable functions after length filtering; null uses all.
+    split: train
+    max_length: 512
+  transform:
+    _target_: dataset_impl.python_edu.PythonEduTransform
+    max_length: 512
+  dataloader:
+    batch_size: 32
+    shuffle: true
+    num_workers: 0
+  test_ratio: 0.1
+  val_ratio: 0.1
+trainer:
+  epochs: 3
+  precision: float32
+  log_every_steps: 10
+  early_stopping_patience: 3
+  inference_every_epochs: null
+  inference_num_samples: 5
+  max_inference_new_tokens: 16
+  grad_clip_norm: null
+output:
+  root: outputs
+  run_name: gemma4_moe__python_edu
+logger: tensorboard
+seed: 42
+device: mps

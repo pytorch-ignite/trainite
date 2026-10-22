@@ -52,6 +52,7 @@ package = true
 default-groups = []
 
 [tool.pyrefly]
+search-path = ["py-edu-gemma-moe"]
 project-excludes = [
     "**/venv/**",
     "**/.venv/**",
