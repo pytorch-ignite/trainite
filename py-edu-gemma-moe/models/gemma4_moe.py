@@ -488,6 +488,11 @@ class Gemma4MoEModel(nn.Module):
         )
 
         self.token_embedding = nn.Embedding(vocab_size, hidden_size, padding_idx=pad_token_id)
+        # Gemma-style small init: ``embedding_scale`` assumes a unit-norm embedding,
+        # so the default N(0, 1) init would make initial logits ~8x too large.
+        nn.init.normal_(self.token_embedding.weight, std=0.02)
+        if pad_token_id is not None:
+            self.token_embedding.weight.data[pad_token_id].zero_()
         self.embedding_scale = hidden_size**0.5
         self.final_logit_softcap = final_logit_softcap
         layers = []

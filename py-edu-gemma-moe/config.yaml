@@ -1,6 +1,8 @@
 project_name: py-edu-gemma-moe
 preprocessor:
-  _target_: preprocessors.gpt2_tokenizer.load_gpt2_tokenizer
+  _target_: preprocessors.python_bpe.load_python_bpe_tokenizer
+  vocab_size: 8192
+  cache_dir: outputs/tokenizers
 model:
   _target_: models.gemma4_moe.Gemma4MoEModel
   collate_fn_target: models.gemma4_moe.CausalLMCollateFn
@@ -35,7 +37,7 @@ data:
   dataset:
     _target_: dataset_impl.python_edu.load_function_dataset
     path: Avelina/python-edu-cleaned
-    dataset_size: 10000 # Maximum usable functions after length filtering; null uses all.
+    dataset_size: 100 # Maximum usable functions after length filtering; null uses all.
     split: train
     max_length: 512
   transform:
@@ -48,13 +50,16 @@ data:
   test_ratio: 0.1
   val_ratio: 0.1
 trainer:
-  epochs: 3
+  epochs: 10
   precision: float32
   log_every_steps: 10
   early_stopping_patience: 3
   inference_every_epochs: null
   inference_num_samples: 5
   max_inference_new_tokens: 16
+  benchmark_every_epochs: 2
+  benchmark_num_samples: 5
+  max_benchmark_new_tokens: 512
   grad_clip_norm: null
 output:
   root: outputs

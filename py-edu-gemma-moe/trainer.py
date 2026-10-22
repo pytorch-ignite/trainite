@@ -1,3 +1,4 @@
+import ast
 import html
 import logging
 
@@ -59,6 +60,52 @@ def _flatten(output: dict[str, torch.Tensor], ignore_index: int = -100) -> tuple
     return logits[mask], targets[mask]
 
 
+def _truncate_completion(text: str) -> str:
+    """Cut a generated body where it dedents into a new top-level statement."""
+    if not text.strip():
+        return ""
+    lines = text.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if line.startswith(("def ", "class ", "@", "#")):
+            return "".join(lines[:i]).rstrip() + "\n"
+    return text.rstrip() + "\n"
+
+
+def _prompt_entry_point(prompt: str) -> str | None:
+    """Return the function name defined by a prompt, or None if it does not parse."""
+    try:
+        tree = ast.parse(prompt)
+    except (SyntaxError, ValueError, RecursionError):
+        return None
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return node.name
+    return None
+
+
+def _compile_stats(prompt: str, completion: str, entry_point: str | None) -> tuple[bool, bool]:
+    """Score a generated body without executing it.
+
+    Returns ``(compiles, has_body)`` where ``has_body`` requires the prompted
+    function to still exist with a statement beyond its docstring, so a model
+    that emits nothing does not count as a success.
+    """
+    try:
+        tree = ast.parse(prompt + completion)
+        compile(tree, "<generated>", "exec")
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return False, False
+    function = next(
+        (
+            node
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == entry_point
+        ),
+        None,
+    )
+    return True, function is not None and len(function.body) >= 2
+
+
 class Trainer:
     """High-level training orchestrator for decoder-only language models.
 
@@ -102,8 +149,14 @@ class Trainer:
             torch.device("cpu") if self.accelerator.device.type == "cpu" else self.accelerator.device
         )
 
-        # Build tokenizer from config (e.g. CharTokenizer)
-        self.tokenizer = instantiate(config.preprocessor)
+        # Build tokenizer from config; dataset-aware preprocessors (e.g. the BPE
+        # tokenizer) train on the raw corpus, others ignore the injected arguments.
+        dataset_config = config.data.dataset if hasattr(config.data, "dataset") else config.data.train.dataset
+        self.tokenizer = instantiate(
+            config.preprocessor,
+            dataset_path=dataset_config.path,
+            split=getattr(dataset_config, "split", "train"),
+        )
         # Build train/val/test DataLoaders from the data config
         self.train_loader, self.val_loader, self.test_loader = build_dataloaders(
             config.data,
@@ -120,6 +173,9 @@ class Trainer:
         self.inference_every_epochs = self.trainer_config.inference_every_epochs
         self.inference_num_samples = self.trainer_config.inference_num_samples
         self.max_inference_new_tokens = self.trainer_config.max_inference_new_tokens
+        self.benchmark_every_epochs = self.trainer_config.benchmark_every_epochs
+        self.benchmark_num_samples = self.trainer_config.benchmark_num_samples
+        self.max_benchmark_new_tokens = self.trainer_config.max_benchmark_new_tokens
         self.criterion = instantiate(config.loss)
         self.ignore_index: int = getattr(self.criterion, "ignore_index", -100)
         self.requires_router_info = getattr(self.criterion, "requires_router_info", False)
@@ -227,6 +283,9 @@ class Trainer:
         # Attach inference logger if inference logging is enabled
         if self.inference_every_epochs is not None:
             self.attach_inference_logger()
+        # Attach compile-only benchmark if enabled
+        if self.benchmark_every_epochs is not None:
+            self.attach_benchmark()
 
     def _train_step(self, engine: Engine, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Run a single training iteration: forward pass, loss, backward, optimizer step.
@@ -342,8 +401,85 @@ class Trainer:
             val_metrics["perplexity"],
         )
         if self.requires_router_info:
-            for name in self.trainer_metric_names[1:]:
+            for name in ("lm_loss", "aux_loss"):
                 self.logger.info("%s=%.4f", name, engine.state.metrics[name])
+            model = self.accelerator.unwrap_model(self.model)
+            for layer, block in enumerate(model.layers):
+                shares = " ".join(
+                    f"{engine.state.metrics[f'router/layer_{layer}/expert_{expert}']:.3f}"
+                    for expert in range(block.moe.num_experts)
+                )
+                self.logger.info("router/layer_%d=[%s]", layer, shares)
+
+    def attach_benchmark(self) -> None:
+        """Register the compile-only benchmark on the training engine.
+
+        Runs every ``benchmark_every_epochs`` epochs: greedily completes fixed
+        validation prompts and scores syntax validity. Nothing is executed, so no
+        sandbox is needed; execution-based scoring belongs to an offline benchmark.
+        """
+        self.trainer.add_event_handler(Events.EPOCH_COMPLETED(every=self.benchmark_every_epochs), self._run_benchmark)
+
+    def _log_scalar(self, tag: str, value: float, step: int) -> None:
+        if self.exp_logger is None:
+            return
+        if self.config.logger == "clearml":
+            title, _, series = tag.partition("/")
+            self.exp_logger.get_task().get_logger().report_scalar(title, series, value, step)
+        else:
+            self.exp_logger.writer.add_scalar(tag, value, global_step=step)
+
+    def _run_benchmark(self, engine: Engine) -> None:
+        """Greedily complete fixed validation prompts and score the generated bodies.
+
+        Prompts use evenly spaced, deterministic dataset indices so every run
+        compares the same inputs. ``compile`` never executes generated code.
+        """
+        self.accelerator.wait_for_everyone()
+        if self.accelerator.is_main_process:
+            dataset = self.val_loader.dataset
+            size = len(dataset)  # type: ignore[arg-type]
+            num_samples = min(self.benchmark_num_samples, size)
+            indices = [round(i * (size - 1) / max(num_samples - 1, 1)) for i in range(num_samples)]
+            items = [dataset[i] for i in indices]
+
+            prompt_ids = [item.eval_input_ids for item in items]
+            pad_token_id = getattr(self.tokenizer, "pad_token_id", 0)
+            input_ids = (
+                torch.nn.utils.rnn.pad_sequence(
+                    [ids.flip(0) for ids in prompt_ids], batch_first=True, padding_value=pad_token_id
+                )
+                .flip(1)
+                .to(self.device)
+            )
+            attention_mask = (
+                torch.nn.utils.rnn.pad_sequence(
+                    [torch.ones_like(ids, dtype=torch.long).flip(0) for ids in prompt_ids],
+                    batch_first=True,
+                    padding_value=0,
+                )
+                .flip(1)
+                .to(self.device)
+            )
+            sequences = self.generate(
+                input_ids=input_ids,
+                max_new_tokens=self.max_benchmark_new_tokens,
+                attention_mask=attention_mask,
+            )
+            completions = [
+                _truncate_completion(self.tokenizer.decode(tokens.tolist(), skip_special_tokens=True))
+                for tokens in sequences[:, input_ids.shape[1] :]
+            ]
+            scores = [
+                _compile_stats(item.source, completion, _prompt_entry_point(item.source))
+                for item, completion in zip(items, completions)
+            ]
+            compile_rate = sum(compiles for compiles, _ in scores) / num_samples
+            body_rate = sum(has_body for _, has_body in scores) / num_samples
+            self._log_scalar("bench/compile_rate", compile_rate, engine.state.epoch)
+            self._log_scalar("bench/body_rate", body_rate, engine.state.epoch)
+            self.logger.info("epoch=%s bench_compile=%.2f bench_body=%.2f", engine.state.epoch, compile_rate, body_rate)
+        self.accelerator.wait_for_everyone()
 
     def run(self) -> None:
         self.logger.info("starting run in %s", self.run_dir)

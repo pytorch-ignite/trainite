@@ -150,10 +150,16 @@ These statistics cover all nonpadding input tokens, including prompts, and are
 combined across ranks weighted by real-token counts. They describe training
 routing, not validation routing. Smoothed values are not whole-epoch counts.
 
+Every `benchmark_every_epochs` epochs the trainer also greedily completes fixed
+validation prompts and logs `bench/compile_rate` (generated source parses) and
+`bench/body_rate` (it also defines the prompted function with a body beyond the
+docstring). Generated code is never executed during training; execution-based
+scoring is a separate offline benchmark.
+
 All metrics are written to TensorBoard or ClearML. Console epoch summaries include
-perplexity, separate training loss components, and expert usage. Run the offline
-checks with `uv run python -m unittest test_metrics.py`. Execution-based code
-correctness metrics are a separate step.
+perplexity, separate training loss components, expert usage, and benchmark rates.
+Run the offline checks with `uv run python -m unittest test_metrics.py`.
+Execution-based code correctness metrics are a separate step.
 
 ## Experiment Logging and Checkpoints
 
@@ -477,24 +483,30 @@ If the run fails or looks unstable, check these first:
 - learning rate is not too high
 
 
-### Preprocessor: gpt2_tokenizer
-# GPT-2 Tokenizer
+### Preprocessor: python_bpe
+# Byte-level BPE Tokenizer
 
-This project uses the fast GPT-2 tokenizer from Hugging Face Transformers. Its byte-level BPE vocabulary handles
-general text more efficiently than the character tokenizer.
+The default preprocessor trains a byte-level BPE tokenizer on the raw `text` column of the configured dataset, once,
+and caches it under `outputs/tokenizers/<dataset>-<split>-<vocab>-<min_frequency>.json`. Later runs reuse that file, so token ids stay
+stable. Training runs before functions are filtered by token length, so the corpus is not biased by the tokenizer it
+produces.
 
-GPT-2 has no dedicated padding token, so `load_gpt2_tokenizer` reuses its end-of-text token for padding. Trainite's
-attention masks still distinguish padding from real end-of-text tokens.
+An 8192-token code vocabulary keeps the output layer small, which matters for memory: logits scale linearly with
+vocabulary size. Byte-level BPE round-trips indentation and arbitrary characters without unknown tokens, and padding
+reuses the end-of-sequence token.
 
 ## Minimal config
 
 ```yaml
 preprocessor:
-  _target_: preprocessors.gpt2_tokenizer.load_gpt2_tokenizer
+  _target_: preprocessors.python_bpe.load_python_bpe_tokenizer
+  vocab_size: 8192
+  cache_dir: outputs/tokenizers
 ```
 
-Edit `preprocessors/gpt2_tokenizer.py` if you need another pretrained tokenizer. Keep in mind that a larger vocabulary
-also makes Trainite's embedding and output layers larger.
+`dataset_path` and `split` are injected from `data.dataset`, so the tokenizer always trains on the corpus the run
+actually uses. Delete the cache file to retrain after changing the corpus or merge settings. The pretrained GPT-2
+tokenizer remains available as `preprocessors.gpt2_tokenizer.load_gpt2_tokenizer` (50257 tokens, no training).
 
 
 ## Understanding `utils.py`

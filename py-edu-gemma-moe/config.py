@@ -89,6 +89,9 @@ class TrainerConfig(BaseModel):
     inference_every_epochs: int | None = Field(default=None, gt=0)
     inference_num_samples: int = Field(default=5, gt=0)
     max_inference_new_tokens: int = Field(default=16, gt=0)
+    benchmark_every_epochs: int | None = Field(default=None, gt=0)
+    benchmark_num_samples: int = Field(default=10, gt=0)
+    max_benchmark_new_tokens: int = Field(default=128, gt=0)
     grad_clip_norm: float | None = Field(default=None, gt=0.0)
 
 

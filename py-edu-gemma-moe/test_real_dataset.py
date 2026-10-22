@@ -28,7 +28,7 @@ def main():
     config.data.dataset.split = args.source_split
     config.data.dataset.dataset_size = args.dataset_size
     config.data.dataloader.num_workers = 0
-    tokenizer = instantiate(config.preprocessor)
+    tokenizer = instantiate(config.preprocessor, dataset_path=config.data.dataset.path, split=args.source_split)
     print(
         f"Loading {config.data.dataset.path}, source split {args.source_split}; "
         f"keeping at most {args.dataset_size} usable functions",
