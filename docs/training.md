@@ -109,9 +109,25 @@ Note that `dataloader` blocks accept standard PyTorch `DataLoader` options (such
 
 ### Mixed precision and distributed training
 
-The `decoder-trainer` supports mixed precision through Hugging Face Accelerate. Set `trainer.precision` in `config.yaml` to `float32` (default), `fp16`, or `bf16`. Choose a precision supported by your hardware.
+The `decoder-trainer` uses Hugging Face Accelerate for mixed precision and multi-GPU training. Set `trainer.precision` in `config.yaml` to one of:
 
-Accelerate also supports multi-GPU distributed training. See the trainer template for launch instructions.
+- `float32` (default) for full precision.
+- `fp16` for half precision on supported GPUs.
+- `bf16` for bfloat16 on hardware that supports it.
+
+To use multiple GPUs, install the project dependencies, then run the launcher from an example directory containing `main.py` and `config.yaml`. Set `--num_processes` to the number of GPUs to use:
+
+```bash
+uv run accelerate launch --num_processes=4 main.py config.yaml
+```
+
+Without `uv`, use:
+
+```bash
+accelerate launch --num_processes=4 main.py config.yaml
+```
+
+For example, use `--num_processes=2` to train on two GPUs. Leave `device` unset or set it to `null` in the config so Accelerate can assign a GPU to each process; an explicit GPU device such as `cuda:0` cannot be used for a distributed run. Accelerate launches one process per GPU, partitions the training data, and synchronizes gradients. Checkpoints and evaluation output are written by the main process.
 
 ### Starter component choices
 
