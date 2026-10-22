@@ -99,3 +99,11 @@ uv run pre-commit run --all-files
 - Branch from `main`
 - Write tests for new functionality
 - Ensure all CI checks pass (`uv run pytest` + pre-commit)
+
+## Documentation
+
+Build the site with `uv run --group docs mkdocs build --strict`. Also inspect
+changed pages in the generated `site/` output: a strict build does not reject
+unsupported Markdown extension syntax. The current configuration uses standard
+headings, links, and fenced code blocks; tabbed content and attribute lists
+require explicit extensions in `mkdocs.yml`.

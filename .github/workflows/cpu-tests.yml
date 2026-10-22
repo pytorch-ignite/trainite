@@ -46,3 +46,6 @@ jobs:
 
       - name: Run tests
         run: uv run pytest
+
+      - name: Run model parity tests
+        run: uv run pytest -o addopts="" -m model_parity tests/models/gemma4_checkpoint_test.py

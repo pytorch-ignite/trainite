@@ -1,9 +1,11 @@
 import logging
 import py_compile
+import shlex
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 import yaml
@@ -217,6 +219,9 @@ def test_init_generates_valid_project(models: list[str], dataset: str, trainer: 
         assert generated_config["output"]["run_name"] == (f"{models[0]}__{dataset}".replace("-", "_"))
         assert generated_config["model"]["_target_"].startswith("models.")
         assert generated_config["model"]["collate_fn_target"].startswith("models.")
+        loss_symbol = "GemmaMoECausalLMLoss" if models[0] == "gemma4-moe" else "CausalLMCrossEntropyLoss"
+        assert generated_config["loss"]["_target_"] == f"models.{model_specs[0].name}.{loss_symbol}"
+        assert not (project_dir / "losses").exists()
 
         # Check if python files are parseable
         python_files = [
@@ -481,3 +486,130 @@ def test_generated_project_grid_search_logic() -> None:
 
         assert "def load_grid_configs" in generated_utils
         assert "load_grid_configs" in generated_main
+
+
+def _recreation_command(project_dir: Path) -> str:
+    line = next(line for line in (project_dir / "README.md").read_text().splitlines() if "trainite init" in line)
+    return line.lstrip("> ").strip()
+
+
+def test_recreation_command_quotes_values_containing_spaces(tmp_path):
+    project_dir = tmp_path / "quoted-experiment"
+    init_project(Init(project_dir=str(project_dir), run_name="my great run", output_root="my outputs"))
+
+    readme = (project_dir / "README.md").read_text()
+    assert "Windows Command Prompt (`cmd.exe`)" in readme
+    assert "replace single quotes around argument values with double quotes" in readme
+
+    command = _recreation_command(project_dir)
+
+    assert "--run-name 'my great run'" in command
+    assert "--output-root 'my outputs'" in command
+
+
+@pytest.mark.parametrize("run_name", ["", "plain_run"])
+def test_recreation_command_leaves_simple_values_unquoted(tmp_path, run_name):
+    project_dir = tmp_path / "plain-experiment"
+    init_project(Init(project_dir=str(project_dir), run_name=run_name))
+
+    readme = (project_dir / "README.md").read_text()
+    assert "POSIX shell quoting" not in readme
+    assert "Windows Command Prompt (`cmd.exe`)" not in readme
+
+    command = _recreation_command(project_dir)
+
+    if run_name:
+        assert "--run-name plain_run" in command
+    assert "'" not in command
+
+
+def test_recreation_command_quoting_note_for_output_root(tmp_path):
+    project_dir = tmp_path / "plain-project"
+    init_project(Init(project_dir=str(project_dir), run_name="plain_run", output_root="my outputs"))
+
+    readme = (project_dir / "README.md").read_text()
+    assert "Windows Command Prompt (`cmd.exe`)" in readme
+
+
+def test_recreation_command_is_replayable(tmp_path):
+    source_dir = tmp_path / "replay-source"
+    init_project(Init(project_dir=str(source_dir), run_name="my great run", output_root="my outputs"))
+
+    # Drop the "trainite init <project-name>" prefix and replay the flags into a new directory.
+    flags = shlex.split(_recreation_command(source_dir))[3:]
+    replay_dir = tmp_path / "replayed"
+
+    result = subprocess.run(
+        [sys.executable, "-m", "trainite.cli", "init", *flags, str(replay_dir)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert "Unrecognized options" not in result.stdout + result.stderr
+    assert (replay_dir / "config.yaml").exists()
+
+    replayed_config = yaml.safe_load((replay_dir / "config.yaml").read_text())
+    assert replayed_config["output"]["run_name"] == "my great run"
+    assert replayed_config["output"]["root"] == "my outputs"
+
+
+def test_primary_model_defaults_to_first_selected_model():
+    config = Init(model=("rope-transformer", "basic-transformer"))
+
+    assert config.primary_model == "rope-transformer"
+
+
+def test_primary_model_not_in_selection_raises_error():
+    with pytest.raises(ValueError, match="must be one of the selected models"):
+        Init(model=("rope-transformer",), primary_model="basic-transformer")
+
+
+def test_interactive_run_name_uses_non_first_primary_model(monkeypatch):
+    from trainite.cli import init
+
+    models = ("rope-transformer", "basic-transformer")
+    monkeypatch.setattr(init, "_prompt_multi_choice", Mock(return_value=list(models)))
+    monkeypatch.setattr(
+        init,
+        "_prompt_choice",
+        Mock(side_effect=["basic-transformer", DEFAULT_DATASET, DEFAULT_TRAINER]),
+    )
+    monkeypatch.setattr(init, "_prompt_text", lambda prompt, default, instruction=None: default)
+    confirmation = Mock()
+    confirmation.ask.return_value = False
+    monkeypatch.setattr(init.questionary, "confirm", Mock(return_value=confirmation))
+    generate_project = Mock()
+    monkeypatch.setattr(init, "init_project", generate_project)
+
+    init.run_interactive_mode()
+
+    generate_project.assert_called_once()
+    config = generate_project.call_args.args[0]
+    assert config.model == models
+    assert config.primary_model == "basic-transformer"
+    assert config.run_name == "basic_transformer__string_reverse"
+
+
+def test_primary_model_drives_generated_config(tmp_path):
+    project_dir = tmp_path / "primary-model-experiment"
+    config = Init(
+        project_dir=str(project_dir),
+        model=("rope-transformer", "basic-transformer"),
+        primary_model="basic-transformer",
+    )
+    init_project(config)
+
+    generated_config = yaml.safe_load((project_dir / "config.yaml").read_text())
+
+    # The primary model drives config.yaml and the run name even though it is
+    # not first in the selection.
+    assert "basic_transformer" in generated_config["model"]["_target_"]
+    assert "basic_transformer" in generated_config["model"]["collate_fn_target"]
+    assert generated_config["loss"]["_target_"] == "models.basic_transformer.CausalLMCrossEntropyLoss"
+    assert generated_config["output"]["run_name"] == "basic_transformer__string_reverse"
+
+    # Both selected models are still generated.
+    assert (project_dir / "models/basic_transformer.py").exists()
+    assert (project_dir / "models/rope_transformer.py").exists()
+    assert "--primary-model basic-transformer" in (project_dir / "README.md").read_text()

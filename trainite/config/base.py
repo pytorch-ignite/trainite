@@ -35,6 +35,12 @@ class OptimizerConfig(BaseModel):
     lr: float = Field(default=1e-3, gt=0.0)
 
 
+class LossConfig(BaseModel):
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
+    target: str = Field(alias="_target_", default="trainite.models.basic_transformer.CausalLMCrossEntropyLoss")
+    ignore_index: int = -100
+
+
 class DataLoaderConfig(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     batch_size: int = Field(default=32, gt=0)
@@ -77,6 +83,7 @@ class DataWithAutoSplit(BaseModel):
 class TrainerConfig(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
     epochs: int = Field(default=3, gt=0)
+    precision: Literal["float32", "fp16", "bf16"] = "float32"
     log_every_steps: int = Field(default=10, gt=0)
     early_stopping_patience: int | None = Field(default=3, gt=0)
     inference_every_epochs: int | None = Field(default=None, gt=0)
@@ -91,6 +98,7 @@ class ProjectConfig(BaseModel):
     preprocessor: PreprocessorConfig
     model: ModelConfig
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
+    loss: LossConfig = Field(default_factory=LossConfig)
     data: DataConfigBase | DataWithAutoSplit
     trainer: TrainerConfig = Field(default_factory=TrainerConfig)
     output: OutputConfig

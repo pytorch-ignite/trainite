@@ -23,6 +23,11 @@ class ComponentSpec(BaseModel):
 class ModelSpec(ComponentSpec):
     builder_symbol: str
     collate_fn_target: str | None = None
+    loss_config_cls_path: str | None = None
+
+    @property
+    def loss_config_cls(self) -> Any | None:
+        return get_target(self.loss_config_cls_path) if self.loss_config_cls_path else None
 
 
 class DatasetSpec(ComponentSpec):
@@ -44,6 +49,7 @@ MODEL_SPECS = {
         builder_symbol="BasicTransformerModel",
         collate_fn_target="trainite.models.basic_transformer.CausalLMCollateFn",
         readme_template_path=Path("trainite/templates/components/models/basic_transformer.md"),
+        loss_config_cls_path="trainite.config.loss.BasicTransformerLoss",
     ),
     "rope-transformer": ModelSpec(
         name="rope_transformer",
@@ -53,6 +59,27 @@ MODEL_SPECS = {
         builder_symbol="RoPETransformerModel",
         collate_fn_target="trainite.models.rope_transformer.CausalLMCollateFn",
         readme_template_path=Path("trainite/templates/components/models/rope_transformer.md"),
+        loss_config_cls_path="trainite.config.loss.RoPETransformerLoss",
+    ),
+    "gemma4-moe": ModelSpec(
+        name="gemma4_moe",
+        implementation_path=Path("trainite/models/gemma4_moe.py"),
+        config_cls_path="trainite.config.models.Gemma4MoEModelConfig",
+        implementation_symbol="Gemma4MoEModel",
+        builder_symbol="Gemma4MoEModel",
+        collate_fn_target="trainite.models.gemma4_moe.CausalLMCollateFn",
+        readme_template_path=Path("trainite/templates/components/models/gemma4_moe.md"),
+        loss_config_cls_path="trainite.config.loss.Gemma4MoELoss",
+    ),
+    "gemma4-dense": ModelSpec(
+        name="gemma4_dense",
+        implementation_path=Path("trainite/models/gemma4_dense.py"),
+        config_cls_path="trainite.config.models.Gemma4DenseModelConfig",
+        implementation_symbol="Gemma4DenseModel",
+        builder_symbol="Gemma4DenseModel",
+        collate_fn_target="trainite.models.gemma4_dense.CausalLMCollateFn",
+        readme_template_path=Path("trainite/templates/components/models/gemma4_dense.md"),
+        loss_config_cls_path="trainite.config.loss.Gemma4DenseLoss",
     ),
 }
 
