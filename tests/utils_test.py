@@ -8,7 +8,7 @@ class MockComponent(BaseModel):
     target: str = Field(alias="_target_")
 
 
-from trainite.shared.utils import get_target, instantiate
+from trainite.shared.utils import get_target, instantiate, get_unique_param_names
 
 
 def cc(target: str | None = None, **kwargs: object) -> MockComponent:
@@ -121,6 +121,28 @@ def test_load_grid_configs_with_nested_sweep(tmp_path):
     }
 
 
+def test_load_grid_configs_allows_null_base_value(tmp_path):
+    class NullableConfig(BaseModel):
+        optimizer: dict[str, float | None]
+
+    config_file = tmp_path / "config_null.yaml"
+    config_file.write_text("optimizer:\n  lr: null\nsweep:\n  optimizer:\n    lr: [0.01, 0.001]\n")
+
+    configs = load_grid_configs(config_file, NullableConfig)
+
+    assert len(configs) == 2
+    assert [config.optimizer["lr"] for config, _ in configs] == [0.01, 0.001]
+
+
+def test_load_grid_configs_rejects_flattened_sweep_keys(tmp_path):
+    config_file = tmp_path / "config_flattened.yaml"
+    yaml_content = "optimizer:\n  lr: 0.01\nbatch_size: 16\nsweep:\n  optimizer.lr: [0.01, 0.001]\n"
+    config_file.write_text(yaml_content)
+
+    with pytest.raises(ValueError, match="nested"):
+        load_grid_configs(config_file, MockSweepConfig)
+
+
 def test_load_grid_configs_sweep_typo(tmp_path):
     config_file = tmp_path / "config_typo.yaml"
     yaml_content = "optimizer:\n  lr: 0.01\nbatch_size: 16\nsweep:\n  optimizer:\n    lrr: [0.01, 0.001]\n"
@@ -128,3 +150,21 @@ def test_load_grid_configs_sweep_typo(tmp_path):
 
     with pytest.raises(KeyError, match="Sweep key 'optimizer.lrr' does not exist"):
         load_grid_configs(config_file, MockSweepConfig)
+
+
+def test_get_unique_param_names_abbreviates_parent_components():
+    keys = [
+        "data.train.dataloader.batch_size",
+        "data.val.dataloader.batch_size",
+        "optimizer.lr",
+    ]
+
+    assert get_unique_param_names(keys) == [
+        "D-T-D-batch_size",
+        "D-V-D-batch_size",
+        "O-lr",
+    ]
+
+
+def test_get_unique_param_names_handles_single_component():
+    assert get_unique_param_names(["batch_size"]) == ["batch_size"]

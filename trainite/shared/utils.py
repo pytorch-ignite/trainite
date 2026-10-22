@@ -138,12 +138,26 @@ def load_config(path: str | Path, config_cls: type[T]) -> T:
 def flatten_sweep_config(d: dict, parent_key: str = "", sep: str = ".") -> dict:
     items = []
     for k, v in d.items():
+        if sep in k:
+            raise ValueError(f"Sweep keys must use nested YAML, not flattened keys: '{k}'")
         new_key = f"{parent_key}{sep}{k}" if parent_key else k
         if isinstance(v, dict) or type(v).__name__ == "DictConfig":
             items.extend(flatten_sweep_config(v, new_key, sep=sep).items())
             continue
         items.append((new_key, v))
     return dict(items)
+
+
+def get_unique_param_names(keys: list[str]) -> list[str]:
+    """Abbreviate parent components using their uppercase initials."""
+    names = []
+
+    for key in keys:
+        parts = key.split(".")
+        parent_initials = [part[0].upper() for part in parts[:-1]]
+        names.append("-".join([*parent_initials, parts[-1]]))
+
+    return names
 
 
 def load_grid_configs(path: str | Path, config_cls: type[T]) -> list[tuple[T, dict[str, Any]]]:
@@ -162,6 +176,12 @@ def load_grid_configs(path: str | Path, config_cls: type[T]) -> list[tuple[T, di
     flat_sweep_params = flatten_sweep_config(sweep_params_dict)
 
     keys = list(flat_sweep_params.keys())
+
+    # Safely handle explicit nulls in the YAML
+    for key in keys:
+        if OmegaConf.select(base_run_conf, key, default="__MISSING__") == "__MISSING__":
+            raise KeyError(f"Sweep key '{key}' does not exist in the base configuration.")
+
     values = [v if isinstance(v, list) else [v] for v in flat_sweep_params.values()]
     combinations = list(itertools.product(*values))
 
@@ -171,12 +191,14 @@ def load_grid_configs(path: str | Path, config_cls: type[T]) -> list[tuple[T, di
         combo_dict = {}
 
         for key, val in zip(keys, combo):
-            # Safely handle explicit nulls in the YAML
-            if OmegaConf.select(run_conf, key, default="__MISSING__") == "__MISSING__":
-                raise KeyError(f"Sweep key '{key}' does not exist in the base configuration.")
-
             OmegaConf.update(run_conf, key, val)
             combo_dict[key] = val
+
+        if combo_dict:
+            short_keys = get_unique_param_names(list(combo_dict.keys()))
+            name_suffix = "_".join(f"{key}={value}" for key, value in zip(short_keys, combo_dict.values()))
+            if OmegaConf.select(run_conf, "output.run_name") is not None:
+                run_conf.output.run_name = f"{run_conf.output.run_name}_{name_suffix}"
 
         configs.append((config_cls.model_validate(run_conf), combo_dict))
 
