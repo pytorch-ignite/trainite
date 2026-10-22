@@ -1,6 +1,10 @@
 import ast
 import html
+import json
 import logging
+import os
+import sys
+from pathlib import Path
 
 from accelerate import Accelerator
 import torch
@@ -176,6 +180,9 @@ class Trainer:
         self.benchmark_every_epochs = self.trainer_config.benchmark_every_epochs
         self.benchmark_num_samples = self.trainer_config.benchmark_num_samples
         self.max_benchmark_new_tokens = self.trainer_config.max_benchmark_new_tokens
+        self.humaneval_enabled = self.trainer_config.humaneval_enabled
+        self.humaneval_max_new_tokens = self.trainer_config.humaneval_max_new_tokens
+        self.humaneval_batch_size = self.trainer_config.humaneval_batch_size
         self.criterion = instantiate(config.loss)
         self.ignore_index: int = getattr(self.criterion, "ignore_index", -100)
         self.requires_router_info = getattr(self.criterion, "requires_router_info", False)
@@ -481,6 +488,106 @@ class Trainer:
             self.logger.info("epoch=%s bench_compile=%.2f bench_body=%.2f", engine.state.epoch, compile_rate, body_rate)
         self.accelerator.wait_for_everyone()
 
+    def _run_humaneval(self) -> None:
+        """Solve HumanEval+ mini and score it with EvalPlus' official evaluator.
+
+        Runs once after the best checkpoint is restored. EvalPlus executes
+        generated code in subprocesses with timeouts, but this is not a security
+        sandbox, so only use it with trusted models and data.
+        """
+        self.accelerator.wait_for_everyone()
+        if not self.accelerator.is_main_process:
+            return
+
+        from evalplus.data import get_human_eval_plus  # pyrefly: ignore[missing-import]
+        from evalplus.evaluate import evaluate  # pyrefly: ignore[missing-import]
+
+        from benchmarks.humaneval import summarize_results
+
+        if sys.platform == "darwin":
+            # EvalPlus' RLIMIT_AS guard raises "current limit exceeds maximum
+            # limit" on macOS; -1 skips the rlimit calls, not the subprocesses.
+            os.environ["EVALPLUS_MAX_MEMORY_BYTES"] = "-1"
+
+        problems = get_human_eval_plus(mini=True)
+        dataset_config = getattr(self.config.data, "dataset", None)
+        max_length = getattr(dataset_config, "max_length", 512)
+        pad_token_id = getattr(self.tokenizer, "pad_token_id", 0) or 0
+
+        items = list(problems.items())
+        completions: dict[str, str] = {}
+        for start in range(0, len(items), self.humaneval_batch_size):
+            batch = []
+            for task_id, problem in items[start : start + self.humaneval_batch_size]:
+                prompt_ids = torch.tensor(
+                    self.tokenizer.encode(problem["prompt"], add_special_tokens=False),
+                    device=self.device,
+                )
+                if prompt_ids.numel() >= max_length:
+                    completions[task_id] = ""
+                else:
+                    batch.append((task_id, prompt_ids))
+            if not batch:
+                continue
+
+            max_new_tokens = min(
+                self.humaneval_max_new_tokens,
+                max_length - max(prompt_ids.numel() for _, prompt_ids in batch),
+            )
+            input_ids = (
+                torch.nn.utils.rnn.pad_sequence(
+                    [prompt_ids.flip(0) for _, prompt_ids in batch],
+                    batch_first=True,
+                    padding_value=pad_token_id,
+                )
+                .flip(1)
+                .to(self.device)
+            )
+            attention_mask = (
+                torch.nn.utils.rnn.pad_sequence(
+                    [torch.ones_like(prompt_ids, dtype=torch.long).flip(0) for _, prompt_ids in batch],
+                    batch_first=True,
+                    padding_value=0,
+                )
+                .flip(1)
+                .to(self.device)
+            )
+            sequences = self.generate(
+                input_ids=input_ids,
+                max_new_tokens=max_new_tokens,
+                attention_mask=attention_mask,
+            )
+            for (task_id, _), tokens in zip(batch, sequences[:, input_ids.shape[1] :]):
+                completions[task_id] = self.tokenizer.decode(tokens.tolist(), skip_special_tokens=True)
+
+            done = min(start + self.humaneval_batch_size, len(items))
+            if done % 20 < self.humaneval_batch_size:
+                self.logger.info("HumanEval: generated %d/%d", done, len(items))
+
+        samples_path = self.run_dir / "humaneval_samples.jsonl"
+        samples_path.write_text(
+            "\n".join(json.dumps({"task_id": task_id, "completion": completions[task_id]}) for task_id in problems)
+            + "\n"
+        )
+        result_path = Path(str(samples_path).replace(".jsonl", "_eval_results.json"))
+        result_path.unlink(missing_ok=True)
+
+        self.logger.info("Evaluating %d HumanEval+ mini samples...", len(problems))
+        evaluate(dataset="humaneval", samples=str(samples_path), mini=True, i_just_wanna_run=True)
+
+        summary = summarize_results(result_path)
+        self.logger.info(
+            "HumanEval+ (mini): base pass@1=%.4f (%d/%d), plus pass@1=%.4f (%d/%d)",
+            summary["base_pass_at_1"],
+            summary["base_passed"],
+            summary["total"],
+            summary["plus_pass_at_1"],
+            summary["plus_passed"],
+            summary["total"],
+        )
+        self._log_scalar("humaneval/base_pass_at_1", summary["base_pass_at_1"], self.trainer.state.iteration)
+        self._log_scalar("humaneval/plus_pass_at_1", summary["plus_pass_at_1"], self.trainer.state.iteration)
+
     def run(self) -> None:
         self.logger.info("starting run in %s", self.run_dir)
         try:
@@ -524,6 +631,10 @@ class Trainer:
             metrics["token_accuracy"],
             metrics["perplexity"],
         )
+
+        if self.humaneval_enabled:
+            self.logger.info("Running HumanEval+ (mini)...")
+            self._run_humaneval()
 
     def _attach_metrics(self) -> dict[str, Metric]:
         """Create and attach Ignite metrics to the trainer and evaluator engines.

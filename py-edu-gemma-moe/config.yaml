@@ -60,6 +60,9 @@ trainer:
   benchmark_every_epochs: 2
   benchmark_num_samples: 5
   max_benchmark_new_tokens: 512
+  humaneval_enabled: true
+  humaneval_max_new_tokens: 192
+  humaneval_batch_size: 8
   grad_clip_norm: null
 output:
   root: outputs

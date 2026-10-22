@@ -153,13 +153,23 @@ routing, not validation routing. Smoothed values are not whole-epoch counts.
 Every `benchmark_every_epochs` epochs the trainer also greedily completes fixed
 validation prompts and logs `bench/compile_rate` (generated source parses) and
 `bench/body_rate` (it also defines the prompted function with a body beyond the
-docstring). Generated code is never executed during training; execution-based
-scoring is a separate offline benchmark.
+docstring). Generated code is never executed during training.
+
+After training, `test()` restores the best checkpoint, runs the held-out loader,
+then generates and executes solutions for HumanEval+ mini (EvalPlus). It logs
+`humaneval/base_pass_at_1` and `humaneval/plus_pass_at_1`, and leaves
+`humaneval_samples.jsonl` plus EvalPlus' `*_eval_results.json` in the run
+directory for inspection. The mini suite keeps all 164 HumanEval tasks but uses a
+reduced set of extra tests, so it is much faster than full HumanEval+ while still
+catching clear correctness failures. Generated code runs in subprocesses with
+timeouts, but this is not a security sandbox: only run it with trusted models and
+data. Disable it with `humaneval_enabled: false`; tune `humaneval_max_new_tokens`
+and `humaneval_batch_size` in the trainer config. EvalPlus is installed as a
+project dependency.
 
 All metrics are written to TensorBoard or ClearML. Console epoch summaries include
 perplexity, separate training loss components, expert usage, and benchmark rates.
-Run the offline checks with `uv run python -m unittest test_metrics.py`.
-Execution-based code correctness metrics are a separate step.
+Run the offline checks with `uv run python -m unittest test_metrics.py test_tokenizer.py test_humaneval.py`.
 
 ## Experiment Logging and Checkpoints
 
