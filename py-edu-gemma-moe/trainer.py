@@ -7,9 +7,11 @@ from ignite.engine import Engine, Events
 from ignite.handlers import DiskSaver
 from ignite.handlers.clearml_logger import ClearMLSaver
 from ignite.handlers.logger_utils import setup_clearml_logging, setup_tb_logging
-from ignite.metrics import Accuracy, Loss, Metric, RunningAverage
+from ignite.metrics import Accuracy, Loss, Metric, Perplexity, RunningAverage
 from ignite.utils import setup_logger
 from torch.utils.data import DataLoader
+
+from models.gemma4_moe import load_balancing_loss
 
 from config import (
     ProjectConfig,
@@ -68,7 +70,7 @@ class Trainer:
       ``float32``, ``fp16``, ``bf16``) without boilerplate.
     * **Engines (Ignite)** – ``self.trainer`` runs the training loop; ``self.train_evaluator``,
       ``self.val_evaluator``, and ``self.test_evaluator`` run evaluation.
-    * **Metrics** – loss and token-accuracy are attached to each evaluator.
+    * **Metrics** – cross-entropy, token accuracy and perplexity on each evaluator; training routing diagnostics.
     * **Learning-rate schedule** – linear warm-up + linear decay.
     * **Checkpointing** – last and best-model checkpoints saved to ``run_dir``.
     * **Early stopping** – halts training when validation loss stagnates.
@@ -171,8 +173,8 @@ class Trainer:
             "optimizers": self.optimizer,
             "evaluators": evaluators,
             "log_every_iters": self.trainer_config.log_every_steps,
-            "trainer_metric_names": ["batch_loss"],
-            "evaluator_metric_names": ["loss", "token_accuracy"],
+            "trainer_metric_names": self.trainer_metric_names,
+            "evaluator_metric_names": ["loss", "token_accuracy", "perplexity"],
         }
         self.exp_logger = None
         if self.accelerator.is_main_process:
@@ -262,11 +264,22 @@ class Trainer:
             self.accelerator.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
 
         self.optimizer.step()
-        return {
+        result = {
             "loss": loss.detach(),
             "logits": logits.detach(),
             "targets": targets.detach(),
         }
+        if self.requires_router_info:
+            router_info = outputs[1].detach()
+            aux_loss = load_balancing_loss(router_info)
+            result["lm_loss"] = result["loss"] - self.criterion.aux_loss_coef * aux_loss
+            result["aux_loss"] = aux_loss
+            # Weight rank-local routing fractions by real tokens before combining ranks.
+            token_count = attention_mask.sum() if attention_mask is not None else inputs.new_tensor(inputs.numel())
+            assignments = self.accelerator.reduce(router_info[:, 1, :] * token_count, reduction="sum")
+            tokens = self.accelerator.reduce(token_count, reduction="sum")
+            result["expert_usage"] = assignments / tokens.clamp(min=1)
+        return result
 
     @torch.no_grad()
     def _eval_step(self, engine: Engine, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
@@ -318,13 +331,19 @@ class Trainer:
         self.val_evaluator.run(self.val_loader)
         val_metrics = self.val_evaluator.state.metrics
         self.logger.info(
-            "epoch=%s train_loss=%.4f train_token_acc=%.4f val_loss=%.4f val_token_acc=%.4f",
+            "epoch=%s train_loss=%.4f train_token_acc=%.4f train_ppl=%.4f "
+            "val_loss=%.4f val_token_acc=%.4f val_ppl=%.4f",
             epoch,
             train_metrics["loss"],
             train_metrics["token_accuracy"],
+            train_metrics["perplexity"],
             val_metrics["loss"],
             val_metrics["token_accuracy"],
+            val_metrics["perplexity"],
         )
+        if self.requires_router_info:
+            for name in self.trainer_metric_names[1:]:
+                self.logger.info("%s=%.4f", name, engine.state.metrics[name])
 
     def run(self) -> None:
         self.logger.info("starting run in %s", self.run_dir)
@@ -364,9 +383,10 @@ class Trainer:
         self.test_evaluator.run(loader)
         metrics = self.test_evaluator.state.metrics
         self.logger.info(
-            "Test results: loss=%.4f token_acc=%.4f",
+            "Test results: loss=%.4f token_acc=%.4f perplexity=%.4f",
             metrics["loss"],
             metrics["token_accuracy"],
+            metrics["perplexity"],
         )
 
     def _attach_metrics(self) -> dict[str, Metric]:
@@ -380,13 +400,27 @@ class Trainer:
         engine so that fluctuations between batches are dampened in the logs.
 
         ``Loss`` and ``Accuracy`` are epoch-level metrics computed over the full
-        evaluation set.  Both use ``_flatten`` as their ``output_transform`` so they
-        see only the non-ignored token positions.
+        evaluation set. Both use ``_flatten`` as their ``output_transform`` so they
+        see only non-ignored token positions. Perplexity is exp of the
+        token-weighted cross-entropy.
 
         See: https://docs.pytorch.org/ignite/metrics.html
         """
         # Running average loss tracked per training iteration (logged in console)
         RunningAverage(output_transform=lambda output: output["loss"]).attach(self.trainer, "batch_loss")
+        self.trainer_metric_names = ["batch_loss"]
+        if self.requires_router_info:
+            for name in ("lm_loss", "aux_loss"):
+                RunningAverage(output_transform=lambda output, key=name: output[key]).attach(self.trainer, name)
+                self.trainer_metric_names.append(name)
+            model = self.accelerator.unwrap_model(self.model)
+            for layer, block in enumerate(model.layers):
+                for expert in range(block.moe.num_experts):
+                    name = f"router/layer_{layer}/expert_{expert}"
+                    RunningAverage(
+                        output_transform=lambda output, i=layer, j=expert: output["expert_usage"][i, j]
+                    ).attach(self.trainer, name)
+                    self.trainer_metric_names.append(name)
 
         # Shared transform: flatten and filter out ignored positions for both metrics
         def transform_fn(output):
@@ -405,9 +439,12 @@ class Trainer:
 
             loss.attach(evaluator, "loss")
             token_acc.attach(evaluator, "token_accuracy")
+            perplexity = Perplexity(output_transform=transform_fn, device=self.device, ignore_index=self.ignore_index)
+            perplexity.attach(evaluator, "perplexity")
 
             metrics[f"{prefix}_loss"] = loss
             metrics[f"{prefix}_token_accuracy"] = token_acc
+            metrics[f"{prefix}_perplexity"] = perplexity
 
         return metrics
 

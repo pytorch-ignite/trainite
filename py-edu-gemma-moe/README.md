@@ -131,6 +131,30 @@ To launch this experiment on cloud GPUs (AWS, GCP, Azure, Lambda, etc.) using [S
 >
 > You can also run jobs on your own on-premises servers or custom clusters via SSH by following SkyPilot's [Existing Machines guide](https://docs.skypilot.co/en/latest/reservations/existing-machines.html).
 
+## Metrics
+
+Train/validation/test evaluators report `loss` (cross-entropy), `token_accuracy`,
+and `perplexity = exp(loss)`, weighted over supervised body tokens and EOS.
+Prompt and padding labels are ignored. Perplexity excludes the MoE auxiliary loss;
+checkpoint selection and early stopping still use validation cross-entropy.
+
+Training logs include smoothed `batch_loss` (total objective), `lm_loss`
+(cross-entropy only), and unweighted `aux_loss` (router balancing). The objective
+is `lm_loss + aux_loss_coef * aux_loss`. Balanced routing has auxiliary loss 1,
+though this value alone does not establish useful expert specialization.
+
+`router/layer_N/expert_M` logs the smoothed share of top-k routing assignments
+received by each expert. Shares sum to 1 per layer; uniform usage is
+`1 / num_experts`. Persistently near-zero usage suggests an unused expert.
+These statistics cover all nonpadding input tokens, including prompts, and are
+combined across ranks weighted by real-token counts. They describe training
+routing, not validation routing. Smoothed values are not whole-epoch counts.
+
+All metrics are written to TensorBoard or ClearML. Console epoch summaries include
+perplexity, separate training loss components, and expert usage. Run the offline
+checks with `uv run python -m unittest test_metrics.py`. Execution-based code
+correctness metrics are a separate step.
+
 ## Experiment Logging and Checkpoints
 
 The default `logger: tensorboard` stores metrics and checkpoints locally. To use ClearML instead:
