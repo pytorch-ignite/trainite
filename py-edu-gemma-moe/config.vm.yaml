@@ -37,7 +37,7 @@ data:
   dataset:
     _target_: dataset_impl.python_edu.load_function_dataset
     path: Avelina/python-edu-cleaned
-    dataset_size: 5000 # Small single-GPU smoke run; use config.gpu.yaml for the full run.
+    dataset_size: 50000 # Single-GPU learning sanity run; use config.gpu.yaml for the full run.
     split: train
     max_length: 512
   transform:
@@ -46,11 +46,11 @@ data:
   dataloader:
     batch_size: 8
     shuffle: true
-    num_workers: 2
+    num_workers: 4
   test_ratio: 0.1
   val_ratio: 0.1
 trainer:
-  epochs: 1
+  epochs: 2
   precision: bf16
   log_every_steps: 50
   early_stopping_patience: null
