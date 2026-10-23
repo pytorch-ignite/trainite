@@ -19,7 +19,8 @@ class PythonBpeTokenizerTest(unittest.TestCase):
             with patch("datasets.load_dataset", return_value=CORPUS) as load_dataset:
                 tokenizer = load_python_bpe_tokenizer("tiny/corpus", vocab_size=300, cache_dir=cache_dir)
             load_dataset.assert_called_once_with("tiny/corpus", split="train")
-            self.assertEqual(tokenizer.eos_token_id, tokenizer.pad_token_id)
+            self.assertNotEqual(tokenizer.eos_token_id, tokenizer.pad_token_id)
+            self.assertEqual(tokenizer.pad_token_id, tokenizer.vocab_size)
             ids = tokenizer.encode(text, add_special_tokens=False)
             self.assertEqual(tokenizer.decode(ids, skip_special_tokens=True), text)
 

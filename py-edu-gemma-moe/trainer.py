@@ -169,7 +169,7 @@ class Trainer:
             collate_fn_target=config.model.collate_fn_target,
         )
         self.model = build_model(
-            config.model, self.device, vocab_size=self.tokenizer.vocab_size, pad_token_id=self.tokenizer.pad_token_id
+            config.model, self.device, vocab_size=len(self.tokenizer), pad_token_id=self.tokenizer.pad_token_id
         )
         self.optimizer = instantiate(config.optimizer, params=self.model.parameters())
         self.epochs: int = self.trainer_config.epochs

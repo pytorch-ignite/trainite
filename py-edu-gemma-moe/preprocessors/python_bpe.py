@@ -49,5 +49,5 @@ def load_python_bpe_tokenizer(
     return PreTrainedTokenizerFast(
         tokenizer_file=str(tokenizer_file),
         eos_token="<eos>",
-        pad_token="<eos>",
+        pad_token="<pad>",
     )

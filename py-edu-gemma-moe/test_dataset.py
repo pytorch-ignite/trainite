@@ -1,6 +1,7 @@
 """Offline checks: python -m unittest test_dataset.py."""
 
 import unittest
+import uuid
 import warnings
 
 import torch
@@ -14,7 +15,7 @@ from datasets import Dataset
 
 class Tokenizer:
     eos_token_id = 0
-    pad_token_id = 0
+    pad_token_id = 1
 
     def encode(self, text, add_special_tokens=False):
         return [ord(c) + 1 for c in text]
@@ -196,7 +197,9 @@ class DatasetTest(unittest.TestCase):
             patch("datasets.load_dataset", return_value=raw),
             patch("dataset_impl.python_edu.function_spans", new=tracked_spans),
         ):
-            dataset = load_function_dataset("python-edu", Tokenizer(), dataset_size=1)
+            # A fresh cache key keeps this test about generator early-stopping,
+            # not about whether an earlier run already cached the same rows.
+            dataset = load_function_dataset(f"python-edu-{uuid.uuid4()}", Tokenizer(), dataset_size=1)
             self.assertEqual(len(dataset), 1)
             self.assertEqual(len(visited), 2)
 

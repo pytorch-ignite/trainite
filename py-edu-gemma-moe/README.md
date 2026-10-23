@@ -502,8 +502,8 @@ stable. Training runs before functions are filtered by token length, so the corp
 produces.
 
 An 8192-token code vocabulary keeps the output layer small, which matters for memory: logits scale linearly with
-vocabulary size. Byte-level BPE round-trips indentation and arbitrary characters without unknown tokens, and padding
-reuses the end-of-sequence token.
+vocabulary size. Byte-level BPE round-trips indentation and arbitrary characters without unknown tokens. Padding uses
+a separate `<pad>` token so the end-of-sequence embedding stays trainable and EOS can be predicted.
 
 ## Minimal config
 

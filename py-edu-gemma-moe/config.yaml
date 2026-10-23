@@ -6,29 +6,29 @@ preprocessor:
 model:
   _target_: models.gemma4_moe.Gemma4MoEModel
   collate_fn_target: models.gemma4_moe.CausalLMCollateFn
-  hidden_size: 64
-  num_layers: 2
-  num_attention_heads: 4
-  num_key_value_heads: 2
-  dense_intermediate_size: 128
-  expert_dim: 64
-  num_experts: 4
+  hidden_size: 1024
+  num_layers: 4
+  num_attention_heads: 16
+  num_key_value_heads: 4
+  dense_intermediate_size: 2816
+  expert_dim: 1152
+  num_experts: 3
   top_k: 2
-  head_dim: 16
+  head_dim: 64
   layer_types: null
   layer_pattern: sg
-  sliding_window: 64
+  sliding_window: 512
   rope_theta: 10000.0
   global_rope_theta: 1000000.0
   rotary_fraction: 1.0
   global_rotary_fraction: 0.25
-  global_num_key_value_heads: 2
-  global_head_dim: 16
+  global_num_key_value_heads: 4
+  global_head_dim: 64
   global_key_equals_value: true
   attention_dropout: 0.0
 optimizer:
   _target_: torch.optim.AdamW
-  lr: 0.001
+  lr: 0.0003
 loss:
   _target_: models.gemma4_moe.GemmaMoECausalLMLoss
   ignore_index: -100
@@ -37,27 +37,27 @@ data:
   dataset:
     _target_: dataset_impl.python_edu.load_function_dataset
     path: Avelina/python-edu-cleaned
-    dataset_size: 100 # Maximum usable functions after length filtering; null uses all.
+    dataset_size: 5000 # Maximum usable functions after length filtering; null uses all.
     split: train
     max_length: 512
   transform:
     _target_: dataset_impl.python_edu.PythonEduTransform
     max_length: 512
   dataloader:
-    batch_size: 32
+    batch_size: 8
     shuffle: true
     num_workers: 0
   test_ratio: 0.1
   val_ratio: 0.1
 trainer:
-  epochs: 10
-  precision: float32
+  epochs: 2
+  precision: fp16
   log_every_steps: 10
   early_stopping_patience: 3
   inference_every_epochs: null
   inference_num_samples: 5
   max_inference_new_tokens: 16
-  benchmark_every_epochs: 2
+  benchmark_every_epochs: 1
   benchmark_num_samples: 5
   max_benchmark_new_tokens: 512
   humaneval_enabled: true

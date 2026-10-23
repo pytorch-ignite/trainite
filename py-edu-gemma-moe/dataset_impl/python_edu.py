@@ -80,7 +80,20 @@ def load_function_dataset(
                 if dataset_size is not None and count >= dataset_size:
                     return
 
-    dataset = Dataset.from_generator(generate, features=Features({"text": Value("string")}))
+    # The generator closes over the source dataset and filtering options.  Letting
+    # `datasets` cache it by generator code alone can silently reuse a stale split.
+    # Include the source fingerprint and filtering/tokenizer settings in the cache key.
+    source_fingerprint = getattr(raw_dataset, "_fingerprint", None) or "unknown"
+    tokenizer_fingerprint = "|".join(
+        str(getattr(tokenizer, attribute, ""))
+        for attribute in ("name_or_path", "vocab_size", "eos_token_id", "pad_token_id")
+    )
+    fingerprint = f"{path}|{split}|{dataset_size}|{max_length}|{source_fingerprint}|{tokenizer_fingerprint}"
+    dataset = Dataset.from_generator(
+        generate,
+        features=Features({"text": Value("string")}),
+        fingerprint=fingerprint,
+    )
     if len(dataset) == 0:
         raise ValueError("No usable functions; inspect docstrings and max_length")
     return dataset
