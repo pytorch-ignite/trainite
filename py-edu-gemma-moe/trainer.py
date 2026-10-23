@@ -61,7 +61,10 @@ def _flatten(output: dict[str, torch.Tensor], ignore_index: int = -100) -> tuple
     targets = output["targets"].reshape(-1)
     # Build a boolean mask that is True for every non-ignored position
     mask = targets != ignore_index
-    return logits[mask], targets[mask]
+    # Ignite's Perplexity sums NLL over all tokens before normalizing. With fp16
+    # logits that sum can overflow to inf even when the mean NLL is small.
+    # Metrics are evaluation-only, so accumulate them in fp32.
+    return logits[mask].float(), targets[mask]
 
 
 def _truncate_completion(text: str) -> str:

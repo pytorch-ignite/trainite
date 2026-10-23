@@ -66,6 +66,17 @@ class MetricsTest(unittest.TestCase):
         extreme = {"logits": torch.tensor([[[0.0, 1000.0]]]), "targets": torch.tensor([[0]])}
         self.assertTrue(math.isinf(trainer.val_evaluator.run([extreme]).metrics["perplexity"]))
 
+    def test_fp16_perplexity_accumulates_in_fp32(self):
+        trainer = self.make_trainer()
+        num_tokens = 8192
+        output = {
+            "logits": torch.tensor([[[0.0, 9.0]]], dtype=torch.float16).repeat(1, num_tokens, 1),
+            "targets": torch.zeros((1, num_tokens), dtype=torch.long),
+        }
+        metrics = trainer.val_evaluator.run([output]).metrics
+        self.assertTrue(math.isfinite(metrics["perplexity"]))
+        self.assertGreater(metrics["perplexity"], 8000)
+
     def test_training_routing_and_logging(self):
         torch.manual_seed(42)
         trainer = self.make_trainer()
