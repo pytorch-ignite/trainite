@@ -1,8 +1,28 @@
 import ast
+import re
 import warnings
 from typing import Any
 import torch
 from pydantic import BaseModel, ConfigDict
+
+_SOURCE_LINE_RE = re.compile(r"\r\n|\r|\n")
+
+
+def split_source_lines(text: str) -> list[str]:
+    """Split on LF/CRLF/CR, matching CPython's line numbering.
+
+    ``str.splitlines`` also treats Unicode separators such as U+2028 and U+2029 as
+    line breaks, while Python's parser does not. Using it here would misalign AST
+    line numbers and truncate functions whose docstrings contain those characters.
+    """
+    lines = []
+    start = 0
+    for match in _SOURCE_LINE_RE.finditer(text):
+        lines.append(text[start : match.end()])
+        start = match.end()
+    if start < len(text):
+        lines.append(text[start:])
+    return lines
 
 
 def parse_source(text: str) -> ast.Module:
@@ -67,7 +87,7 @@ def load_function_dataset(
             text = sample["text"]
             if not isinstance(text, str):
                 continue
-            lines = text.splitlines(keepends=True)
+            lines = split_source_lines(text)
             imports = import_prefix(text)
             for start, doc_end, end in function_spans(text):
                 # Match the transform's separately encoded prompt/body lengths, including EOS.
@@ -136,7 +156,7 @@ class PythonEduTransform:
         if len(spans) != 1:
             raise ValueError("Expected exactly one eligible documented function")
         start, doc_end, end = spans[0]
-        lines = text.splitlines(keepends=True)
+        lines = split_source_lines(text)
         prompt = import_prefix(text) + "".join(lines[start:doc_end])
         completion = "".join(lines[doc_end:end])
         prompt_ids = self.tokenizer.encode(prompt, add_special_tokens=False)

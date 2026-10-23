@@ -63,6 +63,28 @@ class DatasetTest(unittest.TestCase):
         ]:
             self.assertEqual(function_spans(invalid), [])
 
+    def test_unicode_line_separator_in_docstring(self):
+        source = (
+            "import random\n\n"
+            "def sample():\n"
+            '    """First line.\u2028Second line.\n\n'
+            "    More documentation.\n"
+            '    """\n'
+            "    value = 1\n"
+            "    return value\n"
+        )
+        transform = PythonEduTransform(Tokenizer(), 512)
+        item = transform({"text": source})
+        self.assertIn("\u2028", item.source)
+        self.assertTrue(item.source.endswith('    """\n'))
+        self.assertEqual(item.target, "    value = 1\n    return value\n")
+
+        raw = Dataset.from_dict({"text": [source]})
+        with patch("datasets.load_dataset", return_value=raw):
+            dataset = load_function_dataset(f"python-edu-{uuid.uuid4()}", Tokenizer(), 512)
+        self.assertEqual(len(dataset), 1)
+        self.assertEqual(transform(dataset[0]).target, item.target)
+
     def test_masking_and_collation(self):
         tokenizer = Tokenizer()
         transform = PythonEduTransform(tokenizer, max_length=256)
