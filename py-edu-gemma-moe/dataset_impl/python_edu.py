@@ -66,18 +66,14 @@ def import_prefix(text: str) -> str:
 
 
 def extract_functions(text: str) -> list[dict[str, str]]:
-    """Extract validated prompt/completion pairs from one raw source row.
-
-    Parsing happens here so malformed slices are caught before the transform
-    sees them. AST end lines can stop on a trailing backslash continuation, so
-    the slice is extended over those lines first.
-    """
+    """Extract validated prompt/completion pairs from one raw source row."""
     if not isinstance(text, str):
         return []
     lines = split_source_lines(text)
     imports = import_prefix(text)
     examples = []
     for start, doc_end, end in function_spans(text):
+        # Include lines consumed by a trailing backslash continuation.
         while end < len(lines) and lines[end - 1].rstrip("\r\n").endswith("\\"):
             end += 1
         prompt = imports + "".join(lines[start:doc_end])
@@ -108,7 +104,6 @@ def load_function_dataset(
         count = 0
         for sample in raw_dataset:
             for example in extract_functions(sample["text"]):
-                # Match the transform's separately encoded prompt/body lengths, including EOS.
                 prompt_length = len(tokenizer.encode(example["prompt"], add_special_tokens=False))
                 body_length = len(tokenizer.encode(example["completion"], add_special_tokens=False))
                 if not prompt_length or not body_length or prompt_length + body_length + 1 > max_length:
@@ -118,10 +113,7 @@ def load_function_dataset(
                 if dataset_size is not None and count >= dataset_size:
                     return
 
-    # The generator closes over the source dataset and filtering options.  Letting
-    # `datasets` cache it by generator code alone can silently reuse a stale split.
-    # Include the source fingerprint, filtering/tokenizer settings, and output
-    # schema in the cache key.
+    # Keep source/tokenizer settings and output schema in the cache key.
     source_fingerprint = getattr(raw_dataset, "_fingerprint", None) or "unknown"
     tokenizer_fingerprint = "|".join(
         str(getattr(tokenizer, attribute, ""))

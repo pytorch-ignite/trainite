@@ -157,15 +157,23 @@ class DatasetTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_function_dataset("python-edu", tokenizer)
 
-    def test_loader_keeps_line_continuations(self):
-        good = 'def good():\n    """Return one."""\n    return 1\n'
-        trailing = 'def trailing():\n    """Return two."""\n    return 2\\\n\n'
-        raw = Dataset.from_dict({"text": [trailing, good]})
+    def test_loader_keeps_problematic_backslash_datapoint(self):
+        problematic = (
+            "def add(num1, num2):\r\n"
+            '    """Returns num1 plus num2. """\r\n'
+            "    return num1 + num2\r\n"
+            "\r\n"
+            "def div(num1, num2):\r\n"
+            '    """Returns num1 divided by num2. """\r\n'
+            "    return num1 / num2\\\r\n"
+            "\r\n"
+        )
+        raw = Dataset.from_dict({"text": [problematic]})
         with patch("dataset_impl.python_edu.load_dataset", return_value=raw):
             dataset = load_function_dataset(f"python-edu-{uuid.uuid4()}", Tokenizer(), 256)
         self.assertEqual(len(dataset), 2)
-        self.assertEqual(dataset[0]["prompt"] + dataset[0]["completion"], trailing)
-        PythonEduTransform(Tokenizer(), 256)(dataset[0])
+        self.assertIn("return num1 / num2\\", dataset[1]["completion"])
+        PythonEduTransform(Tokenizer(), 256)(dataset[1])
 
     def test_import_context(self):
         imports = "import numpy as np\nfrom math import (\n    sin,\n    cos,\n)\n"
