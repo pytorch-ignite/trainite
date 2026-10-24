@@ -6,9 +6,14 @@ import warnings
 
 import torch
 
-from dataset_impl.python_edu import PythonEduTransform
+from dataset_impl.python_edu import (
+    PythonEduTransform,
+    extract_functions,
+    function_spans,
+    load_function_dataset,
+    parse_source,
+)
 from models.gemma4_moe import CausalLMCollateFn
-from dataset_impl.python_edu import function_spans, load_function_dataset, parse_source
 from unittest.mock import patch
 from datasets import Dataset
 
@@ -49,11 +54,14 @@ class DatasetTest(unittest.TestCase):
 
     def test_extraction(self):
         code = 'async def add(\n    a, b,\n):\n    """Add two numbers.\n\n    Preserve values.\n    """\n    # Keep indentation.\n    return a + b\n\ndef undocumented():\n    return 1\n'
-        rows = [PythonEduTransform(Tokenizer(), 512)({"text": code})]
-        self.assertEqual(len(rows), 1)
-        self.assertTrue(rows[0].source.startswith("async def add("))
-        self.assertTrue(rows[0].source.endswith('    """\n'))
-        self.assertEqual(rows[0].target, "    # Keep indentation.\n    return a + b\n")
+        examples = extract_functions(code)
+        self.assertEqual(len(examples), 1)
+        self.assertTrue(examples[0]["prompt"].startswith("async def add("))
+        self.assertTrue(examples[0]["prompt"].endswith('    """\n'))
+        self.assertEqual(examples[0]["completion"], "    # Keep indentation.\n    return a + b\n")
+        item = PythonEduTransform(Tokenizer(), 512)(examples[0])
+        self.assertTrue(item.source.startswith("async def add("))
+        self.assertEqual(item.target, examples[0]["completion"])
         for invalid in [
             "not valid python!",
             'def f(): """Doc."""; return 1',
@@ -61,7 +69,7 @@ class DatasetTest(unittest.TestCase):
             '@decorator\ndef f():\n    """Doc."""\n    return 1\n',
             'class C:\n    def f(self):\n        """Doc."""\n        return 1\n',
         ]:
-            self.assertEqual(function_spans(invalid), [])
+            self.assertEqual(extract_functions(invalid), [])
 
     def test_unicode_line_separator_in_docstring(self):
         source = (
@@ -74,13 +82,15 @@ class DatasetTest(unittest.TestCase):
             "    return value\n"
         )
         transform = PythonEduTransform(Tokenizer(), 512)
-        item = transform({"text": source})
+        examples = extract_functions(source)
+        self.assertEqual(len(examples), 1)
+        item = transform(examples[0])
         self.assertIn("\u2028", item.source)
         self.assertTrue(item.source.endswith('    """\n'))
         self.assertEqual(item.target, "    value = 1\n    return value\n")
 
         raw = Dataset.from_dict({"text": [source]})
-        with patch("datasets.load_dataset", return_value=raw):
+        with patch("dataset_impl.python_edu.load_dataset", return_value=raw):
             dataset = load_function_dataset(f"python-edu-{uuid.uuid4()}", Tokenizer(), 512)
         self.assertEqual(len(dataset), 1)
         self.assertEqual(transform(dataset[0]).target, item.target)
@@ -89,34 +99,34 @@ class DatasetTest(unittest.TestCase):
         tokenizer = Tokenizer()
         transform = PythonEduTransform(tokenizer, max_length=256)
         row = {"prompt": 'def f():\n    """Return one."""\n', "completion": "    return 1\n"}
-        item = transform({"text": row["prompt"] + row["completion"]})
+        item = transform(row)
         prompt_ids = tokenizer.encode(row["prompt"])
         body_ids = tokenizer.encode(row["completion"])
         n = len(prompt_ids)
         self.assertEqual(item.eval_input_ids.tolist(), prompt_ids)
         self.assertTrue((item.train_label_ids[: n - 1] == -100).all())
         self.assertEqual(item.train_label_ids[n - 1 :].tolist(), body_ids + [0])
-        batch = CausalLMCollateFn(tokenizer=tokenizer)([item, transform({"text": row["prompt"] + "    return 123\n"})])
+        batch = CausalLMCollateFn(tokenizer=tokenizer)([item, transform({**row, "completion": "    return 123\n"})])
         self.assertEqual(batch["input_ids"].shape, batch["labels"].shape)
         self.assertTrue((batch["labels"][batch["attention_mask"] == 0] == -100).all())
         logits = torch.randn(*batch["labels"].shape, 512, requires_grad=True)
         loss = torch.nn.functional.cross_entropy(logits.flatten(0, 1), batch["labels"].flatten())
         loss.backward()
         self.assertTrue(torch.isfinite(loss))
-        for bad in [{"text": ""}, {"text": row["prompt"]}, {"text": 42}]:
+        for bad in [{}, {"prompt": ""}, {"completion": ""}, {"prompt": row["prompt"], "completion": 42}]:
             with self.assertRaises(ValueError):
                 transform(bad)
         with self.assertRaises(ValueError):
-            PythonEduTransform(tokenizer, max_length=2)({"text": row["prompt"] + row["completion"]})
+            PythonEduTransform(tokenizer, max_length=2)(row)
 
     def test_dataset_loader(self):
         samples = [f'def f{i}():\n    """Return {i}."""\n    return {i}\n' for i in range(100)]
         raw = Dataset.from_dict({"text": samples + ["invalid python!"], "metadata": ["unused"] * 101})
-        with patch("datasets.load_dataset", return_value=raw) as load:
+        with patch("dataset_impl.python_edu.load_dataset", return_value=raw) as load:
             dataset = load_function_dataset("existing-python-edu", Tokenizer(), 256)
             load.assert_called_once_with("existing-python-edu", split="train")
             self.assertEqual(len(dataset), 100)
-            self.assertEqual(dataset.column_names, ["text"])
+            self.assertEqual(dataset.column_names, ["prompt", "completion"])
             for row in dataset:
                 PythonEduTransform(Tokenizer(), 256)(row)
             with self.assertRaises(ValueError):
@@ -130,13 +140,14 @@ class DatasetTest(unittest.TestCase):
         body = short[len(prompt) :]
         limit = len(Tokenizer().encode(prompt)) + len(Tokenizer().encode(body)) + 1
         with (
-            patch("datasets.load_dataset", return_value=raw),
+            patch("dataset_impl.python_edu.load_dataset", return_value=raw),
             patch(
                 "dataset_impl.python_edu.PythonEduTransform", new=lambda *a, **k: self.fail("Loader called transform")
             ),
         ):
             dataset = load_function_dataset("python-edu", Tokenizer(), max_length=limit)
-            self.assertEqual(dataset["text"], [short])
+            self.assertEqual(dataset["prompt"], [prompt])
+            self.assertEqual(dataset["completion"], [body])
             with self.assertRaises(ValueError):
                 load_function_dataset("python-edu", Tokenizer(), max_length=limit - 1)
             with self.assertRaises(ValueError):
@@ -146,6 +157,16 @@ class DatasetTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_function_dataset("python-edu", tokenizer)
 
+    def test_loader_skips_malformed_function_slices(self):
+        good = 'def good():\n    """Return one."""\n    return 1\n'
+        trailing = 'def trailing():\n    """Return two."""\n    return 2\\\n\n'
+        raw = Dataset.from_dict({"text": [trailing, good]})
+        with patch("dataset_impl.python_edu.load_dataset", return_value=raw):
+            dataset = load_function_dataset("python-edu", Tokenizer(), 256)
+        self.assertEqual(len(dataset), 1)
+        self.assertEqual(dataset[0]["prompt"] + dataset[0]["completion"], good)
+        PythonEduTransform(Tokenizer(), 256)(dataset[0])
+
     def test_import_context(self):
         imports = "import numpy as np\nfrom math import (\n    sin,\n    cos,\n)\n"
         function = 'def sig(x):\n    """Compute sigmoid."""\n    return 1 / (1 + np.exp(-x))\n'
@@ -153,18 +174,23 @@ class DatasetTest(unittest.TestCase):
         source = imports + "\nGLOBAL = 7\n\n" + function + "\nimport os\n"
         prefix = imports + "import os\n\n"
         raw = Dataset.from_dict({"text": [source]})
-        transform = PythonEduTransform(Tokenizer(), 512)
-        item = transform({"text": source})
+        examples = extract_functions(source)
+        self.assertEqual(len(examples), 1)
         expected_prompt = prefix + function[: function.index("    return")]
+        self.assertEqual(examples[0]["prompt"], expected_prompt)
+        self.assertEqual(examples[0]["completion"], "    return 1 / (1 + np.exp(-x))\n")
+        transform = PythonEduTransform(Tokenizer(), 512)
+        item = transform(examples[0])
         self.assertEqual(item.source, expected_prompt)
         self.assertEqual(item.target, "    return 1 / (1 + np.exp(-x))\n")
         prompt_ids = Tokenizer().encode(expected_prompt)
         self.assertEqual(item.eval_input_ids.tolist(), prompt_ids)
         self.assertTrue((item.train_label_ids[: len(prompt_ids) - 1] == -100).all())
         limit = len(prompt_ids) + len(Tokenizer().encode(item.target)) + 1
-        with patch("datasets.load_dataset", return_value=raw):
+        with patch("dataset_impl.python_edu.load_dataset", return_value=raw):
             dataset = load_function_dataset("python-edu", Tokenizer(), max_length=limit)
-            self.assertEqual(dataset[0]["text"], prefix + function)
+            self.assertEqual(dataset[0]["prompt"], expected_prompt)
+            self.assertEqual(dataset[0]["completion"], item.target)
             self.assertEqual(transform(dataset[0]).source, expected_prompt)
             with self.assertRaises(ValueError):
                 load_function_dataset("python-edu", Tokenizer(), max_length=limit - 1)
@@ -180,16 +206,16 @@ class DatasetTest(unittest.TestCase):
                 ]
             }
         )
-        with patch("datasets.load_dataset", return_value=raw):
+        with patch("dataset_impl.python_edu.load_dataset", return_value=raw):
             limited = load_function_dataset("python-edu", Tokenizer(), dataset_size=1)
             self.assertEqual(len(limited), 1)
-            self.assertTrue(limited[0]["text"].startswith("def a"))
+            self.assertTrue(limited[0]["prompt"].startswith("def a"))
             for size, expected in ((None, 3), (2, 2), (100, 3)):
                 subset = load_function_dataset("python-edu", Tokenizer(), dataset_size=size)
                 self.assertEqual(len(subset), expected)
                 if size == 2:
-                    self.assertTrue(subset[1]["text"].startswith("def b"))
-        with patch("datasets.load_dataset") as load:
+                    self.assertTrue(subset[1]["prompt"].startswith("def b"))
+        with patch("dataset_impl.python_edu.load_dataset") as load:
             for size in (0, -1, True, 1.5, "10"):
                 with self.assertRaises(ValueError):
                     load_function_dataset("python-edu", Tokenizer(), dataset_size=size)
@@ -216,14 +242,14 @@ class DatasetTest(unittest.TestCase):
             return original_spans(text)
 
         with (
-            patch("datasets.load_dataset", return_value=raw),
+            patch("dataset_impl.python_edu.load_dataset", return_value=raw),
             patch("dataset_impl.python_edu.function_spans", new=tracked_spans),
         ):
             # A fresh cache key keeps this test about generator early-stopping,
             # not about whether an earlier run already cached the same rows.
             dataset = load_function_dataset(f"python-edu-{uuid.uuid4()}", Tokenizer(), dataset_size=1)
             self.assertEqual(len(dataset), 1)
-            self.assertEqual(len(visited), 2)
+            self.assertFalse(any(text.startswith("def b") for text in visited))
 
     def test_config_dataloaders(self):
         from pathlib import Path
@@ -234,7 +260,7 @@ class DatasetTest(unittest.TestCase):
         raw = Dataset.from_dict({"text": [f'def f{i}():\n    """Return {i}."""\n    return {i}\n' for i in range(100)]})
         config.data.dataloader.num_workers = 0
         config.data.dataset.dataset_size = 50
-        with patch("datasets.load_dataset", return_value=raw):
+        with patch("dataset_impl.python_edu.load_dataset", return_value=raw):
             loaders = build_dataloaders(config.data, Tokenizer(), 42, config.model.collate_fn_target)
             self.assertEqual([len(loader.dataset) for loader in loaders], [40, 5, 5])
             load_indices = [set(loader.dataset.indices) for loader in loaders]

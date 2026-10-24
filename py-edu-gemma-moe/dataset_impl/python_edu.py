@@ -2,7 +2,9 @@ import ast
 import re
 import warnings
 from typing import Any
+
 import torch
+from datasets import Dataset, Features, Value, load_dataset
 from pydantic import BaseModel, ConfigDict
 
 _SOURCE_LINE_RE = re.compile(r"\r\n|\r|\n")
@@ -63,6 +65,26 @@ def import_prefix(text: str) -> str:
     return "\n".join(imports) + "\n\n" if imports else ""
 
 
+def extract_functions(text: str) -> list[dict[str, str]]:
+    """Extract validated prompt/completion pairs from one raw source row.
+
+    Parsing happens here so malformed slices, such as a function ending on a
+    dangling backslash continuation, are dropped before the transform sees them.
+    """
+    if not isinstance(text, str):
+        return []
+    lines = split_source_lines(text)
+    imports = import_prefix(text)
+    examples = []
+    for start, doc_end, end in function_spans(text):
+        prompt = imports + "".join(lines[start:doc_end])
+        completion = "".join(lines[doc_end:end])
+        if not prompt or not completion or len(function_spans(prompt + completion)) != 1:
+            continue
+        examples.append({"prompt": prompt, "completion": completion})
+    return examples
+
+
 def load_function_dataset(
     path: str,
     tokenizer: Any,
@@ -70,9 +92,7 @@ def load_function_dataset(
     split: str = "train",
     dataset_size: int | None = None,
 ):
-    """Index raw functions; the transform owns prompt/body formatting and tokenization."""
-    from datasets import Dataset, Features, Value, load_dataset
-
+    """Index raw functions; the transform only tokenizes precomputed pairs."""
     if dataset_size is not None and (type(dataset_size) is not int or dataset_size < 1):
         raise ValueError("dataset_size must be a positive integer or None")
     if max_length < 2:
@@ -84,34 +104,32 @@ def load_function_dataset(
     def generate():
         count = 0
         for sample in raw_dataset:
-            text = sample["text"]
-            if not isinstance(text, str):
-                continue
-            lines = split_source_lines(text)
-            imports = import_prefix(text)
-            for start, doc_end, end in function_spans(text):
+            for example in extract_functions(sample["text"]):
                 # Match the transform's separately encoded prompt/body lengths, including EOS.
-                prompt_length = len(tokenizer.encode(imports + "".join(lines[start:doc_end]), add_special_tokens=False))
-                body_length = len(tokenizer.encode("".join(lines[doc_end:end]), add_special_tokens=False))
+                prompt_length = len(tokenizer.encode(example["prompt"], add_special_tokens=False))
+                body_length = len(tokenizer.encode(example["completion"], add_special_tokens=False))
                 if not prompt_length or not body_length or prompt_length + body_length + 1 > max_length:
                     continue
-                yield {"text": imports + "".join(lines[start:end])}
+                yield example
                 count += 1
                 if dataset_size is not None and count >= dataset_size:
                     return
 
     # The generator closes over the source dataset and filtering options.  Letting
     # `datasets` cache it by generator code alone can silently reuse a stale split.
-    # Include the source fingerprint and filtering/tokenizer settings in the cache key.
+    # Include the source fingerprint, filtering/tokenizer settings, and output
+    # schema in the cache key.
     source_fingerprint = getattr(raw_dataset, "_fingerprint", None) or "unknown"
     tokenizer_fingerprint = "|".join(
         str(getattr(tokenizer, attribute, ""))
         for attribute in ("name_or_path", "vocab_size", "eos_token_id", "pad_token_id")
     )
-    fingerprint = f"{path}|{split}|{dataset_size}|{max_length}|{source_fingerprint}|{tokenizer_fingerprint}"
+    fingerprint = (
+        f"{path}|{split}|{dataset_size}|{max_length}|{source_fingerprint}|{tokenizer_fingerprint}|prompt-completion"
+    )
     dataset = Dataset.from_generator(
         generate,
-        features=Features({"text": Value("string")}),
+        features=Features({"prompt": Value("string"), "completion": Value("string")}),
         fingerprint=fingerprint,
     )
     if len(dataset) == 0:
@@ -149,16 +167,10 @@ class PythonEduTransform:
         self.max_length = max_length
 
     def __call__(self, sample: dict[str, object]) -> DatapointModel:
-        text = sample["text"]
-        if not isinstance(text, str):
-            raise ValueError("text must be a Python source string")
-        spans = function_spans(text)
-        if len(spans) != 1:
-            raise ValueError("Expected exactly one eligible documented function")
-        start, doc_end, end = spans[0]
-        lines = split_source_lines(text)
-        prompt = import_prefix(text) + "".join(lines[start:doc_end])
-        completion = "".join(lines[doc_end:end])
+        prompt = sample.get("prompt")
+        completion = sample.get("completion")
+        if not isinstance(prompt, str) or not isinstance(completion, str):
+            raise ValueError("Dataset rows must provide prompt and completion strings")
         prompt_ids = self.tokenizer.encode(prompt, add_special_tokens=False)
         body_ids = self.tokenizer.encode(completion, add_special_tokens=False)
         if not prompt_ids or not body_ids:

@@ -294,27 +294,29 @@ then indexes individual raw functions using a cached generator. No separate
 preparation script, JSONL export, or bucket configuration is required. Hugging
 Face handles its normal download and processing cache.
 
-Each dataset item retains the file's top-level imports followed by raw function
-source in `text`. Imports preserve source text and order, including aliases and
-multiline imports; nested or conditional imports are not lifted out of their
-original scope. `PythonEduTransform` extracts the prompt (imports, signature,
-and existing docstring) and target (remaining
-function body), tokenizes them, and masks the prompt labels. The loader checks
-token lengths directly to exclude oversized functions before batching; it does
-not instantiate or call the transform. Only top-level, undecorated functions with nonempty
-docstrings and remaining bodies are included. Async functions and multiline
-signatures are supported. Source is parsed, never executed. Missing docstrings,
-invalid Python, inline suites, and examples exceeding 512 tokens including EOS
-are skipped. Imports count toward the token limit. Dataset and transform `max_length` values
-must match.
+Each generator row is a validated prompt/completion pair: the prompt contains the
+file's top-level imports followed by the function signature and existing
+docstring, and the completion is the remaining function body. Imports preserve
+source text and order, including aliases and multiline imports; nested or
+conditional imports are not lifted out of their original scope. The generator
+drops malformed slices, such as a function ending on a dangling backslash
+continuation, so extraction errors happen before training. `PythonEduTransform`
+only tokenizes the precomputed strings and masks the prompt labels. The loader
+checks token lengths directly to exclude oversized functions before batching; it
+does not instantiate or call the transform. Only top-level, undecorated functions
+with nonempty docstrings and remaining bodies are included. Async functions and
+multiline signatures are supported. Source is parsed, never executed. Missing
+docstrings, invalid Python, inline suites, and examples exceeding 512 tokens
+including EOS are skipped. Imports count toward the token limit. Dataset and
+transform `max_length` values must match.
 
 Trainite's existing automatic split logic divides the extracted function examples
 into 80/10/10 train/validation/test sets using the configured seed. Ratios are
 controlled by `data.val_ratio` and `data.test_ratio`; the dataset loader does not
 split data. Functions from the same source file or duplicate functions can
 therefore appear in different splits.
-The transform tokenizes the examples, masks prompt labels with -100, supervises
-body tokens and EOS, and supplies only the prompt at inference.
+The transform masks prompt labels with -100, supervises body tokens and EOS, and
+supplies only the prompt at inference.
 
 Bodies may still depend on globals, helpers, or conditional imports absent from the prompt; these
 are training examples, not standalone correctness benchmarks. The shared Trainite
