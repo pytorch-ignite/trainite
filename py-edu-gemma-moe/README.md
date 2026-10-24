@@ -298,9 +298,9 @@ Each generator row is a validated prompt/completion pair: the prompt contains th
 file's top-level imports followed by the function signature and existing
 docstring, and the completion is the remaining function body. Imports preserve
 source text and order, including aliases and multiline imports; nested or
-conditional imports are not lifted out of their original scope. The generator
-drops malformed slices, such as a function ending on a dangling backslash
-continuation, so extraction errors happen before training. `PythonEduTransform`
+conditional imports are not lifted out of their original scope. The generator extends slices over trailing backslash continuations and drops
+only examples that still do not parse, so extraction errors happen before
+training. `PythonEduTransform`
 only tokenizes the precomputed strings and masks the prompt labels. The loader
 checks token lengths directly to exclude oversized functions before batching; it
 does not instantiate or call the transform. Only top-level, undecorated functions

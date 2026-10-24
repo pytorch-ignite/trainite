@@ -157,14 +157,14 @@ class DatasetTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_function_dataset("python-edu", tokenizer)
 
-    def test_loader_skips_malformed_function_slices(self):
+    def test_loader_keeps_line_continuations(self):
         good = 'def good():\n    """Return one."""\n    return 1\n'
         trailing = 'def trailing():\n    """Return two."""\n    return 2\\\n\n'
         raw = Dataset.from_dict({"text": [trailing, good]})
         with patch("dataset_impl.python_edu.load_dataset", return_value=raw):
-            dataset = load_function_dataset("python-edu", Tokenizer(), 256)
-        self.assertEqual(len(dataset), 1)
-        self.assertEqual(dataset[0]["prompt"] + dataset[0]["completion"], good)
+            dataset = load_function_dataset(f"python-edu-{uuid.uuid4()}", Tokenizer(), 256)
+        self.assertEqual(len(dataset), 2)
+        self.assertEqual(dataset[0]["prompt"] + dataset[0]["completion"], trailing)
         PythonEduTransform(Tokenizer(), 256)(dataset[0])
 
     def test_import_context(self):

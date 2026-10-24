@@ -68,8 +68,9 @@ def import_prefix(text: str) -> str:
 def extract_functions(text: str) -> list[dict[str, str]]:
     """Extract validated prompt/completion pairs from one raw source row.
 
-    Parsing happens here so malformed slices, such as a function ending on a
-    dangling backslash continuation, are dropped before the transform sees them.
+    Parsing happens here so malformed slices are caught before the transform
+    sees them. AST end lines can stop on a trailing backslash continuation, so
+    the slice is extended over those lines first.
     """
     if not isinstance(text, str):
         return []
@@ -77,6 +78,8 @@ def extract_functions(text: str) -> list[dict[str, str]]:
     imports = import_prefix(text)
     examples = []
     for start, doc_end, end in function_spans(text):
+        while end < len(lines) and lines[end - 1].rstrip("\r\n").endswith("\\"):
+            end += 1
         prompt = imports + "".join(lines[start:doc_end])
         completion = "".join(lines[doc_end:end])
         if not prompt or not completion or len(function_spans(prompt + completion)) != 1:
