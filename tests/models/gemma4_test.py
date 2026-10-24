@@ -496,6 +496,17 @@ def test_gemma4_config_defaults_to_sg_pattern(config_cls):
     assert config.attention_dropout == 0.0
 
 
+@pytest.mark.parametrize("model_factory", [make_dense_model, make_moe_model])
+def test_gemma4_embedding_initialization_avoids_self_prediction(model_factory):
+    torch.manual_seed(0)
+    model = model_factory()
+
+    with torch.no_grad():
+        probabilities = model(torch.full((1, 8), 5)).softmax(dim=-1)
+
+    assert probabilities.max().item() < 0.1
+
+
 @pytest.mark.parametrize(
     ("spec_name", "model_cls"),
     [
