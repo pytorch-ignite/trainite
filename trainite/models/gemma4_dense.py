@@ -396,6 +396,10 @@ class Gemma4DenseModel(nn.Module):
         )
 
         self.token_embedding = nn.Embedding(vocab_size, hidden_size, padding_idx=pad_token_id)
+        # Gemma initializes embeddings with std=0.02.
+        nn.init.normal_(self.token_embedding.weight, mean=0.0, std=0.02)
+        if pad_token_id is not None:
+            self.token_embedding.weight.data[pad_token_id].zero_()
         self.embedding_scale = hidden_size**0.5
         self.final_logit_softcap = final_logit_softcap
 
