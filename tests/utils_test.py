@@ -16,7 +16,14 @@ from trainite.config.base import (
     SplitConfig,
     TrainerConfig,
 )
-from trainite.shared.utils import create_accelerator, create_run_dir, get_target, instantiate, dump_config, load_config
+from trainite.shared.utils import (
+    create_accelerator,
+    create_run_dir,
+    get_target,
+    instantiate,
+    dump_config,
+    load_config,
+)
 
 
 class MockComponent(BaseModel):
