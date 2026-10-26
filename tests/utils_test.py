@@ -16,15 +16,7 @@ from trainite.config.base import (
     SplitConfig,
     TrainerConfig,
 )
-from trainite.shared.utils import (
-    create_accelerator,
-    create_run_dir,
-    get_target,
-    instantiate,
-    dump_config,
-    load_config,
-    get_unique_param_names,
-)
+from trainite.shared.utils import create_accelerator, create_run_dir, get_target, instantiate, dump_config, load_config
 
 
 class MockComponent(BaseModel):
@@ -116,6 +108,17 @@ def test_load_grid_configs_no_sweep(tmp_path):
     assert params == {}
 
 
+def test_load_grid_configs_rejects_empty_sweep_parameter(tmp_path):
+    config_file = tmp_path / "config_empty_sweep.yaml"
+    config_file.write_text("optimizer:\n  lr: 0.01\nsweep:\n  optimizer:\n    lr: []\n")
+
+    with pytest.raises(
+        ValueError,
+        match="Sweep parameter 'optimizer.lr' must contain at least one value",
+    ):
+        load_grid_configs(config_file, MockSweepConfig)
+
+
 def test_load_grid_configs_with_nested_sweep(tmp_path):
     config_file = tmp_path / "config_sweep.yaml"
     yaml_content = (
@@ -171,24 +174,6 @@ def test_load_grid_configs_sweep_typo(tmp_path):
 
     with pytest.raises(KeyError, match="Sweep key 'optimizer.lrr' does not exist"):
         load_grid_configs(config_file, MockSweepConfig)
-
-
-def test_get_unique_param_names_abbreviates_parent_components():
-    keys = [
-        "data.train.dataloader.batch_size",
-        "data.val.dataloader.batch_size",
-        "optimizer.lr",
-    ]
-
-    assert get_unique_param_names(keys) == [
-        "D-T-D-batch_size",
-        "D-V-D-batch_size",
-        "O-lr",
-    ]
-
-
-def test_get_unique_param_names_handles_single_component():
-    assert get_unique_param_names(["batch_size"]) == ["batch_size"]
 
 
 def make_dummy_config(root_dir: Path, device: str | None = None) -> ProjectConfig:

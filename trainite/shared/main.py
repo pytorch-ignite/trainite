@@ -2,7 +2,7 @@ import argparse
 from pathlib import Path
 
 from trainite.shared.utils import load_grid_configs
-from trainite.trainers.decoder_trainer import ProjectConfig, Trainer
+from trainite.trainers.decoder_trainer import Trainer, ProjectConfig
 
 
 def main() -> None:
