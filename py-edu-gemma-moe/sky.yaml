@@ -1,0 +1,26 @@
+# For full SkyPilot YAML reference, visit: https://docs.skypilot.ai/en/latest/reference/yaml-spec.html
+
+name: "py-edu-gemma-moe"
+
+workdir: .
+
+resources:
+  cloud: vast
+  accelerators: RTX3090:2
+  use_spot: true
+  disk_size: 50
+
+file_mounts:
+  ~/clearml.conf: ~/clearml.conf
+
+setup: |
+  pip install uv
+  uv sync
+
+run: |
+  uv run accelerate launch main.py config.yaml
+
+# envs:
+#   # Optional environment variables (accessible in setup and run, or override via --env)
+#   MY_BUCKET: skypilot-data
+#   MY_ENV_VAR: value

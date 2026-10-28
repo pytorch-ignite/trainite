@@ -1,5 +1,6 @@
 import ast
 import re
+import symtable
 import warnings
 from typing import Any
 
@@ -33,12 +34,42 @@ def parse_source(text: str) -> ast.Module:
         return ast.parse(text)
 
 
-def function_spans(text: str) -> list[tuple[int, int, int]]:
-    """Index eligible top-level functions as start/docstring-end/function-end lines."""
+def _referenced_globals(table: symtable.SymbolTable) -> set[str]:
+    """Return names a function scope reads from the module or an outer scope."""
+    names = {symbol.get_name() for symbol in table.get_symbols() if symbol.is_global() and symbol.is_referenced()}
+    for child in table.get_children():
+        names |= _referenced_globals(child)
+    return names
+
+
+def module_scope_names(text: str) -> tuple[set[str], dict[str, set[str]]] | None:
+    """Return module-level names and the globals each top-level function reads.
+
+    Imports are excluded because ``import_prefix`` already puts them in the
+    prompt. A function that reads any remaining module-level name depends on
+    context that the prompt does not carry.
+    """
     try:
-        tree = parse_source(text)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            table = symtable.symtable(text, "<source>", "exec")
     except (SyntaxError, ValueError, RecursionError):
-        return []
+        return None
+    module_names = {
+        symbol.get_name()
+        for symbol in table.get_symbols()
+        if (symbol.is_assigned() or symbol.is_namespace()) and not symbol.is_imported()
+    }
+    return module_names, {child.get_name(): _referenced_globals(child) for child in table.get_children()}
+
+
+def function_spans(text: str, tree: ast.Module | None = None) -> list[tuple[int, int, int]]:
+    """Index eligible top-level functions as start/docstring-end/function-end lines."""
+    if tree is None:
+        try:
+            tree = parse_source(text)
+        except (SyntaxError, ValueError, RecursionError):
+            return []
     spans = []
     for node in tree.body:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -53,12 +84,13 @@ def function_spans(text: str) -> list[tuple[int, int, int]]:
     return spans
 
 
-def import_prefix(text: str) -> str:
+def import_prefix(text: str, tree: ast.Module | None = None) -> str:
     """Preserve top-level import statements without executing or resolving them."""
-    try:
-        tree = parse_source(text)
-    except (SyntaxError, ValueError, RecursionError):
-        return ""
+    if tree is None:
+        try:
+            tree = parse_source(text)
+        except (SyntaxError, ValueError, RecursionError):
+            return ""
     imports = [
         ast.get_source_segment(text, node) for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))
     ]
@@ -66,13 +98,27 @@ def import_prefix(text: str) -> str:
 
 
 def extract_functions(text: str) -> list[dict[str, str]]:
-    """Extract validated prompt/completion pairs from one raw source row."""
+    """Extract validated, self-contained prompt/completion pairs from one raw source row."""
     if not isinstance(text, str):
         return []
+    try:
+        tree = parse_source(text)
+    except (SyntaxError, ValueError, RecursionError):
+        return []
+    scope = module_scope_names(text)
+    if scope is None:
+        return []
+    module_names, function_deps = scope
+    names_by_line = {
+        node.lineno: node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
     lines = split_source_lines(text)
-    imports = import_prefix(text)
+    imports = import_prefix(text, tree)
     examples = []
-    for start, doc_end, end in function_spans(text):
+    for start, doc_end, end in function_spans(text, tree):
+        name = names_by_line.get(start + 1)
+        if name is None or function_deps.get(name, set()) & (module_names - {name}):
+            continue
         # Include lines consumed by a trailing backslash continuation.
         while end < len(lines) and lines[end - 1].rstrip("\r\n").endswith("\\"):
             end += 1
@@ -120,7 +166,8 @@ def load_function_dataset(
         for attribute in ("name_or_path", "vocab_size", "eos_token_id", "pad_token_id")
     )
     fingerprint = (
-        f"{path}|{split}|{dataset_size}|{max_length}|{source_fingerprint}|{tokenizer_fingerprint}|prompt-completion"
+        f"{path}|{split}|{dataset_size}|{max_length}|{source_fingerprint}|{tokenizer_fingerprint}|"
+        "prompt-completion|self-contained"
     )
     dataset = Dataset.from_generator(
         generate,

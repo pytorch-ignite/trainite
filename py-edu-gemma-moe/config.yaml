@@ -67,6 +67,6 @@ trainer:
 output:
   root: outputs
   run_name: gemma4_moe__python_edu
-logger: tensorboard
+logger: clearml
 seed: 42
-device: mps
+device: null

@@ -3,9 +3,13 @@
 import unittest
 import uuid
 import warnings
+from pathlib import Path
+from unittest.mock import patch
 
 import torch
+from datasets import Dataset
 
+from config import ProjectConfig
 from dataset_impl.python_edu import (
     PythonEduTransform,
     extract_functions,
@@ -14,8 +18,7 @@ from dataset_impl.python_edu import (
     parse_source,
 )
 from models.gemma4_moe import CausalLMCollateFn
-from unittest.mock import patch
-from datasets import Dataset
+from utils import build_dataloaders, load_config
 
 
 class Tokenizer:
@@ -70,6 +73,41 @@ class DatasetTest(unittest.TestCase):
             'class C:\n    def f(self):\n        """Doc."""\n        return 1\n',
         ]:
             self.assertEqual(extract_functions(invalid), [])
+
+    def test_extraction_keeps_only_self_contained_functions(self):
+        source = (
+            "import math\n\n"
+            "LIMIT = 10\n\n"
+            "def helper(x):\n"
+            '    """Double x."""\n'
+            "    return x * 2\n\n"
+            "def uses_helper(x):\n"
+            '    """Double x, capped."""\n'
+            "    return min(helper(x), LIMIT)\n\n"
+            "def uses_constant(x):\n"
+            '    """Cap x."""\n'
+            "    return min(x, LIMIT)\n\n"
+            "def uses_nested_helper(x):\n"
+            '    """Double x through a closure."""\n'
+            "    def inner():\n"
+            "        return helper(x)\n"
+            "    return inner()\n\n"
+            "def shadows_constant(x):\n"
+            '    """Cap x with a local."""\n'
+            "    LIMIT = 5\n"
+            "    return min(x, LIMIT)\n\n"
+            "def uses_import(x):\n"
+            '    """Floor x."""\n'
+            "    return math.floor(x)\n"
+        )
+        prompts = [example["prompt"] for example in extract_functions(source)]
+        self.assertEqual(len(prompts), 3)
+        self.assertTrue(any("def helper(" in prompt for prompt in prompts))
+        self.assertTrue(any("def shadows_constant(" in prompt for prompt in prompts))
+        self.assertTrue(any("def uses_import(" in prompt for prompt in prompts))
+        self.assertFalse(any("def uses_helper(" in prompt for prompt in prompts))
+        self.assertFalse(any("def uses_constant(" in prompt for prompt in prompts))
+        self.assertFalse(any("def uses_nested_helper(" in prompt for prompt in prompts))
 
     def test_unicode_line_separator_in_docstring(self):
         source = (
@@ -230,8 +268,6 @@ class DatasetTest(unittest.TestCase):
             load.assert_not_called()
 
     def test_dataset_size_stops_processing(self):
-        from dataset_impl.python_edu import function_spans as original_spans
-
         raw = Dataset.from_dict(
             {
                 "text": [
@@ -243,11 +279,11 @@ class DatasetTest(unittest.TestCase):
         )
         visited = []
 
-        def tracked_spans(text):
+        def tracked_spans(text, tree=None):
             visited.append(text)
             if text.startswith("def b"):
                 raise AssertionError("Read past requested usable example count")
-            return original_spans(text)
+            return function_spans(text, tree)
 
         with (
             patch("dataset_impl.python_edu.load_dataset", return_value=raw),
@@ -260,10 +296,6 @@ class DatasetTest(unittest.TestCase):
             self.assertFalse(any(text.startswith("def b") for text in visited))
 
     def test_config_dataloaders(self):
-        from pathlib import Path
-        from config import ProjectConfig
-        from utils import load_config, build_dataloaders
-
         config = load_config(Path(__file__).with_name("config.yaml"), ProjectConfig)
         raw = Dataset.from_dict({"text": [f'def f{i}():\n    """Return {i}."""\n    return {i}\n' for i in range(100)]})
         config.data.dataloader.num_workers = 0

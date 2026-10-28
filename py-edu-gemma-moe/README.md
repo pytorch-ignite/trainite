@@ -178,17 +178,13 @@ The default `logger: tensorboard` stores metrics and checkpoints locally. To use
 1. Run `clearml-init` to configure your ClearML server and credentials.
 2. Set `logger: clearml` in `config.yaml`.
 
-ClearML runs still keep checkpoints in the local output directory. By default, `ClearMLSaver` also uploads them to
-ClearML's file server with `output_uri=True`.
+ClearML runs log metrics and keep checkpoints in the local output directory during training. After training, the best
+checkpoint is uploaded once as a ClearML artifact with `wait_on_upload=True`. PyTorch auto-connect is disabled, so
+checkpoints are not registered as `Imported by <run>` models.
 
-To change checkpoint storage, edit the `ClearMLSaver` call in `trainer.py`:
-
-- Use a storage URI such as `s3://bucket/path` to upload somewhere else.
-- Use `None` to leave the destination to `CLEARML_DEFAULT_OUTPUT_URI` or
-  `sdk.development.default_output_uri` in `clearml.conf`.
-
-To disable checkpoint uploads while retaining ClearML metric logging, pass `output_uri=False` to `ClearMLLogger` in
-`utils.py` and use `output_uri=None` for `ClearMLSaver` in `trainer.py`.
+Uploads are best-effort: if one fails, the error is logged and the local checkpoint is kept. Artifacts are stored at the
+task's output URI, which comes from `CLEARML_DEFAULT_OUTPUT_URI` or `sdk.development.default_output_uri` in
+`clearml.conf`. Set it to an `s3://` or `gs://` path if the worker's local disk will not persist.
 
 ## Components
 
@@ -300,7 +296,9 @@ docstring, and the completion is the remaining function body. Imports preserve
 source text and order, including aliases and multiline imports; nested or
 conditional imports are not lifted out of their original scope. The generator extends slices over trailing backslash continuations and drops
 only examples that still do not parse, so extraction errors happen before
-training. `PythonEduTransform`
+training. Functions that read a sibling function, class, or module-level
+variable from the same file are skipped: the prompt carries imports but not
+that context, and HumanEval prompts are self-contained. `PythonEduTransform`
 only tokenizes the precomputed strings and masks the prompt labels. The loader
 checks token lengths directly to exclude oversized functions before batching; it
 does not instantiate or call the transform. Only top-level, undecorated functions

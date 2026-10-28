@@ -17,7 +17,6 @@ from ignite.handlers import (
     EarlyStopping,
     create_lr_scheduler_with_warmup,
 )
-from ignite.handlers.clearml_logger import ClearMLSaver
 from ignite.handlers.fbresearch_logger import FBResearchLogger
 from ignite.handlers.param_scheduler import ParamScheduler
 from ignite.utils import setup_logger
@@ -401,7 +400,7 @@ def attach_early_stopping(
 def setup_training_checkpointing(
     engine: Engine,
     to_save: dict[str, Any],
-    save_handler: DiskSaver | ClearMLSaver,
+    save_handler: DiskSaver,
 ) -> Checkpoint:
     """Save the latest model and optimizer state at the end of every epoch.
 
@@ -429,7 +428,7 @@ def setup_best_model_checkpoint(
     engine: Engine,
     val_evaluator: Engine,
     to_save: dict[str, Any],
-    save_handler: DiskSaver | ClearMLSaver,
+    save_handler: DiskSaver,
     score_function: Callable,
     score_name: str,
 ) -> Checkpoint:

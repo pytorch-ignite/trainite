@@ -18,6 +18,8 @@ dependencies = [
     "tensorboard",
     "torch",
     "transformers",
+    "skypilot[vast]>=0.14.1",
+    "vastai-sdk",
 ]
 requires-python = ">=3.10"
 

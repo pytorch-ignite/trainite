@@ -10,7 +10,6 @@ from accelerate import Accelerator
 import torch
 from ignite.engine import Engine, Events
 from ignite.handlers import DiskSaver
-from ignite.handlers.clearml_logger import ClearMLSaver
 from ignite.handlers.logger_utils import setup_clearml_logging, setup_tb_logging
 from ignite.metrics import Accuracy, Loss, Metric, Perplexity, RunningAverage
 from ignite.utils import setup_logger
@@ -249,6 +248,7 @@ class Trainer:
                     **logging_kwargs,
                     project_name=config.project_name,
                     task_name=self.run_dir.name,
+                    auto_connect_frameworks={"pytorch": False},
                 )
                 self.exp_logger.get_task().upload_artifact(
                     name="config.yaml", artifact_object=str(self.run_dir / "config.yaml")
@@ -261,16 +261,7 @@ class Trainer:
 
         # Setup save handler and checkpointing on main process only
         if self.accelerator.is_main_process:
-            if config.logger == "clearml":
-                # Keep local checkpoints in run_dir; ClearML uses its configured output_uri for optional uploads.
-                save_handler = ClearMLSaver(
-                    logger=self.exp_logger,
-                    dirname=str(self.run_dir),
-                    output_uri=True,
-                    require_empty=False,
-                )
-            else:
-                save_handler = DiskSaver(dirname=str(self.run_dir), require_empty=False)
+            save_handler = DiskSaver(dirname=str(self.run_dir), require_empty=False)
 
             # Unwrap model before checkpointing to save clean weights without distributed ('module.') prefixes
             unwrapped_model: torch.nn.Module = self.accelerator.unwrap_model(self.model)
@@ -599,8 +590,31 @@ class Trainer:
             if self.test_loader:
                 self.test()
         finally:
+            self._upload_checkpoints()
             if self.exp_logger is not None:
                 self.exp_logger.close()
+
+    def _upload_checkpoints(self) -> None:
+        """Upload the final checkpoint once, after training has stopped."""
+        if self.config.logger != "clearml" or self.exp_logger is None:
+            return
+        if not self.accelerator.is_main_process:
+            return
+
+        checkpoint = self.run_dir / "best.pt"
+        if not checkpoint.exists():
+            checkpoint = self.run_dir / "last.pt"
+        if not checkpoint.exists():
+            return
+
+        try:
+            self.exp_logger.get_task().upload_artifact(
+                checkpoint.name,
+                artifact_object=str(checkpoint),
+                wait_on_upload=True,
+            )
+        except Exception:
+            self.logger.exception("ClearML upload failed; checkpoint kept at %s", checkpoint)
 
     def test(self, test_loader: DataLoader | None = None) -> None:
         loader = test_loader or self.test_loader
