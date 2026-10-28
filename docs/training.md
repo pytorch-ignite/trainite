@@ -62,6 +62,10 @@ output:
 logger: tensorboard
 seed: 42
 device: null
+
+sweep:
+  optimizer:
+    lr: [0.0001, 0.0003, 0.001]
 ```
 
 ### How `_target_` works
@@ -107,6 +111,8 @@ Note that `dataloader` blocks accept standard PyTorch `DataLoader` options (such
 
 **`device`** — `cpu`, `cuda`, or `null` to let Trainite pick automatically via PyTorch-Ignite's distributed utilities.
 
+**`sweep`** — Optional grid-search configuration. Specify the parameters to explore using the same nested structure as the main configuration, with a list of candidate values for each parameter. Trainite generates and runs every combination of the specified values, while parameters not included in sweep retain their base configuration values
+
 ### Starter component choices
 
 `trainite init` currently provides:
@@ -141,7 +147,7 @@ python main.py config.yaml
 
 What happens under the hood:
 
-1. The YAML is loaded and validated into a `ProjectConfig` instance.
+1. The YAML is loaded. If a `sweep` section is present, Trainite generates all combinations of the specified parameter values; otherwise, it creates a single configuration. Each configuration is validated into a `ProjectConfig` instance.
 2. The preprocessor, model, and dataset/transform components are instantiated from their `_target_` entries. DataLoaders are constructed from the `dataloader` options and `collate_fn_target`. The optimizer is created with the model parameters.
 3. Logging, metrics, and the output directory are set up.
 4. `trainer.run()` starts the PyTorch-Ignite training loop — running epochs, evaluating on the validation set, saving checkpoints, and optionally running test evaluation at the end.

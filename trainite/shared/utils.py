@@ -163,7 +163,7 @@ def load_grid_configs(path: str | Path, config_cls: type[T]) -> list[tuple[T, di
         del base_run_conf["sweep"]
 
     if not sweep_params:
-        return [(config_cls.model_validate(base_run_conf), {})]
+        return [(config_cls.model_validate(OmegaConf.to_container(base_run_conf, resolve=True)), {})]
 
     sweep_params_dict = OmegaConf.to_container(sweep_params, resolve=True)
     flat_sweep_params = flatten_sweep_config(sweep_params_dict)
@@ -196,7 +196,7 @@ def load_grid_configs(path: str | Path, config_cls: type[T]) -> list[tuple[T, di
             if OmegaConf.select(run_conf, "output.run_name") is not None:
                 run_conf.output.run_name = f"{run_conf.output.run_name}_{name_suffix}"
 
-        configs.append((config_cls.model_validate(run_conf), combo_dict))
+        configs.append((config_cls.model_validate(OmegaConf.to_container(run_conf, resolve=True)), combo_dict))
 
     return configs
 

@@ -183,6 +183,21 @@ def test_load_grid_configs_sweep_typo(tmp_path):
         load_grid_configs(config_file, MockSweepConfig)
 
 
+def test_load_grid_configs_returns_dictionary(tmp_path):
+    class DictionaryCheckingConfig(BaseModel):
+        @classmethod
+        def model_validate(cls, obj, **kwargs):
+            assert isinstance(obj, dict)
+            return super().model_validate(obj, **kwargs)
+
+        name: str
+
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("name: test\n")
+
+    load_grid_configs(config_file, DictionaryCheckingConfig)
+
+
 def make_dummy_config(root_dir: Path, device: str | None = None) -> ProjectConfig:
     return ProjectConfig(
         project_name="test_proj",
