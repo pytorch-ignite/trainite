@@ -294,11 +294,14 @@ Each generator row is a validated prompt/completion pair: the prompt contains th
 file's top-level imports followed by the function signature and existing
 docstring, and the completion is the remaining function body. Imports preserve
 source text and order, including aliases and multiline imports; nested or
-conditional imports are not lifted out of their original scope. The generator extends slices over trailing backslash continuations and drops
-only examples that still do not parse, so extraction errors happen before
-training. Functions that read a sibling function, class, or module-level
-variable from the same file are skipped: the prompt carries imports but not
-that context, and HumanEval prompts are self-contained. `PythonEduTransform`
+conditional imports are not lifted out of their original scope. Files with
+relative imports or imports outside `_ALLOWED_IMPORTS` (the standard library
+plus common third-party packages such as NumPy and SciPy) are skipped. The
+generator extends slices over trailing backslash continuations and drops
+examples that still do not parse, so extraction errors happen before training.
+Functions that read a sibling function, class, or module-level variable from the
+same file are skipped: the prompt carries imports but not that context, and
+HumanEval prompts are self-contained. `PythonEduTransform`
 only tokenizes the precomputed strings and masks the prompt labels. The loader
 checks token lengths directly to exclude oversized functions before batching; it
 does not instantiate or call the transform. Only top-level, undecorated functions
@@ -316,9 +319,9 @@ therefore appear in different splits.
 The transform masks prompt labels with -100, supervises body tokens and EOS, and
 supplies only the prompt at inference.
 
-Bodies may still depend on globals, helpers, or conditional imports absent from the prompt; these
-are training examples, not standalone correctness benchmarks. The shared Trainite
-raw-code pretraining component remains unchanged.
+Dynamic lookups such as `globals()["helper"]`, `getattr(...)`, and dynamic
+imports are not detected. The shared Trainite raw-code pretraining component
+remains unchanged.
 
 ### Trainer: decoder_trainer
 # Trainer

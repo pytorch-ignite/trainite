@@ -109,6 +109,47 @@ class DatasetTest(unittest.TestCase):
         self.assertFalse(any("def uses_constant(" in prompt for prompt in prompts))
         self.assertFalse(any("def uses_nested_helper(" in prompt for prompt in prompts))
 
+    def test_extraction_rejects_relative_imports(self):
+        source = 'from .helper import helper\n\ndef f(x):\n    """Call helper."""\n    return helper(x)\n'
+        self.assertEqual(extract_functions(source), [])
+
+    def test_extraction_allows_only_allowlisted_imports(self):
+        source = 'import numpy as np\n\ndef f(x):\n    """Use numpy."""\n    return np.abs(x)\n'
+        self.assertEqual(len(extract_functions(source)), 1)
+        for imports in (
+            "import helpers",
+            "from app.db import Base",
+            "from . import helper",
+            "from .numpy import array",
+        ):
+            with self.subTest(imports=imports):
+                source = f'{imports}\n\ndef f(x):\n    """Use a helper."""\n    return x\n'
+                self.assertEqual(extract_functions(source), [])
+
+    def test_extraction_rejects_signature_dependencies(self):
+        source = (
+            "def helper():\n"
+            '    """Return one."""\n'
+            "    return 1\n\n"
+            "class Marker:\n"
+            "    pass\n\n"
+            "def uses_default(x=helper()):\n"
+            '    """Use a helper in a default."""\n'
+            "    return x\n\n"
+            "def uses_annotation(x: Marker) -> Marker:\n"
+            '    """Use a class in annotations."""\n'
+            "    return x\n\n"
+            "def independent(x: int) -> int:\n"
+            '    """Use only builtins."""\n'
+            "    return x + 1\n"
+        )
+        prompts = [example["prompt"] for example in extract_functions(source)]
+        self.assertEqual(len(prompts), 2)
+        self.assertTrue(any("def helper(" in prompt for prompt in prompts))
+        self.assertTrue(any("def independent(" in prompt for prompt in prompts))
+        self.assertFalse(any("def uses_default(" in prompt for prompt in prompts))
+        self.assertFalse(any("def uses_annotation(" in prompt for prompt in prompts))
+
     def test_unicode_line_separator_in_docstring(self):
         source = (
             "import random\n\n"

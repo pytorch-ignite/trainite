@@ -1,6 +1,7 @@
 import ast
 import re
 import symtable
+import sys
 import warnings
 from typing import Any
 
@@ -9,6 +10,25 @@ from datasets import Dataset, Features, Value, load_dataset
 from pydantic import BaseModel, ConfigDict
 
 _SOURCE_LINE_RE = re.compile(r"\r\n|\r|\n")
+_ALLOWED_IMPORTS = frozenset(sys.stdlib_module_names) | {
+    "PIL",
+    "bs4",
+    "cv2",
+    "keras",
+    "matplotlib",
+    "mpl_toolkits",
+    "networkx",
+    "nltk",
+    "numpy",
+    "pandas",
+    "pygame",
+    "requests",
+    "scipy",
+    "seaborn",
+    "sklearn",
+    "tensorflow",
+    "torch",
+}
 
 
 def split_source_lines(text: str) -> list[str]:
@@ -34,33 +54,47 @@ def parse_source(text: str) -> ast.Module:
         return ast.parse(text)
 
 
-def _referenced_globals(table: symtable.SymbolTable) -> set[str]:
-    """Return names a function scope reads from the module or an outer scope."""
-    names = {symbol.get_name() for symbol in table.get_symbols() if symbol.is_global() and symbol.is_referenced()}
-    for child in table.get_children():
-        names |= _referenced_globals(child)
-    return names
+def _import_roots(tree: ast.Module) -> set[str] | None:
+    """Return imported root modules, or None if any import is relative."""
+    roots = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            roots.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                return None
+            if node.module:
+                roots.add(node.module.split(".")[0])
+    return roots
 
 
-def module_scope_names(text: str) -> tuple[set[str], dict[str, set[str]]] | None:
-    """Return module-level names and the globals each top-level function reads.
-
-    Imports are excluded because ``import_prefix`` already puts them in the
-    prompt. A function that reads any remaining module-level name depends on
-    context that the prompt does not carry.
-    """
+def _symtable(text: str) -> symtable.SymbolTable | None:
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", SyntaxWarning)
-            table = symtable.symtable(text, "<source>", "exec")
+            return symtable.symtable(text, "<source>", "exec")
     except (SyntaxError, ValueError, RecursionError):
         return None
-    module_names = {
+
+
+def _module_names(text: str) -> set[str] | None:
+    """Return module-level names that are not imports."""
+    table = _symtable(text)
+    if table is None:
+        return None
+    return {
         symbol.get_name()
         for symbol in table.get_symbols()
         if (symbol.is_assigned() or symbol.is_namespace()) and not symbol.is_imported()
     }
-    return module_names, {child.get_name(): _referenced_globals(child) for child in table.get_children()}
+
+
+def _referenced_globals(table: symtable.SymbolTable) -> set[str]:
+    """Return module-level names read by a scope or any nested scope."""
+    names = {symbol.get_name() for symbol in table.get_symbols() if symbol.is_global() and symbol.is_referenced()}
+    for child in table.get_children():
+        names |= _referenced_globals(child)
+    return names
 
 
 def function_spans(text: str, tree: ast.Module | None = None) -> list[tuple[int, int, int]]:
@@ -105,26 +139,37 @@ def extract_functions(text: str) -> list[dict[str, str]]:
         tree = parse_source(text)
     except (SyntaxError, ValueError, RecursionError):
         return []
-    scope = module_scope_names(text)
-    if scope is None:
+    imported_roots = _import_roots(tree)
+    if imported_roots is None or not imported_roots <= _ALLOWED_IMPORTS:
         return []
-    module_names, function_deps = scope
-    names_by_line = {
-        node.lineno: node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    }
+    module_names = _module_names(text)
+    if module_names is None:
+        return []
     lines = split_source_lines(text)
     imports = import_prefix(text, tree)
     examples = []
     for start, doc_end, end in function_spans(text, tree):
-        name = names_by_line.get(start + 1)
-        if name is None or function_deps.get(name, set()) & (module_names - {name}):
-            continue
         # Include lines consumed by a trailing backslash continuation.
         while end < len(lines) and lines[end - 1].rstrip("\r\n").endswith("\\"):
             end += 1
         prompt = imports + "".join(lines[start:doc_end])
         completion = "".join(lines[doc_end:end])
-        if not prompt or not completion or len(function_spans(prompt + completion)) != 1:
+        if not prompt or not completion:
+            continue
+
+        combined = prompt + completion
+        try:
+            combined_tree = parse_source(combined)
+        except (SyntaxError, ValueError, RecursionError):
+            continue
+        functions = [node for node in combined_tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        if len(functions) != 1 or len(function_spans(combined, combined_tree)) != 1:
+            continue
+        table = _symtable(combined)
+        if table is None:
+            continue
+        imported = {symbol.get_name() for symbol in table.get_symbols() if symbol.is_imported()}
+        if _referenced_globals(table) & (module_names - imported - {functions[0].name}):
             continue
         examples.append({"prompt": prompt, "completion": completion})
     return examples
@@ -167,7 +212,7 @@ def load_function_dataset(
     )
     fingerprint = (
         f"{path}|{split}|{dataset_size}|{max_length}|{source_fingerprint}|{tokenizer_fingerprint}|"
-        "prompt-completion|self-contained"
+        "prompt-completion|self-contained|stdlib-allowlist-v1"
     )
     dataset = Dataset.from_generator(
         generate,
