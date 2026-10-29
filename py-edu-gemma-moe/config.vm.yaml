@@ -37,14 +37,14 @@ data:
   dataset:
     _target_: dataset_impl.python_edu.load_function_dataset
     path: Avelina/python-edu-cleaned
-    dataset_size: 50000 # Single-GPU learning sanity run; use config.gpu.yaml for the full run.
+    dataset_size: null # Full filtered corpus; ~756k examples at max_length 512.
     split: train
     max_length: 512
   transform:
     _target_: dataset_impl.python_edu.PythonEduTransform
     max_length: 512
   dataloader:
-    batch_size: 8
+    batch_size: 16 # 24GB card; drop to 8 if OOM.
     shuffle: true
     num_workers: 4
   test_ratio: 0.1
@@ -61,8 +61,8 @@ trainer:
   benchmark_num_samples: 2
   max_benchmark_new_tokens: 128
   humaneval_enabled: true
-  humaneval_max_new_tokens: 128
-  humaneval_batch_size: 4
+  humaneval_max_new_tokens: 192
+  humaneval_batch_size: 8
   grad_clip_norm: 1.0
 output:
   root: outputs
