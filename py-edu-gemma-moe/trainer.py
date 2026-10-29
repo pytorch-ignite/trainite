@@ -595,26 +595,25 @@ class Trainer:
                 self.exp_logger.close()
 
     def _upload_checkpoints(self) -> None:
-        """Upload the final checkpoint once, after training has stopped."""
+        """Upload the final checkpoints once, after training has stopped."""
         if self.config.logger != "clearml" or self.exp_logger is None:
             return
         if not self.accelerator.is_main_process:
             return
 
-        checkpoint = self.run_dir / "best.pt"
-        if not checkpoint.exists():
-            checkpoint = self.run_dir / "last.pt"
-        if not checkpoint.exists():
-            return
+        for name in ("best.pt", "last.pt"):
+            checkpoint = self.run_dir / name
+            if not checkpoint.exists():
+                continue
 
-        try:
-            self.exp_logger.get_task().upload_artifact(
-                checkpoint.name,
-                artifact_object=str(checkpoint),
-                wait_on_upload=True,
-            )
-        except Exception:
-            self.logger.exception("ClearML upload failed; checkpoint kept at %s", checkpoint)
+            try:
+                self.exp_logger.get_task().upload_artifact(
+                    checkpoint.name,
+                    artifact_object=str(checkpoint),
+                    wait_on_upload=True,
+                )
+            except Exception:
+                self.logger.exception("ClearML upload failed; checkpoint kept at %s", checkpoint)
 
     def test(self, test_loader: DataLoader | None = None) -> None:
         loader = test_loader or self.test_loader
