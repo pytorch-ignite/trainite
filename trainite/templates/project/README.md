@@ -210,5 +210,24 @@ data:
 1. Add the parameter to `config.yaml`.
 2. (Optional) Update the corresponding Pydantic model in `config.py` if you want strict validation and IDE autocomplete for custom fields.
 
+### Grid Search / Hyperparameter Sweeps
+Trainite supports grid search through the optional sweep section in `config.yaml`. Specify the parameters to explore using the same nested structure as the main configuration, with a list of candidate values for each parameter.
+
+For example, to try three learning rates:
+```yaml
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 0.0003
+
+sweep:
+  optimizer:
+    lr: [0.0001, 0.0003, 0.001]
+```
+
+Trainite generates a training run for each combination of sweep parameter values. Parameters not specified in sweep retain their base configuration values.
+
+Run the sweep using the usual command:
+`uv run python main.py config.yaml`
+
 ## Design Philosophy
 The code generated here is yours. There are no hidden abstractions or magic imports. Feel free to refactor or rewrite any part of it to suit your research needs.
