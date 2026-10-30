@@ -50,7 +50,7 @@ data:
   test_ratio: 0.1
   val_ratio: 0.1
 trainer:
-  epochs: 2
+  epochs: 5 # Reuses the 752k dataset cache; ~2h14 per epoch on the VM.
   precision: bf16
   log_every_steps: 50
   early_stopping_patience: null
