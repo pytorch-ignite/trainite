@@ -48,7 +48,7 @@ data:
     _target_: dataset_impl.python_edu.PythonEduTransform
     max_length: 512
   dataloader:
-    batch_size: 32 # Smaller model, so twice the batch should fit in 24GB.
+    batch_size: 16 # Same as config.vm.yaml: keep optimization identical, isolate model size.
     shuffle: true
     num_workers: 4
   test_ratio: 0.1
