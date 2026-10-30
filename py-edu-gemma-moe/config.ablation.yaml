@@ -50,7 +50,7 @@ data:
   dataloader:
     batch_size: 16 # Same as config.vm.yaml: keep optimization identical, isolate model size.
     shuffle: true
-    num_workers: 4
+    num_workers: 6 # 10 physical cores, 1 GPU: reclaim idle CPU before raising the batch.
   test_ratio: 0.1
   val_ratio: 0.1
 trainer:
