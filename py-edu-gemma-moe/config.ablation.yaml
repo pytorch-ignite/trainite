@@ -1,0 +1,76 @@
+# Equal-compute ablation against config.vm.yaml:
+#   270.7M total / 228.2M active x 5 epochs = 6.4e17 FLOPs  (baseline, 20/164 HumanEval)
+#   155.8M total / 131.0M active x 9 epochs = 6.4e17 FLOPs  (this config)
+# Same dataset (cache is reused because the model config is not in the cache key).
+project_name: py-edu-gemma-moe
+preprocessor:
+  _target_: preprocessors.python_bpe.load_python_bpe_tokenizer
+  vocab_size: 8192
+  cache_dir: outputs/tokenizers
+model:
+  _target_: models.gemma4_moe.Gemma4MoEModel
+  collate_fn_target: models.gemma4_moe.CausalLMCollateFn
+  hidden_size: 768
+  num_layers: 12
+  num_attention_heads: 12
+  num_key_value_heads: 4
+  dense_intermediate_size: 2048
+  expert_dim: 896
+  num_experts: 3
+  top_k: 2
+  head_dim: 64
+  layer_types: null
+  layer_pattern: sssssg
+  sliding_window: 512
+  rope_theta: 10000.0
+  global_rope_theta: 1000000.0
+  rotary_fraction: 1.0
+  global_rotary_fraction: 0.25
+  global_num_key_value_heads: 4
+  global_head_dim: 64
+  global_key_equals_value: true
+  attention_dropout: 0.0
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 0.0006
+loss:
+  _target_: models.gemma4_moe.GemmaMoECausalLMLoss
+  ignore_index: -100
+  aux_loss_coef: 0.01
+data:
+  dataset:
+    _target_: dataset_impl.python_edu.load_function_dataset
+    path: Avelina/python-edu-cleaned
+    dataset_size: null # Same corpus and cache entry as config.vm.yaml.
+    split: train
+    max_length: 512
+  transform:
+    _target_: dataset_impl.python_edu.PythonEduTransform
+    max_length: 512
+  dataloader:
+    batch_size: 32 # Smaller model, so twice the batch should fit in 24GB.
+    shuffle: true
+    num_workers: 4
+  test_ratio: 0.1
+  val_ratio: 0.1
+trainer:
+  epochs: 9 # 813M trained tokens, matching the 5-epoch run's compute.
+  precision: bf16
+  log_every_steps: 50
+  early_stopping_patience: null
+  inference_every_epochs: null
+  inference_num_samples: 2
+  max_inference_new_tokens: 16
+  benchmark_every_epochs: 1
+  benchmark_num_samples: 2
+  max_benchmark_new_tokens: 128
+  humaneval_enabled: true
+  humaneval_max_new_tokens: 192
+  humaneval_batch_size: 16
+  grad_clip_norm: 1.0
+output:
+  root: outputs
+  run_name: gemma4_moe__ablation_h768
+logger: tensorboard
+seed: 42
+device: null
