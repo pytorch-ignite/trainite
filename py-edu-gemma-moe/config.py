@@ -95,6 +95,7 @@ class TrainerConfig(BaseModel):
     humaneval_enabled: bool = True
     humaneval_max_new_tokens: int = Field(default=192, gt=0)
     humaneval_batch_size: int = Field(default=8, gt=0)
+    humaneval_strip_docstrings: bool = False
     grad_clip_norm: float | None = Field(default=None, gt=0.0)
 
 

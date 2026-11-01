@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from accelerate import Accelerator
@@ -185,6 +186,7 @@ class Trainer:
         self.humaneval_enabled = self.trainer_config.humaneval_enabled
         self.humaneval_max_new_tokens = self.trainer_config.humaneval_max_new_tokens
         self.humaneval_batch_size = self.trainer_config.humaneval_batch_size
+        self.humaneval_strip_docstrings = self.trainer_config.humaneval_strip_docstrings
         self.criterion = instantiate(config.loss)
         self.ignore_index: int = getattr(self.criterion, "ignore_index", -100)
         self.requires_router_info = getattr(self.criterion, "requires_router_info", False)
@@ -488,15 +490,19 @@ class Trainer:
         Runs once after the best checkpoint is restored. EvalPlus executes
         generated code in subprocesses with timeouts, but this is not a security
         sandbox, so only use it with trusted models and data.
+
+        With ``humaneval_strip_docstrings`` enabled the same problems are solved a
+        second time with the docstring removed from the prompt. A large drop means
+        the model reads docstrings; no drop means it ignores them, which is the
+        failure mode to watch for after training mostly on bare signatures.
         """
         self.accelerator.wait_for_everyone()
         if not self.accelerator.is_main_process:
             return
 
         from evalplus.data import get_human_eval_plus  # pyrefly: ignore[missing-import]
-        from evalplus.evaluate import evaluate  # pyrefly: ignore[missing-import]
 
-        from benchmarks.humaneval import summarize_results
+        from benchmarks.humaneval import strip_docstring
 
         if sys.platform == "darwin":
             # EvalPlus' RLIMIT_AS guard raises "current limit exceeds maximum
@@ -504,6 +510,31 @@ class Trainer:
             os.environ["EVALPLUS_MAX_MEMORY_BYTES"] = "-1"
 
         problems = get_human_eval_plus(mini=True)
+        native = self._evaluate_humaneval(problems, lambda problem: problem["prompt"], "")
+        if not self.humaneval_strip_docstrings:
+            return
+
+        stripped = self._evaluate_humaneval(problems, lambda problem: strip_docstring(problem["prompt"]), "_nodoc")
+        gap = native["base_pass_at_1"] - stripped["base_pass_at_1"]
+        self.logger.info(
+            "HumanEval+ (mini) docstring dependency: base %.4f -> %.4f without docstrings (gap %.4f)",
+            native["base_pass_at_1"],
+            stripped["base_pass_at_1"],
+            gap,
+        )
+        self._log_scalar("humaneval/docstring_gap", gap, self.trainer.state.iteration)
+
+    def _evaluate_humaneval(
+        self,
+        problems: dict[str, dict[str, str]],
+        prompt_for: Callable[[dict[str, str]], str],
+        tag: str,
+    ) -> dict[str, float | int]:
+        """Generate, score and log one HumanEval+ mini pass under ``tag``."""
+        from evalplus.evaluate import evaluate  # pyrefly: ignore[missing-import]
+
+        from benchmarks.humaneval import summarize_results
+
         dataset_config = getattr(self.config.data, "dataset", None)
         max_length = getattr(dataset_config, "max_length", 512)
         pad_token_id = getattr(self.tokenizer, "pad_token_id", 0) or 0
@@ -514,7 +545,7 @@ class Trainer:
             batch = []
             for task_id, problem in items[start : start + self.humaneval_batch_size]:
                 prompt_ids = torch.tensor(
-                    self.tokenizer.encode(problem["prompt"], add_special_tokens=False),
+                    self.tokenizer.encode(prompt_for(problem), add_special_tokens=False),
                     device=self.device,
                 )
                 if prompt_ids.numel() >= max_length:
@@ -556,9 +587,9 @@ class Trainer:
 
             done = min(start + self.humaneval_batch_size, len(items))
             if done % 20 < self.humaneval_batch_size:
-                self.logger.info("HumanEval: generated %d/%d", done, len(items))
+                self.logger.info("HumanEval%s: generated %d/%d", tag, done, len(items))
 
-        samples_path = self.run_dir / "humaneval_samples.jsonl"
+        samples_path = self.run_dir / f"humaneval_samples{tag}.jsonl"
         samples_path.write_text(
             "\n".join(json.dumps({"task_id": task_id, "completion": completions[task_id]}) for task_id in problems)
             + "\n"
@@ -566,12 +597,13 @@ class Trainer:
         result_path = Path(str(samples_path).replace(".jsonl", "_eval_results.json"))
         result_path.unlink(missing_ok=True)
 
-        self.logger.info("Evaluating %d HumanEval+ mini samples...", len(problems))
+        self.logger.info("Evaluating %d HumanEval+ mini samples%s...", len(problems), tag)
         evaluate(dataset="humaneval", samples=str(samples_path), mini=True, i_just_wanna_run=True)
 
         summary = summarize_results(result_path)
         self.logger.info(
-            "HumanEval+ (mini): base pass@1=%.4f (%d/%d), plus pass@1=%.4f (%d/%d)",
+            "HumanEval+ (mini)%s: base pass@1=%.4f (%d/%d), plus pass@1=%.4f (%d/%d)",
+            tag,
             summary["base_pass_at_1"],
             summary["base_passed"],
             summary["total"],
@@ -579,8 +611,9 @@ class Trainer:
             summary["plus_passed"],
             summary["total"],
         )
-        self._log_scalar("humaneval/base_pass_at_1", summary["base_pass_at_1"], self.trainer.state.iteration)
-        self._log_scalar("humaneval/plus_pass_at_1", summary["plus_pass_at_1"], self.trainer.state.iteration)
+        self._log_scalar(f"humaneval{tag}/base_pass_at_1", summary["base_pass_at_1"], self.trainer.state.iteration)
+        self._log_scalar(f"humaneval{tag}/plus_pass_at_1", summary["plus_pass_at_1"], self.trainer.state.iteration)
+        return summary
 
     def run(self) -> None:
         self.logger.info("starting run in %s", self.run_dir)

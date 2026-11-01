@@ -5,7 +5,32 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from benchmarks.humaneval import summarize_results
+from benchmarks.humaneval import strip_docstring, summarize_results
+
+
+class HumanEvalStripDocstringTest(unittest.TestCase):
+    def test_removes_docstring_and_keeps_imports_and_signature(self):
+        prompt = (
+            "from typing import List\n"
+            "\n"
+            "\n"
+            "def has_close_elements(numbers: List[float], threshold: float) -> bool:\n"
+            '    """Check whether any two numbers are closer than the threshold.\n'
+            "\n"
+            "    >>> has_close_elements([1.0, 2.0], 0.5)\n"
+            "    True\n"
+            '    """\n'
+        )
+        self.assertEqual(
+            strip_docstring(prompt),
+            "from typing import List\n\n\ndef has_close_elements(numbers: List[float], threshold: float) -> bool:\n",
+        )
+
+    def test_leaves_prompts_without_docstring_or_parseable_code_alone(self):
+        documented_body = "def f():\n    x = 1\n    return x\n"
+        self.assertEqual(strip_docstring(documented_body), documented_body)
+        not_python = "this is not python"
+        self.assertEqual(strip_docstring(not_python), not_python)
 
 
 class HumanEvalSummaryTest(unittest.TestCase):
