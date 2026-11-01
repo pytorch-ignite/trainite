@@ -74,6 +74,46 @@ class DatasetTest(unittest.TestCase):
         ]:
             self.assertEqual(extract_functions(invalid), [])
 
+    def test_require_docstring(self):
+        source = (
+            "def documented():\n"
+            '    """Return one."""\n'
+            "    return 1\n"
+            "\n"
+            "def bare(a, b):\n"
+            "    return a + b\n"
+            "\n"
+            "def empty():\n"
+            "    pass\n"
+        )
+        self.assertEqual(len(function_spans(source)), 1)
+        self.assertEqual(len(function_spans(source, require_docstring=False)), 3)
+
+        # Documented functions keep the docstring in the prompt in both modes.
+        for require_docstring in (True, False):
+            example = extract_functions(source, require_docstring=require_docstring)[0]
+            self.assertEqual(example["prompt"], 'def documented():\n    """Return one."""\n')
+            self.assertEqual(example["completion"], "    return 1\n")
+
+        relaxed = extract_functions(source, require_docstring=False)
+        self.assertIn(
+            {"prompt": "def bare(a, b):\n", "completion": "    return a + b\n"},
+            relaxed,
+        )
+        self.assertIn({"prompt": "def empty():\n", "completion": "    pass\n"}, relaxed)
+
+        raw = Dataset.from_dict({"text": [source]})
+        path = f"python-edu-{uuid.uuid4()}"
+        with patch("dataset_impl.python_edu.load_dataset", return_value=raw):
+            strict = load_function_dataset(path, Tokenizer(), 256)
+            relaxed = load_function_dataset(path, Tokenizer(), 256, require_docstring=False)
+            with self.assertRaises(ValueError):
+                load_function_dataset(path, Tokenizer(), 256, require_docstring="yes")
+        # The flag is part of the cache key, so the two variants do not collide.
+        self.assertEqual(len(strict), 1)
+        self.assertEqual(len(relaxed), 3)
+        self.assertNotEqual(strict.cache_files, relaxed.cache_files)
+
     def test_extraction_keeps_only_self_contained_functions(self):
         source = (
             "import math\n\n"
@@ -320,11 +360,11 @@ class DatasetTest(unittest.TestCase):
         )
         visited = []
 
-        def tracked_spans(text, tree=None):
+        def tracked_spans(text, tree=None, **kwargs):
             visited.append(text)
             if text.startswith("def b"):
                 raise AssertionError("Read past requested usable example count")
-            return function_spans(text, tree)
+            return function_spans(text, tree, **kwargs)
 
         with (
             patch("dataset_impl.python_edu.load_dataset", return_value=raw),

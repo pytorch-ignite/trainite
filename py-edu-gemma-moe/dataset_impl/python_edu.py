@@ -97,8 +97,20 @@ def _referenced_globals(table: symtable.SymbolTable) -> set[str]:
     return names
 
 
-def function_spans(text: str, tree: ast.Module | None = None) -> list[tuple[int, int, int]]:
-    """Index eligible top-level functions as start/docstring-end/function-end lines."""
+def function_spans(
+    text: str,
+    tree: ast.Module | None = None,
+    require_docstring: bool = True,
+) -> list[tuple[int, int, int]]:
+    """Index eligible top-level functions as start/body-start/function-end lines.
+
+    The middle element is the 0-based index of the first line that belongs to the
+    completion: just past the docstring when there is one, otherwise the line of
+    the first body statement.
+
+    With ``require_docstring=False``, functions without a docstring are indexed
+    too, so their prompt is only the signature (plus any imports).
+    """
     if tree is None:
         try:
             tree = parse_source(text)
@@ -108,13 +120,23 @@ def function_spans(text: str, tree: ast.Module | None = None) -> list[tuple[int,
     for node in tree.body:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        if not ast.get_docstring(node) or len(node.body) < 2:
+        docstring = ast.get_docstring(node)
+        if require_docstring and not docstring:
             continue
-        doc = node.body[0]
+        first = node.body[0]
         # shortcut: omit decorated functions and inline suites; add context-aware extraction if needed.
-        if node.decorator_list or node.body[1].lineno <= doc.end_lineno:
+        # An inline suite (``def f(): ...``) has no signature-only prompt.
+        if node.decorator_list or first.lineno <= node.lineno:
             continue
-        spans.append((node.lineno - 1, doc.end_lineno, node.end_lineno))
+        if docstring:
+            # A docstring alone leaves no body to predict, and a body inlined on the
+            # docstring line has no line to start the completion at.
+            if len(node.body) < 2 or node.body[1].lineno <= first.end_lineno:
+                continue
+            body_start = first.end_lineno
+        else:
+            body_start = first.lineno - 1
+        spans.append((node.lineno - 1, body_start, node.end_lineno))
     return spans
 
 
@@ -131,8 +153,13 @@ def import_prefix(text: str, tree: ast.Module | None = None) -> str:
     return "\n".join(imports) + "\n\n" if imports else ""
 
 
-def extract_functions(text: str) -> list[dict[str, str]]:
-    """Extract validated, self-contained prompt/completion pairs from one raw source row."""
+def extract_functions(text: str, require_docstring: bool = True) -> list[dict[str, str]]:
+    """Extract validated, self-contained prompt/completion pairs from one raw source row.
+
+    ``require_docstring`` controls whether functions without a docstring are kept.
+    Keeping them roughly quadruples the usable corpus, at the cost of prompts that
+    are only a signature (no natural-language description of the task).
+    """
     if not isinstance(text, str):
         return []
     try:
@@ -148,7 +175,7 @@ def extract_functions(text: str) -> list[dict[str, str]]:
     lines = split_source_lines(text)
     imports = import_prefix(text, tree)
     examples = []
-    for start, doc_end, end in function_spans(text, tree):
+    for start, doc_end, end in function_spans(text, tree, require_docstring=require_docstring):
         # Include lines consumed by a trailing backslash continuation.
         while end < len(lines) and lines[end - 1].rstrip("\r\n").endswith("\\"):
             end += 1
@@ -163,7 +190,10 @@ def extract_functions(text: str) -> list[dict[str, str]]:
         except (SyntaxError, ValueError, RecursionError):
             continue
         functions = [node for node in combined_tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
-        if len(functions) != 1 or len(function_spans(combined, combined_tree)) != 1:
+        if (
+            len(functions) != 1
+            or len(function_spans(combined, combined_tree, require_docstring=require_docstring)) != 1
+        ):
             continue
         table = _symtable(combined)
         if table is None:
@@ -181,10 +211,19 @@ def load_function_dataset(
     max_length: int = 512,
     split: str = "train",
     dataset_size: int | None = None,
+    require_docstring: bool = True,
 ):
-    """Index raw functions; the transform only tokenizes precomputed pairs."""
+    """Index raw functions; the transform only tokenizes precomputed pairs.
+
+    ``require_docstring`` selects the corpus: ``True`` keeps only documented
+    functions (the original behaviour), ``False`` also keeps bare functions whose
+    prompt is just the signature.  The flag is part of the cache fingerprint, so
+    the two variants never share a cache entry.
+    """
     if dataset_size is not None and (type(dataset_size) is not int or dataset_size < 1):
         raise ValueError("dataset_size must be a positive integer or None")
+    if type(require_docstring) is not bool:
+        raise ValueError("require_docstring must be a boolean")
     if max_length < 2:
         raise ValueError("max_length must be at least 2")
     if tokenizer.eos_token_id is None:
@@ -194,7 +233,7 @@ def load_function_dataset(
     def generate():
         count = 0
         for sample in raw_dataset:
-            for example in extract_functions(sample["text"]):
+            for example in extract_functions(sample["text"], require_docstring=require_docstring):
                 prompt_length = len(tokenizer.encode(example["prompt"], add_special_tokens=False))
                 body_length = len(tokenizer.encode(example["completion"], add_special_tokens=False))
                 if not prompt_length or not body_length or prompt_length + body_length + 1 > max_length:
@@ -210,9 +249,14 @@ def load_function_dataset(
         str(getattr(tokenizer, attribute, ""))
         for attribute in ("name_or_path", "vocab_size", "eos_token_id", "pad_token_id")
     )
+    docstring_fingerprint = ""
+    if not require_docstring:
+        # Only the relaxed variant gets a suffix: docstring-only extraction is
+        # byte-identical to the pre-flag code, so existing caches stay valid.
+        docstring_fingerprint = "|docstring-optional"
     fingerprint = (
         f"{path}|{split}|{dataset_size}|{max_length}|{source_fingerprint}|{tokenizer_fingerprint}|"
-        "prompt-completion|self-contained|stdlib-allowlist-v1"
+        f"prompt-completion|self-contained|stdlib-allowlist-v1{docstring_fingerprint}"
     )
     dataset = Dataset.from_generator(
         generate,
