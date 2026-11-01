@@ -167,6 +167,15 @@ data. Disable it with `humaneval_enabled: false`; tune `humaneval_max_new_tokens
 and `humaneval_batch_size` in the trainer config. EvalPlus is installed as a
 project dependency.
 
+Set `humaneval_strip_docstrings: true` to run the suite a second time with each
+prompt's docstring removed, which measures how much the model relies on it. It
+logs `humaneval_nodoc/base_pass_at_1`, `humaneval_nodoc/plus_pass_at_1`, and
+`humaneval/docstring_gap` (native minus stripped), and writes
+`humaneval_samples_nodoc.jsonl`. A large gap is healthy: it means the model reads
+the docstring. A gap near zero means it ignores it, which is the failure mode to
+watch for after training on bare signatures. The extra pass costs about two
+minutes because generation, not scoring, dominates.
+
 All metrics are written to TensorBoard or ClearML. Console epoch summaries include
 perplexity, separate training loss components, expert usage, and benchmark rates.
 Run the offline checks with `uv run python -m unittest test_metrics.py test_tokenizer.py test_humaneval.py`.
@@ -305,11 +314,37 @@ HumanEval prompts are self-contained. `PythonEduTransform`
 only tokenizes the precomputed strings and masks the prompt labels. The loader
 checks token lengths directly to exclude oversized functions before batching; it
 does not instantiate or call the transform. Only top-level, undecorated functions
-with nonempty docstrings and remaining bodies are included. Async functions and
-multiline signatures are supported. Source is parsed, never executed. Missing
-docstrings, invalid Python, inline suites, and examples exceeding 512 tokens
-including EOS are skipped. Imports count toward the token limit. Dataset and
+with remaining bodies are included. Async functions and
+multiline signatures are supported. Source is parsed, never executed. Invalid
+Python, inline suites, and examples exceeding 512 tokens including EOS are
+skipped. Imports count toward the token limit. Dataset and
 transform `max_length` values must match.
+
+### Docstrings are optional
+
+`data.dataset.require_docstring` defaults to `true`, which keeps the original
+corpus: only functions with a nonempty docstring, where the prompt ends after the
+docstring. Setting it to `false` also keeps bare functions. Their prompt is then
+just the signature (plus imports) and the completion starts at the first body
+statement:
+
+```yaml
+data:
+  dataset:
+    _target_: dataset_impl.python_edu.load_function_dataset
+    require_docstring: false
+```
+
+Documented functions are extracted exactly as before in both modes, so relaxed
+extraction is a strict superset. On `Avelina/python-edu-cleaned` this raises the
+yield from about 752k examples to roughly 7.1M raw function spans, or about
+3.7M examples after the 512-token filter. That is the lever for more unique
+training tokens when epochs start to repeat the same data. The flag is part of
+the generator cache fingerprint, so the two variants never share a cache entry,
+and the default `true` still reuses the existing cached corpus. Note the
+trade-off: a bare signature is a weaker, more ambiguous prompt than a docstring,
+which is closer to what HumanEval provides (89.6% of HumanEval prompts include a
+docstring).
 
 Trainite's existing automatic split logic divides the extracted function examples
 into 80/10/10 train/validation/test sets using the configured seed. Ratios are

@@ -1,0 +1,95 @@
+# Same 155.8M model as config.ablation.yaml, retrained on the docstring-optional
+# corpus. NOT an equal-compute ablation: three things change at once on purpose,
+# because the previous runs established that unique data volume is the bottleneck.
+#
+#   corpus     docstring-required  -> docstring-optional
+#              ~752k examples                          -> ~4.0M examples
+#              ~93M train tokens/pass                  -> ~300M train tokens/pass
+#              18% documented, 82% bare. Bare prompts are signature-only.
+#   batch      16 -> 24   (fewer steps, no longer update-starved: 4M examples
+#                          still give 667k updates over 4 epochs)
+#   epochs     9 -> 4     (1.20B tokens, 9.1 tok/param, ~4 passes of repetition)
+#
+# lr stays 6e-4. The previous 16 -> 24 batch change produced the same loss at
+# matched update counts, which is what you expect below the critical batch size;
+# sqrt-scaling the lr would add a variable without evidence it helps.
+#
+# Validation loss is NOT comparable to the earlier runs: bare functions are about
+# half as long (~80 vs ~155 tokens) and easier to predict. Compare HumanEval only.
+#
+# Expected cost: ~22h on one 4090, ~11h on 2x4090. Early stopping cuts it short if
+# validation loss turns before epoch 4.
+project_name: py-edu-gemma-moe
+preprocessor:
+  _target_: preprocessors.python_bpe.load_python_bpe_tokenizer
+  vocab_size: 8192
+  cache_dir: outputs/tokenizers
+model:
+  _target_: models.gemma4_moe.Gemma4MoEModel
+  collate_fn_target: models.gemma4_moe.CausalLMCollateFn
+  hidden_size: 768
+  num_layers: 12
+  num_attention_heads: 12
+  num_key_value_heads: 4
+  dense_intermediate_size: 2048
+  expert_dim: 896
+  num_experts: 3
+  top_k: 2
+  head_dim: 64
+  layer_types: null
+  layer_pattern: sssssg
+  sliding_window: 512
+  rope_theta: 10000.0
+  global_rope_theta: 1000000.0
+  rotary_fraction: 1.0
+  global_rotary_fraction: 0.25
+  global_num_key_value_heads: 4
+  global_head_dim: 64
+  global_key_equals_value: true
+  attention_dropout: 0.0
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 0.0006
+loss:
+  _target_: models.gemma4_moe.GemmaMoECausalLMLoss
+  ignore_index: -100
+  aux_loss_coef: 0.01
+data:
+  dataset:
+    _target_: dataset_impl.python_edu.load_function_dataset
+    path: Avelina/python-edu-cleaned
+    dataset_size: null # Full corpus; the flag below selects the extraction variant.
+    split: train
+    max_length: 512
+    require_docstring: false # New cache entry; the 752k docstring-only cache is untouched.
+  transform:
+    _target_: dataset_impl.python_edu.PythonEduTransform
+    max_length: 512
+  dataloader:
+    batch_size: 24 # See header: step time is linear in batch, so this trades updates for wall clock.
+    shuffle: true
+    num_workers: 8
+  test_ratio: 0.1
+  val_ratio: 0.1
+trainer:
+  epochs: 4 # 1.2B trained tokens; raise only after seeing where validation loss turns.
+  precision: bf16
+  log_every_steps: 50
+  early_stopping_patience: 2
+  inference_every_epochs: null
+  inference_num_samples: 2
+  max_inference_new_tokens: 16
+  benchmark_every_epochs: 1
+  benchmark_num_samples: 2
+  max_benchmark_new_tokens: 128
+  humaneval_enabled: true
+  humaneval_max_new_tokens: 192
+  humaneval_batch_size: 16
+  humaneval_strip_docstrings: true # Second pass without docstrings: measures docstring reliance.
+  grad_clip_norm: 1.0
+output:
+  root: outputs
+  run_name: gemma4_moe__relaxed_h768
+logger: tensorboard
+seed: 42
+device: null

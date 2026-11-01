@@ -1,7 +1,7 @@
 # Equal-compute ablation against config.vm.yaml:
 #   270.7M total / 228.2M active x 5 epochs = 6.4e17 FLOPs  (baseline, 20/164 HumanEval)
 #   155.8M total / 131.0M active x 9 epochs = 6.4e17 FLOPs  (this config)
-# Same dataset (cache is reused because the model config is not in the cache key).
+# Same dataset and recipe (batch 16, lr 6e-4, seed 42); only the model differs.
 project_name: py-edu-gemma-moe
 preprocessor:
   _target_: preprocessors.python_bpe.load_python_bpe_tokenizer
@@ -48,9 +48,9 @@ data:
     _target_: dataset_impl.python_edu.PythonEduTransform
     max_length: 512
   dataloader:
-    batch_size: 16 # Same as config.vm.yaml: keep optimization identical, isolate model size.
+    batch_size: 16 # Identical recipe to config.vm.yaml; only model size differs.
     shuffle: true
-    num_workers: 6 # 10 physical cores, 1 GPU: reclaim idle CPU before raising the batch.
+    num_workers: 6
   test_ratio: 0.1
   val_ratio: 0.1
 trainer:
