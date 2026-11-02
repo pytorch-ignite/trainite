@@ -804,6 +804,7 @@ def test_eval_step_pads_across_processes_in_distributed(project_config):
         assert "targets" in output
 
 
+@pytest.mark.distributed
 @pytest.mark.skipif(
     sys.platform.startswith("win") or sys.platform.startswith("darwin"),
     reason="Distributed multi-process training is not supported on Windows/macOS in CI",
@@ -822,7 +823,21 @@ def test_decoder_trainer_distributed_two_workers(tmp_path):
         str(script_path),
         str(output_dir),
     ]
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        res = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired as e:
+        stdout = e.stdout.decode() if isinstance(e.stdout, bytes) else (e.stdout or "")
+        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or "")
+
+        raise AssertionError(
+            f"Distributed run timed out after 120 seconds:\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}"
+        ) from e
+
     assert res.returncode == 0, f"Distributed run failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
 
 
