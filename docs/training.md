@@ -115,6 +115,8 @@ The `decoder-trainer` uses Hugging Face Accelerate for mixed precision and multi
 - `fp16` for half precision on supported GPUs.
 - `bf16` for bfloat16 on hardware that supports it.
 
+Before the first run, configure Accelerate for your machine by running `accelerate config` and answering its prompts. This creates a default configuration that Accelerate uses when launching training. You only need to run this setup again if your machine or training environment changes.
+
 To use multiple GPUs, install the project dependencies, then run the launcher from an example directory containing `main.py` and `config.yaml`. Set `--num_processes` to the number of GPUs to use:
 
 ```bash
