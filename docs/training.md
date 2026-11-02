@@ -101,7 +101,7 @@ or GPT-2 tokenizer loader (`preprocessors.gpt2_tokenizer.load_gpt2_tokenizer`), 
 
 Note that `dataloader` blocks accept standard PyTorch `DataLoader` options (such as `batch_size`, `shuffle`, and `num_workers`) rather than using a `_target_`.
 
-**`trainer`** — Training loop parameters: `epochs`, `log_every_steps`, `early_stopping_patience` (set to `null` to disable), `inference_every_epochs`, `inference_num_samples`, `max_inference_new_tokens`, and `grad_clip_norm`.
+**`trainer`** — Training loop parameters: `epochs`, `precision` (`float32`, `fp16`, `bf16`), `log_every_steps`, `early_stopping_patience` (set to `null` to disable), `inference_every_epochs`, `inference_num_samples`, `max_inference_new_tokens`, and `grad_clip_norm`.
 
 **`output`** — Where artifacts are saved. `root` specifies the parent directory and `run_name` identifies the experiment run. Artifacts are saved to `<root>/<run_name>/<timestamp>/`.
 
@@ -117,7 +117,7 @@ Note that `dataloader` blocks accept standard PyTorch `DataLoader` options (such
 
 `trainite init` currently provides:
 
-- Models: `rope-transformer`, `basic-transformer`
+- Models: `rope-transformer`, `basic-transformer`, `gemma4-dense`, `gemma4-moe`
 - Datasets: `string-reverse`, `counting`, `hugging-face`, `wikitext`, `ultrachat-200k`, `python-edu`
 - Trainer: `decoder-trainer`
 
@@ -133,7 +133,7 @@ Split behavior by dataset family:
 
 ## Running training
 
-Each example has a `main.py` entry point. From the example directory:
+Each generated project has a `main.py` entry point. From the project directory:
 
 ```bash
 uv run python main.py config.yaml
@@ -143,6 +143,12 @@ Or without `uv`:
 
 ```bash
 python main.py config.yaml
+```
+
+To run distributed training on multiple GPUs via Hugging Face Accelerate:
+
+```bash
+uv run accelerate launch --num_processes=4 main.py config.yaml
 ```
 
 What happens under the hood:

@@ -78,7 +78,7 @@ trainite init my-experiment \
 
 Available template choices:
 
-- Models: `rope-transformer`, `basic-transformer`
+- Models: `rope-transformer`, `basic-transformer`, `gemma4-dense`, `gemma4-moe`
 - Datasets: `string-reverse`, `counting`, `hugging-face`, `wikitext`, `ultrachat-200k`, `python-edu`
 - Trainers: `decoder-trainer`
 

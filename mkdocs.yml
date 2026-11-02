@@ -1,6 +1,7 @@
 site_name: Trainite
 site_description: Documentation for Trainite
 site_url: https://pytorch-ignite.github.io/trainite/
+repo_name: pytorch-ignite/trainite
 repo_url: https://github.com/pytorch-ignite/trainite
 
 theme:
@@ -23,9 +24,33 @@ theme:
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
+  features:
+    - content.code.copy
+    - navigation.top
+    - search.suggest
+    - search.highlight
 
 extra_css:
   - stylesheets/extra.css
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - attr_list
+  - toc:
+      permalink: true
 
 nav:
   - Home: index.md
