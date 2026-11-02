@@ -1,6 +1,6 @@
 # Instructions for Trainite
 
-<!-- Used PyTorch-Ignite and MLX AGENTS.md as reference -->
+<!-- Used https://github.com/ml-explore/mlx/blob/c9ea4f1e911b2955b206273e9e29dbe927dd5ceb/AGENTS.md and https://github.com/pytorch/ignite/blob/master/AGENTS.md?plain=1 as reference -->
 
 AI tools are allowed, but the user must understand the code and changes made, and they are responsible for the code, not the AI. Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup and architecture details.
 
