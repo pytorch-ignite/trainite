@@ -583,7 +583,12 @@ class Trainer:
                 attention_mask=attention_mask,
             )
             for (task_id, _), tokens in zip(batch, sequences[:, input_ids.shape[1] :]):
-                completions[task_id] = self.tokenizer.decode(tokens.tolist(), skip_special_tokens=True)
+                completion = self.tokenizer.decode(tokens.tolist(), skip_special_tokens=True)
+                if self.humaneval_truncate_at_top_level:
+                    # A file-level model has learned to keep writing after the body,
+                    # so cut the completion where it starts a new top-level construct.
+                    completion = _truncate_completion(completion)
+                completions[task_id] = completion
 
             done = min(start + self.humaneval_batch_size, len(items))
             if done % 20 < self.humaneval_batch_size:
