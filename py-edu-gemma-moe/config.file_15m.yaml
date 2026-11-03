@@ -30,13 +30,10 @@
 # imports, top-level script code, comments and blank lines. Some of that is useful
 # context and idiom; some is dilution. That is the open question here.
 #
-# Expected memory, extrapolated from the measured 13.6GB at batch 64 / 512 tokens
-# (~215MB per example at 512, roughly 2.5x that at 1024 because attention grows
-# quadratically): batch 8 ~8GB, batch 16 ~13GB, batch 32 ~20GB+. So 16 is the safe
-# default on a 24GB card, and 8 is the only option if another run is already on the
-# GPU. Wall clock at batch 16 is ~12-18h: steps are ~2x more expensive than the
-# function-level run but there are 4x fewer of them, and padding to the longest file
-# in each batch is the swing factor. Read the first 200 steps before trusting that.
+# Expected memory, measured: 6.5GB at batch 16 / 1024 tokens. So batch 32 is ~10GB
+# and batch 64 ~16GB on a 24GB card. Batch 32 is the default: it halves wall clock
+# without cutting the update count to a third, which would confound the comparison.
+# Wall clock at batch 32 is ~4.5h (batch 16 measured 7.8h, ~31.7k tokens/s).
 # Read against the function-level 15M run; if this matches or beats it at the
 # same token budget, the file-level pipeline becomes the default and the
 # function-level one becomes the ablation.
@@ -87,7 +84,7 @@ data:
     _target_: dataset_impl.python_file.FileCausalLMTransform
     max_length: 1024
   dataloader:
-    batch_size: 16 # See header: 16 is safe alone on 24GB, 8 if another run is resident.
+    batch_size: 32 # See header: 16 measured 6.5GB/7.8h, 32 is ~10GB/~4.5h.
     shuffle: true
     num_workers: 8
   test_ratio: 0.1
