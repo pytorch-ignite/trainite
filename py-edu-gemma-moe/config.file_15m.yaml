@@ -1,0 +1,117 @@
+# Task ablation at the cheapest size: whole-file causal LM vs function-body
+# completion. Same 15.4M model as config.relaxed_15m.yaml, same token budget.
+#
+# Why: the function-level extractor drops every function that references a
+# module-level name from its own file -- 33.4% of all candidate functions (5,189 of
+# 15,557 on 20k real source rows). Those are the ones that call helpers, so the
+# filter removes exactly the composed code you want a Python model to learn. Whole
+# files keep them, plus imports, classes and module structure in their real order.
+#
+# The task at inference does not change: give the model an import block plus a
+# signature and it continues, because that is a prefix of a file.
+#
+# Matched budget (the point of this config). The function-level 15M run
+# (config.relaxed_15m.yaml, 4 epochs) sees ~1.25B train tokens. Whole files at
+# max_length 1024 are ~3.6x longer per pass, so one epoch lands at ~1.1B tokens.
+# Same compute, different task -- that is the only clean way to compare them.
+#
+#   corpus      one example per eligible file, loss on every token + EOS
+#   max_length  1024   (files: median 152 tokens, 94.9% fit; 2048 adds 3.6% more)
+#   epochs      1      (~5.3M train files, ~150-200k steps at batch 32)
+#
+# Two things this config does differently on purpose:
+#   - max_length 1024, not 512. Files are 2-3x longer than functions; 512 would
+#     throw away 14% of them and those are the multi-function files with helpers.
+#   - humaneval_truncate_at_top_level. A file-level model has learned that a body
+#     is followed by more code, so it may keep writing the next function. Cutting
+#     at the first top-level def/class is what makes the HumanEval number fair.
+#
+# Note that only ~15% of file characters are inside def/class bodies. The rest is
+# imports, top-level script code, comments and blank lines. Some of that is useful
+# context and idiom; some is dilution. That is the open question here.
+#
+# Expected memory, extrapolated from the measured 13.6GB at batch 64 / 512 tokens
+# (~215MB per example at 512, roughly 2.5x that at 1024 because attention grows
+# quadratically): batch 8 ~8GB, batch 16 ~13GB, batch 32 ~20GB+. So 16 is the safe
+# default on a 24GB card, and 8 is the only option if another run is already on the
+# GPU. Wall clock at batch 16 is ~12-18h: steps are ~2x more expensive than the
+# function-level run but there are 4x fewer of them, and padding to the longest file
+# in each batch is the swing factor. Read the first 200 steps before trusting that.
+# Read against the function-level 15M run; if this matches or beats it at the
+# same token budget, the file-level pipeline becomes the default and the
+# function-level one becomes the ablation.
+project_name: py-edu-gemma-moe
+preprocessor:
+  _target_: preprocessors.python_bpe.load_python_bpe_tokenizer
+  vocab_size: 8192
+  cache_dir: outputs/tokenizers
+model:
+  _target_: models.gemma4_moe.Gemma4MoEModel
+  collate_fn_target: models.gemma4_moe.CausalLMCollateFn
+  hidden_size: 256
+  num_layers: 8
+  num_attention_heads: 4
+  num_key_value_heads: 2
+  dense_intermediate_size: 768
+  expert_dim: 384
+  num_experts: 3
+  top_k: 2
+  head_dim: 64
+  layer_types: null
+  layer_pattern: sssg
+  sliding_window: 1024
+  rope_theta: 10000.0
+  global_rope_theta: 1000000.0
+  rotary_fraction: 1.0
+  global_rotary_fraction: 0.25
+  global_num_key_value_heads: 2
+  global_head_dim: 64
+  global_key_equals_value: true
+  attention_dropout: 0.0
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 0.0006
+loss:
+  _target_: models.gemma4_moe.GemmaMoECausalLMLoss
+  ignore_index: -100
+  aux_loss_coef: 0.01
+data:
+  dataset:
+    _target_: dataset_impl.python_file.load_file_dataset
+    path: Avelina/python-edu-cleaned
+    dataset_size: null
+    split: train
+    max_length: 1024
+    min_length: 16 # Skip files whose whole content is one import or constant.
+  transform:
+    _target_: dataset_impl.python_file.FileCausalLMTransform
+    max_length: 1024
+  dataloader:
+    batch_size: 16 # See header: 16 is safe alone on 24GB, 8 if another run is resident.
+    shuffle: true
+    num_workers: 8
+  test_ratio: 0.1
+  val_ratio: 0.1
+trainer:
+  epochs: 1 # ~1.1B train tokens, matched to the function-level 4-epoch budget.
+  precision: bf16
+  log_every_steps: 50
+  early_stopping_patience: null
+  inference_every_epochs: null
+  inference_num_samples: 2
+  max_inference_new_tokens: 16
+  benchmark_every_epochs: 1
+  benchmark_num_samples: 2
+  max_benchmark_new_tokens: 128
+  humaneval_enabled: true
+  humaneval_max_new_tokens: 192
+  humaneval_batch_size: 16
+  humaneval_strip_docstrings: true # Same diagnostic as the function-level runs.
+  humaneval_truncate_at_top_level: true # See header: stop at the next top-level def.
+  grad_clip_norm: 1.0
+output:
+  root: outputs
+  run_name: gemma4_moe__file_15m
+logger: tensorboard
+seed: 42
+device: null
