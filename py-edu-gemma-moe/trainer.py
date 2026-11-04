@@ -187,6 +187,7 @@ class Trainer:
         self.humaneval_max_new_tokens = self.trainer_config.humaneval_max_new_tokens
         self.humaneval_batch_size = self.trainer_config.humaneval_batch_size
         self.humaneval_strip_docstrings = self.trainer_config.humaneval_strip_docstrings
+        self.humaneval_truncate_at_top_level = self.trainer_config.humaneval_truncate_at_top_level
         self.criterion = instantiate(config.loss)
         self.ignore_index: int = getattr(self.criterion, "ignore_index", -100)
         self.requires_router_info = getattr(self.criterion, "requires_router_info", False)
