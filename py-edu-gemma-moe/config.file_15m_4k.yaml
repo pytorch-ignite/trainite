@@ -1,0 +1,115 @@
+# Does raising the file-length cap rescue the file-level task?
+#
+# Runs 7 and 8 (config.file_15m.yaml) dropped every file over 1024 tokens and
+# scored 0/164 twice. Those dropped files are not filler. Measured on 60k raw
+# rows with the allowlist kept, files over 1024 tokens are 8.4% of the eligible
+# files but 40% of the eligible tokens, and they are ~9x denser in documented
+# top-level functions (1.06 per file vs 0.11). They are the multi-function
+# library files, which is exactly the shape HumanEval tests.
+#
+# Measured effect of the cap, same allowlist, same corpus:
+#
+#   cap      files    tokens        documented top-level defs   share of tokens
+#   1024     43,605   12.45M        4,875                       0.039%
+#   2048     46,375   16.34M (+31%)  6,875 (+41%)                0.042%
+#   4096     47,330   18.97M (+52%)  8,285 (+70%)                0.044%
+#   none     47,609   20.92M (+68%)  9,134 (+87%)                0.044%
+#
+# So one pass at 4096 gives +70% *unique* after-docstring positions, not just
+# repetition of the same ones (run 8 tested repetition and it did not work).
+# The tail above 4096 is 1.7% of tokens, so 4096 is the stopping point: this is
+# not a "use the 16k files" run, it is a "stop throwing away the 1-4k files" run.
+#
+# Honest expectation: still 0/164. Density only moves 0.039% -> 0.044%, so the
+# move remains ~1 token in 2,300. Score this run on the n=100 body rate
+# (1024 baseline: 17% at 1 pass, 10% at 2), not on HumanEval, or it will not be
+# informative either way.
+#
+# What changes against run 7: max_length 1024 -> 4096 and batch 32 -> 8. Nothing
+# else, so it is a one-variable diff. Batch 8 keeps the same token slots as
+# 32 x 1024 (12.8GB measured), which is the same memory ceiling; raise to 16 if
+# the card allows, but keep the reported batch in the run notes.
+#
+# Budget: 6.06M eligible files, mean 401 tokens/file, ~2.43B tokens total and
+# ~1.94B train per pass (1.5x run 7). At batch 8 that is ~606k steps and roughly
+# 19-20h, versus 5.2h for run 7. The added wall clock is padding and long-file
+# compute, not more target positions.
+#
+# If this comes back at the same body rate, the answer is settled: the objective
+# has to change (stage-2 fine-tune on functions, or a mixed corpus), and no
+# amount of filtering tweaking will do it.
+project_name: py-edu-gemma-moe
+preprocessor:
+  _target_: preprocessors.python_bpe.load_python_bpe_tokenizer
+  vocab_size: 8192
+  cache_dir: outputs/tokenizers
+model:
+  _target_: models.gemma4_moe.Gemma4MoEModel
+  collate_fn_target: models.gemma4_moe.CausalLMCollateFn
+  hidden_size: 256
+  num_layers: 8
+  num_attention_heads: 4
+  num_key_value_heads: 2
+  dense_intermediate_size: 768
+  expert_dim: 384
+  num_experts: 3
+  top_k: 2
+  head_dim: 64
+  layer_types: null
+  layer_pattern: sssg
+  sliding_window: 1024
+  rope_theta: 10000.0
+  global_rope_theta: 1000000.0
+  rotary_fraction: 1.0
+  global_rotary_fraction: 0.25
+  global_num_key_value_heads: 2
+  global_head_dim: 64
+  global_key_equals_value: true
+  attention_dropout: 0.0
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 0.0006
+loss:
+  _target_: models.gemma4_moe.GemmaMoECausalLMLoss
+  ignore_index: -100
+  aux_loss_coef: 0.01
+data:
+  dataset:
+    _target_: dataset_impl.python_file.load_file_dataset
+    path: Avelina/python-edu-cleaned
+    dataset_size: null
+    split: train
+    max_length: 4096
+    min_length: 16 # Skip files whose whole content is one import or constant.
+  transform:
+    _target_: dataset_impl.python_file.FileCausalLMTransform
+    max_length: 4096
+  dataloader:
+    batch_size: 8 # See header: same 32k token slots as 32 x 1024, ~12.8GB.
+    shuffle: true
+    num_workers: 8
+  test_ratio: 0.1
+  val_ratio: 0.1
+trainer:
+  epochs: 1 # ~1.94B train tokens, 1.5x run 7.
+  precision: bf16
+  log_every_steps: 50
+  early_stopping_patience: null
+  inference_every_epochs: null
+  inference_num_samples: 2
+  max_inference_new_tokens: 16
+  benchmark_every_epochs: 1
+  benchmark_num_samples: 2
+  max_benchmark_new_tokens: 128
+  humaneval_enabled: true
+  humaneval_max_new_tokens: 192
+  humaneval_batch_size: 16
+  humaneval_strip_docstrings: true
+  humaneval_truncate_at_top_level: true # Same fair cut as run 7.
+  grad_clip_norm: 1.0
+output:
+  root: outputs
+  run_name: gemma4_moe__file_15m_4k
+logger: tensorboard
+seed: 42
+device: null
