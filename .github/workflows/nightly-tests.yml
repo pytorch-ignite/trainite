@@ -2,23 +2,24 @@ name: nightly tests
 
 on:
   schedule:
-    # Run every night at 02:00 UTC
-    - cron: "0 2 * * *"
+    # Run every night at 00:00 UTC
+    - cron: "0 0 * * *"
   workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   integration-tests:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11"]
-        os: ["ubuntu-latest", "macos-latest", "windows-latest"]
+        python-version: ["3.11", "3.12", "3.13"]
+        os: ["ubuntu-latest"]
+        include:
+          - python-version: "3.11"
+            os: "macos-latest"
+          - python-version: "3.11"
+            os: "windows-latest"
 
-    name: Integration (${{ matrix.os }})
+    name: Integration Python ${{ matrix.python-version }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -32,6 +33,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Run integration tests
+        env:
+          TRAINITE_INTEGRATION_SMOKE: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11' && '0' || '1' }}
         run: uv run --with pytest pytest -o addopts="" -m integration tests/cli_test.py
 
   distributed-tests:
@@ -52,4 +55,4 @@ jobs:
         run: uv sync --locked --dev
 
       - name: Run distributed tests
-        run: uv run pytest -o addopts="" -m distributed tests/trainers/decoder_trainer_test.py
+        run: uv run pytest -o addopts="" -m distributed tests

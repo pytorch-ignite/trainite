@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import shutil
@@ -819,6 +820,8 @@ def test_decoder_trainer_distributed_two_workers(tmp_path):
         sys.executable,
         "-m",
         "torch.distributed.run",
+        "--standalone",
+        "--rdzv-endpoint=localhost:0",
         "--nproc_per_node=2",
         str(script_path),
         str(output_dir),
@@ -839,6 +842,10 @@ def test_decoder_trainer_distributed_two_workers(tmp_path):
         ) from e
 
     assert res.returncode == 0, f"Distributed run failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+    reports = [json.loads((output_dir / f"rank-{rank}.json").read_text()) for rank in range(2)]
+    assert [report["rank"] for report in reports] == [0, 1]
+    assert all(report["iterations"] == 4 for report in reports)
+    assert reports[0]["run_dir"] == reports[1]["run_dir"]
 
 
 @pytest.mark.parametrize("ignore_index", [-100, -1])
