@@ -45,6 +45,23 @@ def test_counting_dataset_fixed_lengths():
     assert all(_len == 8 for _len in source_lengths)
 
 
+def test_counting_dataset_duplicates_and_exhaustion(monkeypatch):
+    generated = []
+    original = CountingDataset.generate_ab
+
+    def generate_ab(self, n, k, rng):
+        sample = original(self, n, k, rng)
+        generated.append(sample)
+        return sample
+
+    monkeypatch.setattr(CountingDataset, "generate_ab", generate_ab)
+    dataset = CountingDataset(total_size=10, k=2, seq_len=3, seed=42)
+
+    assert len(dataset) == 2
+    assert set(zip(dataset.source_texts, dataset.target_texts)) == {("aab", "001"), ("abb", "011")}
+    assert len(generated) > len(set(generated))
+
+
 def test_build_counting_dataset_constraints():
     with pytest.raises(
         ValueError,

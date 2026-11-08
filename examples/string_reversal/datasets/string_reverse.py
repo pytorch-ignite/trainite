@@ -94,7 +94,10 @@ class StringReverseDataset(Dataset):
 
             while len(unique_sequences) < target and attempts < max_attempts:
                 seq = "".join(rng.choices(self.chars, k=length))
-                unique_sequences.add(seq)
+                if seq not in unique_sequences:
+                    unique_sequences.add(seq)
+                    source_texts.append(seq)
+                    target_texts.append(seq[::-1])
                 attempts += 1
 
             if len(unique_sequences) < per_seq_size:
@@ -104,12 +107,6 @@ class StringReverseDataset(Dataset):
                     f"(max possible: {max_possible_combinations}).",
                     stacklevel=2,
                 )
-
-            # Pack each unique sequence into source and target formats
-            for seq in unique_sequences:
-                reversed_seq = seq[::-1]
-                source_texts.append(seq)
-                target_texts.append(reversed_seq)
 
         return source_texts, target_texts
 
