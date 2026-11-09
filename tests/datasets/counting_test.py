@@ -1,3 +1,9 @@
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
 import pytest
 from torch.utils.data import DataLoader
 from trainite.datasets.counting import (
@@ -112,3 +118,27 @@ def test_counting_transform_and_collator():
     assert "input_ids" in batch
     assert "attention_mask" in batch
     assert "labels" in batch
+
+
+def test_counting_ordering_across_hash_seeds():
+    script = (
+        "import json\n"
+        "from trainite.datasets.counting import CountingDataset\n"
+        "print(json.dumps(list(CountingDataset(total_size=20, k=3, min_seq_len=5, max_seq_len=8, seed=42))))"
+    )
+    samples = []
+    for hash_seed in ("1", "2"):
+        result = subprocess.run(
+            [sys.executable, "-B", "-c", script],
+            cwd=Path(__file__).resolve().parents[2],
+            env={**os.environ, "PYTHONHASHSEED": hash_seed},
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        samples.append(json.loads(result.stdout))
+
+    assert len(samples[0]) == 20
+    assert len({sample["source"] for sample in samples[0]}) == 20
+    assert samples[0] == samples[1]

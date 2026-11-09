@@ -90,6 +90,7 @@ class CountingDataset(Dataset):
             return [], []
 
         unique_sequences: set[str] = set()
+        seq_map: dict[str, str] = {}
 
         # Pre-calculate possible combinations to avoid infinite loops on small ranges
         total_possible = sum(math.comb(seq_len - 1, k - 1) for seq_len in range(min_len, max_len + 1) if seq_len >= k)
@@ -106,8 +107,7 @@ class CountingDataset(Dataset):
             src, tgt = self.generate_ab(length, k, rng)
             if src not in unique_sequences:
                 unique_sequences.add(src)
-                source_texts.append(src)
-                target_texts.append(tgt)
+                seq_map[src] = tgt
             attempts += 1
 
         if len(unique_sequences) < target_size:
@@ -115,6 +115,10 @@ class CountingDataset(Dataset):
                 f"Requested {target_size} unique sequences but only {len(unique_sequences)} could be generated.",
                 stacklevel=2,
             )
+
+        for seq in unique_sequences:
+            source_texts.append(seq)
+            target_texts.append(seq_map[seq])
 
         return source_texts, target_texts
 

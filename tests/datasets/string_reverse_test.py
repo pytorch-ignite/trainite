@@ -1,3 +1,9 @@
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
 import pytest
 import torch
 from torch.utils.data import DataLoader
@@ -217,3 +223,27 @@ def test_prompt_completion_transform():
 
     # Eval prompt is [bos] + source + [sep], no target
     assert item.eval_input_ids.tolist() == [tokenizer.bos_token_id] + source_tokens + [tokenizer.sep_token_id]
+
+
+def test_string_reverse_ordering_across_hash_seeds():
+    script = (
+        "import json\n"
+        "from trainite.datasets.string_reverse import StringReverseDataset\n"
+        'print(json.dumps(list(StringReverseDataset(per_seq_size=20, seq_len=5, charset="abc", seed=42))))'
+    )
+    samples = []
+    for hash_seed in ("1", "2"):
+        result = subprocess.run(
+            [sys.executable, "-B", "-c", script],
+            cwd=Path(__file__).resolve().parents[2],
+            env={**os.environ, "PYTHONHASHSEED": hash_seed},
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        samples.append(json.loads(result.stdout))
+
+    assert len(samples[0]) == 20
+    assert len({sample["source"] for sample in samples[0]}) == 20
+    assert samples[0] == samples[1]
