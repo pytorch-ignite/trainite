@@ -1,0 +1,123 @@
+# Dense control for the file-level zero: is the MoE the reason?
+#
+# Runs 7, 8 and 9 all scored 0/164 with a 10-17% body rate, and every run used the
+# same 3-expert MoE. The obvious objection is that routing is the problem: with
+# top_k 2 over 3 experts of width 384, each token gets an average of the experts
+# rather than a coherent FFN, so maybe the model never forms the "start an
+# indented body" feature.
+#
+# This config uses models/gemma4_dense.py, a verbatim copy of the canonical dense
+# variant in trainite/models/gemma4_dense.py (same attention, norms, depth and
+# width as our MoE file, but one dense FFN per block instead of a shared FFN plus
+# a top-2 MoE). Copied rather than imported so the py-edu project stays
+# self-contained and the MoE code path cannot change.
+#
+# The embedding init in that file now comes from upstream fix 507cb91 ("initialize
+# Gemma embeddings with std 0.02"), which is why the dense and MoE baselines start
+# from the same logit scale.
+#
+# Setting num_experts=1 on the MoE class would also be dense mathematically, but
+# the block would still run the shared FFN *and* the expert FFN -- two parallel
+# FFNs of width 768. A reader can argue with "that is still a MoE block". The
+# dense module has one FFN, so the claim "we trained a dense model" is not
+# contestable.
+#
+# Width. The MoE's active FFN width per layer is
+#   dense_intermediate_size 768 + top_k 2 * expert_dim 384 = 1536.
+# One DenseMLP of width 1536 has the same parameters and FLOPs as that active
+# path, so capacity is held constant and routing is the only change.
+#
+# Measured param counts, same config otherwise:
+#
+#   MoE   total 15.425M   active 13.066M   (one expert of three is idle)
+#   dense total 13.051M   active 13.051M
+#
+# The 0.1% gap is the router tensors and the extra post-MoE norm.
+#
+# Also note the block topology: the MoE block computes shared FFN + experts in
+# parallel and sums them, so "one wide FFN" is not the same function class as
+# "two summed narrow FFNs". That is unavoidable when removing routing from this
+# architecture, and it is why the width is matched rather than the topology.
+#
+# Everything else is identical to config.file_15m.yaml (run 7): same corpus,
+# max_length 1024, batch 32, 1 epoch, same seed. Run 7 is the number to beat:
+# 0/164 with 17% body rate (n=100).
+#
+# Honest prediction: 0/164, body rate 12-18%. If it lands far outside that band
+# (say >30%), routing was hiding something and the whole file-level story needs a
+# second look. If it lands in the band, the MoE is exonerated and the objective is
+# the only remaining explanation -- which is what the write-up should say.
+#
+# Budget: batch 32 at 1024, ~5.2h like run 7. Score it on the n=100 body rate;
+# a 0/164 on its own tells us nothing new.
+project_name: py-edu-gemma-moe
+preprocessor:
+  _target_: preprocessors.python_bpe.load_python_bpe_tokenizer
+  vocab_size: 8192
+  cache_dir: outputs/tokenizers
+model:
+  _target_: models.gemma4_dense.Gemma4DenseModel
+  collate_fn_target: models.gemma4_dense.CausalLMCollateFn
+  hidden_size: 256
+  num_layers: 8
+  num_attention_heads: 4
+  num_key_value_heads: 2
+  dense_intermediate_size: 1536 # 768 shared + 2 * 384 active experts, see header.
+  head_dim: 64
+  layer_types: null
+  layer_pattern: sssg
+  sliding_window: 1024
+  rope_theta: 10000.0
+  global_rope_theta: 1000000.0
+  rotary_fraction: 1.0
+  global_rotary_fraction: 0.25
+  global_num_key_value_heads: 2
+  global_head_dim: 64
+  global_key_equals_value: true
+  attention_dropout: 0.0
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 0.0006
+loss:
+  _target_: models.gemma4_dense.CausalLMCrossEntropyLoss
+  ignore_index: -100
+data:
+  dataset:
+    _target_: dataset_impl.python_file.load_file_dataset
+    path: Avelina/python-edu-cleaned
+    dataset_size: null
+    split: train
+    max_length: 1024
+    min_length: 16
+  transform:
+    _target_: dataset_impl.python_file.FileCausalLMTransform
+    max_length: 1024
+  dataloader:
+    batch_size: 32
+    shuffle: true
+    num_workers: 8
+  test_ratio: 0.1
+  val_ratio: 0.1
+trainer:
+  epochs: 1
+  precision: bf16
+  log_every_steps: 50
+  early_stopping_patience: null
+  inference_every_epochs: null
+  inference_num_samples: 2
+  max_inference_new_tokens: 16
+  benchmark_every_epochs: 1
+  benchmark_num_samples: 2
+  max_benchmark_new_tokens: 128
+  humaneval_enabled: true
+  humaneval_max_new_tokens: 192
+  humaneval_batch_size: 16
+  humaneval_strip_docstrings: true
+  humaneval_truncate_at_top_level: true
+  grad_clip_norm: 1.0
+output:
+  root: outputs
+  run_name: gemma4_moe__file_dense_15m
+logger: tensorboard
+seed: 42
+device: null
