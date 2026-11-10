@@ -30,8 +30,8 @@
 # 32 x 1024 (12.8GB measured), which is the same memory ceiling; raise to 16 if
 # the card allows, but keep the reported batch in the run notes.
 #
-# Budget: 6.06M eligible files, mean 401 tokens/file, ~2.43B tokens total and
-# ~1.94B train per pass (1.5x run 7). At batch 8 that is ~606k steps and roughly
+# Budget: 6.07M eligible files, mean 408.6 tokens/file, ~2.48B tokens total and
+# ~1.98B train per pass (1.54x run 7). At batch 8 that is ~606k steps and roughly
 # 19-20h, versus 5.2h for run 7. The added wall clock is padding and long-file
 # compute, not more target positions.
 #
@@ -91,7 +91,7 @@ data:
   test_ratio: 0.1
   val_ratio: 0.1
 trainer:
-  epochs: 1 # ~1.94B train tokens, 1.5x run 7.
+  epochs: 1 # ~1.98B train tokens, 1.54x run 7.
   precision: bf16
   log_every_steps: 50
   early_stopping_patience: null

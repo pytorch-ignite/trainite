@@ -12,7 +12,7 @@
 #
 # Matched budget (the point of this config). The function-level 15M run
 # (config.relaxed_15m.yaml, 4 epochs) sees ~1.25B train tokens. Whole files at
-# max_length 1024 are ~3.6x longer per pass, so one epoch lands at ~1.1B tokens.
+# max_length 1024 are ~3.8x longer per pass, so one epoch lands at ~1.29B tokens.
 # Same compute, different task -- that is the only clean way to compare them.
 #
 #   corpus      one example per eligible file, loss on every token + EOS
@@ -90,7 +90,7 @@ data:
   test_ratio: 0.1
   val_ratio: 0.1
 trainer:
-  epochs: 1 # ~1.1B train tokens, matched to the function-level 4-epoch budget.
+  epochs: 1 # ~1.29B train tokens, matched to the function-level 4-epoch budget.
   precision: bf16
   log_every_steps: 50
   early_stopping_patience: null
