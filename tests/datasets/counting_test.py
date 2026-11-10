@@ -1,3 +1,9 @@
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
 import pytest
 from torch.utils.data import DataLoader
 from trainite.datasets.counting import (
@@ -43,6 +49,23 @@ def test_counting_dataset_fixed_lengths():
     target_lengths = [len(x) for x in dataset.target_texts]
     assert all(s == t for s, t in zip(source_lengths, target_lengths))
     assert all(_len == 8 for _len in source_lengths)
+
+
+def test_counting_dataset_duplicates_and_exhaustion(monkeypatch):
+    generated = []
+    original = CountingDataset.generate_ab
+
+    def generate_ab(self, n, k, rng):
+        sample = original(self, n, k, rng)
+        generated.append(sample)
+        return sample
+
+    monkeypatch.setattr(CountingDataset, "generate_ab", generate_ab)
+    dataset = CountingDataset(total_size=10, k=2, seq_len=3, seed=42)
+
+    assert len(dataset) == 2
+    assert set(zip(dataset.source_texts, dataset.target_texts)) == {("aab", "001"), ("abb", "011")}
+    assert len(generated) > len(set(generated))
 
 
 def test_build_counting_dataset_constraints():
@@ -95,3 +118,27 @@ def test_counting_transform_and_collator():
     assert "input_ids" in batch
     assert "attention_mask" in batch
     assert "labels" in batch
+
+
+def test_counting_ordering_across_hash_seeds():
+    script = (
+        "import json\n"
+        "from trainite.datasets.counting import CountingDataset\n"
+        "print(json.dumps(list(CountingDataset(total_size=20, k=3, min_seq_len=5, max_seq_len=8, seed=42))))"
+    )
+    samples = []
+    for hash_seed in ("1", "2"):
+        result = subprocess.run(
+            [sys.executable, "-B", "-c", script],
+            cwd=Path(__file__).resolve().parents[2],
+            env={**os.environ, "PYTHONHASHSEED": hash_seed},
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        samples.append(json.loads(result.stdout))
+
+    assert len(samples[0]) == 20
+    assert len({sample["source"] for sample in samples[0]}) == 20
+    assert samples[0] == samples[1]
