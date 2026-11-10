@@ -1,5 +1,6 @@
 import importlib
 import inspect
+import itertools
 import logging
 import os
 from datetime import datetime
@@ -137,6 +138,67 @@ def load_config(path: str | Path, config_cls: type[T]) -> T:
     raw_conf = OmegaConf.load(path)
     # PyYAML cannot serialize OmegaConf's DictConfig and ListConfig objects when the resolved config is saved.
     return config_cls.model_validate(OmegaConf.to_container(raw_conf, resolve=True))
+
+
+def flatten_sweep_config(d: dict, parent_key: str = "", sep: str = ".") -> dict:
+    items = []
+    for k, v in d.items():
+        if sep in k:
+            raise ValueError(f"Sweep keys must use nested YAML, not flattened keys: '{k}'")
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            items.extend(flatten_sweep_config(v, new_key, sep=sep).items())
+            continue
+        items.append((new_key, v))
+    return dict(items)
+
+
+def load_grid_configs(path: str | Path, config_cls: type[T]) -> list[tuple[T, dict[str, Any]]]:
+    raw_conf = OmegaConf.load(path)
+    sweep_params = raw_conf.get("sweep", None)
+
+    # Delete sweep block once upfront
+    base_run_conf = raw_conf.copy()
+    if "sweep" in base_run_conf:
+        del base_run_conf["sweep"]
+
+    if not sweep_params:
+        return [(config_cls.model_validate(OmegaConf.to_container(base_run_conf, resolve=True)), {})]
+
+    sweep_params_dict = OmegaConf.to_container(sweep_params, resolve=True)
+    flat_sweep_params = flatten_sweep_config(sweep_params_dict)
+
+    keys = list(flat_sweep_params.keys())
+
+    # Safely handle explicit nulls in the YAML
+    for key in keys:
+        if OmegaConf.select(base_run_conf, key, default="__MISSING__") == "__MISSING__":
+            raise KeyError(f"Sweep key '{key}' does not exist in the base configuration.")
+
+    for key, value in flat_sweep_params.items():
+        if isinstance(value, list) and not value:
+            raise ValueError(f"Sweep parameter '{key}' must contain at least one value.")
+
+    values = [v if isinstance(v, list) else [v] for v in flat_sweep_params.values()]
+    combinations = list(itertools.product(*values))
+
+    configs = []
+    for combo in combinations:
+        run_conf = base_run_conf.copy()
+        combo_dict = {}
+
+        for key, val in zip(keys, combo):
+            OmegaConf.update(run_conf, key, val)
+            combo_dict[key] = val
+
+        if combo_dict:
+            name_suffix = "_".join(f"{key}={value}" for key, value in combo_dict.items())
+            if OmegaConf.select(run_conf, "output.run_name") is not None:
+                run_conf.output.run_name = f"{run_conf.output.run_name}_{name_suffix}"
+
+        configs.append((config_cls.model_validate(OmegaConf.to_container(run_conf, resolve=True)), combo_dict))
+
+    return configs
 
 
 # ==========================================
