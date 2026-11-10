@@ -25,6 +25,7 @@ plus extra tests, `nodoc` = same weights, prompts with the docstring removed.
 | 6 | `config.relaxed_15m.yaml` | 15.4M / 13.1M | relaxed, 4 ep | 1.25B | 19/164 (11.6%) | 15/164 (9.2%) | 79% |
 | 7 | `config.file_15m.yaml` | 15.4M / 13.1M | file-level, 1 ep | ~1.3B | **0/164 (0.0%)** | **0/164 (0.0%)** | — |
 | 8 | run 7 config, `epochs: 2` | 15.4M / 13.1M | file-level, 2 ep | ~2.6B | **0/164 (0.0%)** | **0/164 (0.0%)** | — |
+| 9 | `config.file_15m_4k.yaml` | 15.4M / 13.1M | file-level 4096, 1 ep | ~1.9B | **0/164 (0.0%)** | **0/164 (0.0%)** | — |
 
 ### Comparisons (two-proportion z-test, n = 164)
 
@@ -66,6 +67,9 @@ is the right test because both runs are scored on the same 164 problems.
    Scored 0/164 — see notes below.
 8  the epochs test on run 7. Only `epochs: 1` -> `2` changed. Still 0/164, and the
    body rate did not move. That answer is in the notes below.
+9  the data test. Same corpus and allowlist, `max_length: 1024` -> `4096` and
+   batch 8. +52% tokens and +70% unique after-docstring positions. Still 0/164,
+   body rate 16% (was 17%). Nothing left to blame on the data.
 ```
 
 ### Notes on run 7 (and run 8): the 0/164
@@ -87,10 +91,20 @@ continue (n=100, 100 fresh files, not the 20 used before):
     function-level 15M, 4 ep      88% correct indented body
     file-level     15M, 1 ep      17%
     file-level     15M, 2 ep      10%
+    file-level     15M, 4096      16%   (run 9: +52% tokens, +70% unique
+                                        docstring positions, 17.8 h)
 
   - same size, same tokenizer, same source -> capacity is not the limit
   - run 7 vs run 8 differs only in `epochs: 1` -> `2` (config diff), so repetition
     is the only variable, and it bought nothing: 17% -> 10%
+  - run 9 changes only `max_length` (and the matching batch). The files it adds are
+    the def-dense ones (1.06 documented defs/file vs 0.11), so this is +70% unique
+    examples of the move, not repetition. Body rate 16% vs 17%: nothing.
+    Epochs and data are both ruled out; the loss structure is all that is left
+  - run 9 cost 607k steps / 17.8 h / 14.4 GB. Its val_loss (1.3107) is not
+    comparable to run 7's 1.3357: the validation set has different files
+  - the failure mix is unchanged too (run 9: 46% commented out, 30% new top-level
+    def, 16% body, 6% EOS, 2% other)
   - 10/100 and 17/100 are within noise of each other (p~0.15); the point is that
     neither is anywhere near 88%
   - run 8's val_loss still improved, 1.3357 -> 1.2847 (ppl 3.80 -> 3.61), while the
@@ -106,8 +120,10 @@ what it never learned: indent and write the body after a closing """
 why: that position is ~0.04% of file-level tokens vs 18% of function-level examples
      (~460x less signal on the move HumanEval tests)
 
-verdict: epochs are ruled out. 2 passes over the same data moved val loss and did
-not move the behavior. The objective has to change, not the schedule:
+verdict: epochs and corpus size are both ruled out. 2 passes over the same data
+(17% -> 10%) and a 4096 cap with +70% unique target positions (17% -> 16%) each
+moved something other than the behavior. The objective has to change, not the
+schedule or the filter:
   - mix the function-level task into file training, or
   - file-level as stage 1, then fine-tune on `signature -> body`
 ```
@@ -152,13 +168,14 @@ for a smaller model.
 Not zero (the model reads docstrings), not catastrophic (it does not need them).
 Note the blind 24/164 still ties the old sighted 156M strict at 18/164.
 
-**Whole-file training scored 0/164, twice.** Not a broken model: on 100 corpus
-files cut after a docstring it wrote a body 17% of the time at 1 pass and 10% at 2
-passes, against 88% for the same-size function-level model. That position is 0.04%
-of file-level tokens vs 18% of function-level examples, so the signal is ~460×
-thinner. A second pass over the same data moved val loss (1.3357 → 1.2847) and did
-not move the behavior — epochs are ruled out, the objective is what has to change.
-See the run 7/8 notes.
+**Whole-file training scored 0/164, three times.** Not a broken model: on 100
+corpus files cut after a docstring it wrote a body 17% of the time at 1 pass, 10%
+at 2 passes, and 16% with the long files included (run 9), against 88% for the
+same-size function-level model. That position is 0.04% of file-level tokens vs 18%
+of function-level examples, so the signal is ~460× thinner. A second pass moved val
+loss (1.3357 → 1.2847) and a 52% bigger pass with 70% more unique target positions
+did not move the behavior either — epochs and data are both ruled out, the objective
+is what has to change. See the run 7/8/9 notes.
 
 ---
 
@@ -327,8 +344,9 @@ figures in section 4 are from the step-time sweep, not from these two runs.
 - **Quality dilution.** Removing the docstring filter also removed an implicit
   "somebody cared about this code" filter. 82% of the corpus is undocumented.
 - **Estimates vs measurements.** Section 4 numbers marked extrapolated have not
-  been measured on the actual card. Section 3 corpus totals are scaled from one
-  shard (×~400), so absolute counts carry maybe ±10%; ratios do not.
+  been measured on the actual card. Section 3 corpus totals are scaled from a
+  30k-file sample across all 10 shards (±3%) and the filter audit from 100k raw
+  rows (±0.5pp); ratios are stable, absolute counts are estimates.
 - **The in-training compile benchmark is 2 samples.** `benchmark_num_samples: 2`
   means `bench_body=0.00` is a coin flip, not a signal. The 100-prefix test in
   section 1 is the measurement to trust.
@@ -340,20 +358,22 @@ figures in section 4 are from the step-time sweep, not from these two runs.
 1. **Where is the size knee?** 13.1M → 19, 131M → 31. Next run: `h512 L10`
    (63.8M total / 53.9M active) on the relaxed corpus, ~10 h.
    `~28` = knee is low; `22–25` = knee near 50M; `18` = something else is wrong.
-2. **Does whole-file training beat function training?** Still not answerable as a
-   score: run 7 (1 pass, 0/164) and run 8 (2 passes, 0/164) against run 6 (function,
-   4 passes, 19/164). But the epochs half of it is now answered — run 8 was run 7
-   with only `epochs: 1` → `2`, and the body rate went 17% → 10% (n=100) while
-   val_loss improved 1.3357 → 1.2847. Repetition does not teach this move, so a
-   4th and 5th pass will not either; do not spend 18 h finding that out.
+2. **Does whole-file training beat function training?** Not as a score: runs 7,
+   8 and 9 (all 0/164) against run 6 (function, 4 passes, 19/164). Both the epochs
+   half and the data half are now answered. Run 8 was run 7 with only `epochs: 1`
+   → `2`: body rate 17% → 10% while val_loss improved 1.3357 → 1.2847. Run 9 was
+   run 7 with only `max_length: 1024` → `4096`: +52% tokens, +70% unique
+   after-docstring positions, body rate 16%. Repetition does not teach this move
+   and neither does more of the corpus. Do not run 4/5 passes or a bigger cap.
    What is left is the objective: mix the function-level task into file training, or
    use file-level as stage 1 and fine-tune on `signature -> body`. Only then is the
    4-pass, pass-matched comparison against run 6 worth running.
 3. **Can 15M discover a rare pattern in file-level data?** Run 7 shows 15M can
    *represent* the docstring move (88% from the function-level model, n=100).
-   Finding it from 0.04% of positions failed at 1 pass and at 2. A 131M file-level
-   arm is now the only size-related test left, and it should follow an objective
-   change, not precede it — a bigger model sees the same 0.04%.
+   Finding it from 0.04% of positions failed at 1 pass, at 2, and at 4096 with 70%
+   more unique examples. A 131M file-level arm is now the only size-related test
+   left, and it should follow an objective change, not precede it — a bigger model
+   sees the same 0.04%.
 4. **Does the 270M finally pay off?** On file-level data (1.29B/pass), 6 passes
    gives 34 tok/param, finally above Chinchilla. On function-level data it would
    need 14.7 passes, which is unreachable.
@@ -451,6 +471,8 @@ whole files instead of functions -19 HumanEval   (19 -> 0, tokens matched 1.29B 
                                                   1.25B — clean comparison)
 1 more pass on file data          +0 HumanEval   (0 -> 0; val_loss -0.051, body
                                                   rate 17% -> 10%, n=100)
+1.5x corpus via a 4096 cap        +0 HumanEval   (0 -> 0; +70% unique docstring
+                                                  positions, body rate 17% -> 16%)
 ```
 
 Read together: repetition and model size were both dead ends — including an extra
