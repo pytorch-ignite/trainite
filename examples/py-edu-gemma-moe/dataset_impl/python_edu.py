@@ -1,4 +1,5 @@
 import ast
+import os
 import re
 import symtable
 import sys
@@ -230,18 +231,24 @@ def load_function_dataset(
         raise ValueError("Tokenizer must define eos_token_id")
     raw_dataset = load_dataset(path, split=split)
 
-    def generate():
+    # Extraction is CPU-bound and cached by fingerprint. dataset_size caps the
+    # output per process, so only shard when there is no cap to divide.
+    num_shards = min(os.cpu_count() or 1, 16) if dataset_size is None else 1
+
+    def generate(shards: list[int] | None = None, num_shards: int = 1):
         count = 0
-        for sample in raw_dataset:
-            for example in extract_functions(sample["text"], require_docstring=require_docstring):
-                prompt_length = len(tokenizer.encode(example["prompt"], add_special_tokens=False))
-                body_length = len(tokenizer.encode(example["completion"], add_special_tokens=False))
-                if not prompt_length or not body_length or prompt_length + body_length + 1 > max_length:
-                    continue
-                yield example
-                count += 1
-                if dataset_size is not None and count >= dataset_size:
-                    return
+        for shard in shards or [0]:
+            source = raw_dataset.shard(num_shards=num_shards, index=shard) if num_shards > 1 else raw_dataset
+            for sample in source:
+                for example in extract_functions(sample["text"], require_docstring=require_docstring):
+                    prompt_length = len(tokenizer.encode(example["prompt"], add_special_tokens=False))
+                    body_length = len(tokenizer.encode(example["completion"], add_special_tokens=False))
+                    if not prompt_length or not body_length or prompt_length + body_length + 1 > max_length:
+                        continue
+                    yield example
+                    count += 1
+                    if dataset_size is not None and count >= dataset_size:
+                        return
 
     # Keep source/tokenizer settings and output schema in the cache key.
     source_fingerprint = getattr(raw_dataset, "_fingerprint", None) or "unknown"
@@ -258,11 +265,17 @@ def load_function_dataset(
         f"{path}|{split}|{dataset_size}|{max_length}|{source_fingerprint}|{tokenizer_fingerprint}|"
         f"prompt-completion|self-contained|stdlib-allowlist-v1{docstring_fingerprint}"
     )
-    dataset = Dataset.from_generator(
-        generate,
-        features=Features({"prompt": Value("string"), "completion": Value("string")}),
-        fingerprint=fingerprint,
-    )
+    features = Features({"prompt": Value("string"), "completion": Value("string")})
+    if num_shards > 1:
+        dataset = Dataset.from_generator(
+            generate,
+            features=features,
+            fingerprint=fingerprint,
+            gen_kwargs={"shards": list(range(num_shards)), "num_shards": num_shards},
+            num_proc=num_shards,
+        )
+    else:
+        dataset = Dataset.from_generator(generate, features=features, fingerprint=fingerprint)
     if len(dataset) == 0:
         raise ValueError("No usable functions; inspect docstrings and max_length")
     return dataset
