@@ -1,6 +1,9 @@
 project_name: py-edu-gemma-moe
 preprocessor:
-  _target_: preprocessors.gpt2_tokenizer.load_gpt2_tokenizer
+  _target_: preprocessors.python_bpe.load_python_bpe_tokenizer
+  dataset_path: Avelina/python-edu-cleaned
+  vocab_size: 8192
+  cache_dir: outputs/tokenizers
 model:
   _target_: models.gemma4_moe.Gemma4MoEModel
   collate_fn_target: models.gemma4_moe.CausalLMCollateFn
