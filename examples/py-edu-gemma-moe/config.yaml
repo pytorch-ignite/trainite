@@ -1,64 +1,71 @@
 project_name: py-edu-gemma-moe
 preprocessor:
   _target_: preprocessors.python_bpe.load_python_bpe_tokenizer
-  dataset_path: Avelina/python-edu-cleaned
   vocab_size: 8192
   cache_dir: outputs/tokenizers
 model:
   _target_: models.gemma4_moe.Gemma4MoEModel
   collate_fn_target: models.gemma4_moe.CausalLMCollateFn
-  hidden_size: 64
-  num_layers: 2
+  hidden_size: 256
+  num_layers: 8
   num_attention_heads: 4
   num_key_value_heads: 2
-  dense_intermediate_size: 128
-  expert_dim: 64
-  num_experts: 4
+  dense_intermediate_size: 768
+  expert_dim: 384
+  num_experts: 3
   top_k: 2
-  head_dim: 16
+  head_dim: 64
   layer_types: null
-  layer_pattern: sg
-  sliding_window: 64
+  layer_pattern: sssg
+  sliding_window: 512
   rope_theta: 10000.0
   global_rope_theta: 1000000.0
   rotary_fraction: 1.0
   global_rotary_fraction: 0.25
   global_num_key_value_heads: 2
-  global_head_dim: 16
+  global_head_dim: 64
   global_key_equals_value: true
   attention_dropout: 0.0
 optimizer:
   _target_: torch.optim.AdamW
-  lr: 0.001
+  lr: 0.0006
 loss:
   _target_: models.gemma4_moe.GemmaMoECausalLMLoss
   ignore_index: -100
   aux_loss_coef: 0.01
 data:
   dataset:
-    _target_: datasets.load_dataset
+    _target_: dataset_impl.python_edu.load_function_dataset
     path: Avelina/python-edu-cleaned
-    name: null
+    dataset_size: null
     split: train
-    revision: null
+    max_length: 512
+    require_docstring: false
   transform:
     _target_: dataset_impl.python_edu.PythonEduTransform
-    max_length: 128
+    max_length: 512
   dataloader:
-    batch_size: 32
+    batch_size: 64
     shuffle: true
-    num_workers: 2
+    num_workers: 8
   test_ratio: 0.1
   val_ratio: 0.1
 trainer:
-  epochs: 3
-  precision: float32
-  log_every_steps: 10
-  early_stopping_patience: 3
+  epochs: 4
+  precision: bf16
+  log_every_steps: 50
+  early_stopping_patience: 2
   inference_every_epochs: null
-  inference_num_samples: 5
+  inference_num_samples: 2
   max_inference_new_tokens: 16
-  grad_clip_norm: null
+  benchmark_every_epochs: 1
+  benchmark_num_samples: 2
+  max_benchmark_new_tokens: 128
+  humaneval_enabled: true
+  humaneval_max_new_tokens: 192
+  humaneval_batch_size: 16
+  humaneval_strip_docstrings: true
+  grad_clip_norm: 1.0
 output:
   root: outputs
   run_name: gemma4_moe__py_edu_15m
