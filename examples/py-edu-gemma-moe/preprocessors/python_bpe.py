@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from tokenizers import Tokenizer, decoders, models, pre_tokenizers, processors, trainers
+from tokenizers import Regex, Tokenizer, decoders, models, pre_tokenizers, processors, trainers
 from transformers import PreTrainedTokenizerFast
 
 
@@ -38,7 +38,8 @@ def load_python_bpe_tokenizer(
         # Python indentation becomes a single token.
         tokenizer.pre_tokenizer = pre_tokenizers.Sequence(
             [
-                pre_tokenizers.Split(pattern=r"\d| +|\n+|[^\s\d\w]+|\w+", behavior="isolated"),
+                # A plain string is a literal in tokenizers; the regex must be wrapped.
+                pre_tokenizers.Split(pattern=Regex(r"\d| +|\n+|[^\s\d\w]+|\w+"), behavior="isolated"),
                 pre_tokenizers.ByteLevel(add_prefix_space=False, use_regex=False),
             ]
         )
