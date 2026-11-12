@@ -1,5 +1,11 @@
+import ast
 import html
+import json
 import logging
+import os
+import sys
+from collections.abc import Callable
+from pathlib import Path
 
 from accelerate import Accelerator
 import torch
@@ -7,9 +13,11 @@ from ignite.engine import Engine, Events
 from ignite.handlers import DiskSaver
 from ignite.handlers.clearml_logger import ClearMLSaver
 from ignite.handlers.logger_utils import setup_clearml_logging, setup_tb_logging
-from ignite.metrics import Accuracy, Loss, Metric, RunningAverage
+from ignite.metrics import Accuracy, Loss, Metric, Perplexity, RunningAverage
 from ignite.utils import setup_logger
 from torch.utils.data import DataLoader
+
+from models.gemma4_moe import load_balancing_loss
 
 from config import (
     ProjectConfig,
@@ -54,7 +62,56 @@ def _flatten(output: dict[str, torch.Tensor], ignore_index: int = -100) -> tuple
     targets = output["targets"].reshape(-1)
     # Build a boolean mask that is True for every non-ignored position
     mask = targets != ignore_index
-    return logits[mask], targets[mask]
+    # Ignite's Perplexity sums NLL over all tokens before normalizing. With fp16
+    # logits that sum can overflow to inf even when the mean NLL is small.
+    # Metrics are evaluation-only, so accumulate them in fp32.
+    return logits[mask].float(), targets[mask]
+
+
+def _truncate_completion(text: str) -> str:
+    """Cut a generated body where it dedents into a new top-level statement."""
+    if not text.strip():
+        return ""
+    lines = text.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if line.startswith(("def ", "class ", "@", "#")):
+            return "".join(lines[:i]).rstrip() + "\n"
+    return text.rstrip() + "\n"
+
+
+def _prompt_entry_point(prompt: str) -> str | None:
+    """Return the function name defined by a prompt, or None if it does not parse."""
+    try:
+        tree = ast.parse(prompt)
+    except (SyntaxError, ValueError, RecursionError):
+        return None
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return node.name
+    return None
+
+
+def _compile_stats(prompt: str, completion: str, entry_point: str | None) -> tuple[bool, bool]:
+    """Score a generated body without executing it.
+
+    Returns ``(compiles, has_body)`` where ``has_body`` requires the prompted
+    function to still exist with a statement beyond its docstring, so a model
+    that emits nothing does not count as a success.
+    """
+    try:
+        tree = ast.parse(prompt + completion)
+        compile(tree, "<generated>", "exec")
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return False, False
+    function = next(
+        (
+            node
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == entry_point
+        ),
+        None,
+    )
+    return True, function is not None and len(function.body) >= 2
 
 
 class Trainer:
@@ -68,7 +125,7 @@ class Trainer:
       ``float32``, ``fp16``, ``bf16``) without boilerplate.
     * **Engines (Ignite)** – ``self.trainer`` runs the training loop; ``self.train_evaluator``,
       ``self.val_evaluator``, and ``self.test_evaluator`` run evaluation.
-    * **Metrics** – loss and token-accuracy are attached to each evaluator.
+    * **Metrics** – cross-entropy, token accuracy and perplexity on each evaluator; training routing diagnostics.
     * **Learning-rate schedule** – linear warm-up + linear decay.
     * **Checkpointing** – last and best-model checkpoints saved to ``run_dir``.
     * **Early stopping** – halts training when validation loss stagnates.
@@ -100,8 +157,14 @@ class Trainer:
             torch.device("cpu") if self.accelerator.device.type == "cpu" else self.accelerator.device
         )
 
-        # Build tokenizer from config (e.g. CharTokenizer)
-        self.tokenizer = instantiate(config.preprocessor)
+        # Build tokenizer from config; dataset-aware preprocessors (e.g. the BPE
+        # tokenizer) train on the raw corpus, others ignore the injected arguments.
+        dataset_config = config.data.dataset if hasattr(config.data, "dataset") else config.data.train.dataset
+        self.tokenizer = instantiate(
+            config.preprocessor,
+            dataset_path=dataset_config.path,
+            split=getattr(dataset_config, "split", "train"),
+        )
         # Build train/val/test DataLoaders from the data config
         self.train_loader, self.val_loader, self.test_loader = build_dataloaders(
             config.data,
@@ -110,7 +173,7 @@ class Trainer:
             collate_fn_target=config.model.collate_fn_target,
         )
         self.model = build_model(
-            config.model, self.device, vocab_size=self.tokenizer.vocab_size, pad_token_id=self.tokenizer.pad_token_id
+            config.model, self.device, vocab_size=len(self.tokenizer), pad_token_id=self.tokenizer.pad_token_id
         )
         self.optimizer = instantiate(config.optimizer, params=self.model.parameters())
         self.epochs: int = self.trainer_config.epochs
@@ -118,6 +181,14 @@ class Trainer:
         self.inference_every_epochs = self.trainer_config.inference_every_epochs
         self.inference_num_samples = self.trainer_config.inference_num_samples
         self.max_inference_new_tokens = self.trainer_config.max_inference_new_tokens
+        self.benchmark_every_epochs = self.trainer_config.benchmark_every_epochs
+        self.benchmark_num_samples = self.trainer_config.benchmark_num_samples
+        self.max_benchmark_new_tokens = self.trainer_config.max_benchmark_new_tokens
+        self.humaneval_enabled = self.trainer_config.humaneval_enabled
+        self.humaneval_max_new_tokens = self.trainer_config.humaneval_max_new_tokens
+        self.humaneval_batch_size = self.trainer_config.humaneval_batch_size
+        self.humaneval_strip_docstrings = self.trainer_config.humaneval_strip_docstrings
+        self.humaneval_truncate_at_top_level = self.trainer_config.humaneval_truncate_at_top_level
         self.criterion = instantiate(config.loss)
         self.ignore_index: int = getattr(self.criterion, "ignore_index", -100)
         self.requires_router_info = getattr(self.criterion, "requires_router_info", False)
@@ -171,8 +242,8 @@ class Trainer:
             "optimizers": self.optimizer,
             "evaluators": evaluators,
             "log_every_iters": self.trainer_config.log_every_steps,
-            "trainer_metric_names": ["batch_loss"],
-            "evaluator_metric_names": ["loss", "token_accuracy"],
+            "trainer_metric_names": self.trainer_metric_names,
+            "evaluator_metric_names": ["loss", "token_accuracy", "perplexity"],
         }
         self.exp_logger = None
         if self.accelerator.is_main_process:
@@ -181,6 +252,7 @@ class Trainer:
                     **logging_kwargs,
                     project_name=config.project_name,
                     task_name=self.run_dir.name,
+                    auto_connect_frameworks={"pytorch": False},
                 )
                 self.exp_logger.get_task().upload_artifact(
                     name="config.yaml", artifact_object=str(self.run_dir / "config.yaml")
@@ -225,6 +297,9 @@ class Trainer:
         # Attach inference logger if inference logging is enabled
         if self.inference_every_epochs is not None:
             self.attach_inference_logger()
+        # Attach compile-only benchmark if enabled
+        if self.benchmark_every_epochs is not None:
+            self.attach_benchmark()
 
     def _train_step(self, engine: Engine, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Run a single training iteration: forward pass, loss, backward, optimizer step.
@@ -262,11 +337,22 @@ class Trainer:
             self.accelerator.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
 
         self.optimizer.step()
-        return {
+        result = {
             "loss": loss.detach(),
             "logits": logits.detach(),
             "targets": targets.detach(),
         }
+        if self.requires_router_info:
+            router_info = outputs[1].detach()
+            aux_loss = load_balancing_loss(router_info)
+            result["lm_loss"] = result["loss"] - self.criterion.aux_loss_coef * aux_loss
+            result["aux_loss"] = aux_loss
+            # Weight rank-local routing fractions by real tokens before combining ranks.
+            token_count = attention_mask.sum() if attention_mask is not None else inputs.new_tensor(inputs.numel())
+            assignments = self.accelerator.reduce(router_info[:, 1, :] * token_count, reduction="sum")
+            tokens = self.accelerator.reduce(token_count, reduction="sum")
+            result["expert_usage"] = assignments / tokens.clamp(min=1)
+        return result
 
     @torch.no_grad()
     def _eval_step(self, engine: Engine, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
@@ -318,13 +404,232 @@ class Trainer:
         self.val_evaluator.run(self.val_loader)
         val_metrics = self.val_evaluator.state.metrics
         self.logger.info(
-            "epoch=%s train_loss=%.4f train_token_acc=%.4f val_loss=%.4f val_token_acc=%.4f",
+            "epoch=%s train_loss=%.4f train_token_acc=%.4f train_ppl=%.4f "
+            "val_loss=%.4f val_token_acc=%.4f val_ppl=%.4f",
             epoch,
             train_metrics["loss"],
             train_metrics["token_accuracy"],
+            train_metrics["perplexity"],
             val_metrics["loss"],
             val_metrics["token_accuracy"],
+            val_metrics["perplexity"],
         )
+        if self.requires_router_info:
+            for name in ("lm_loss", "aux_loss"):
+                self.logger.info("%s=%.4f", name, engine.state.metrics[name])
+            model = self.accelerator.unwrap_model(self.model)
+            for layer, block in enumerate(model.layers):
+                shares = " ".join(
+                    f"{engine.state.metrics[f'router/layer_{layer}/expert_{expert}']:.3f}"
+                    for expert in range(block.moe.num_experts)
+                )
+                self.logger.info("router/layer_%d=[%s]", layer, shares)
+
+    def attach_benchmark(self) -> None:
+        """Register the compile-only benchmark on the training engine.
+
+        Runs every ``benchmark_every_epochs`` epochs: greedily completes fixed
+        validation prompts and scores syntax validity. Nothing is executed, so no
+        sandbox is needed; execution-based scoring belongs to an offline benchmark.
+        """
+        self.trainer.add_event_handler(Events.EPOCH_COMPLETED(every=self.benchmark_every_epochs), self._run_benchmark)
+
+    def _log_scalar(self, tag: str, value: float, step: int) -> None:
+        if self.exp_logger is None:
+            return
+        if self.config.logger == "clearml":
+            title, _, series = tag.partition("/")
+            self.exp_logger.get_task().get_logger().report_scalar(title, series, value, step)
+        else:
+            self.exp_logger.writer.add_scalar(tag, value, global_step=step)
+
+    def _run_benchmark(self, engine: Engine) -> None:
+        """Greedily complete fixed validation prompts and score the generated bodies.
+
+        Prompts use evenly spaced, deterministic dataset indices so every run
+        compares the same inputs. ``compile`` never executes generated code.
+        """
+        self.accelerator.wait_for_everyone()
+        if self.accelerator.is_main_process:
+            dataset = self.val_loader.dataset
+            size = len(dataset)  # type: ignore[arg-type]
+            num_samples = min(self.benchmark_num_samples, size)
+            indices = [round(i * (size - 1) / max(num_samples - 1, 1)) for i in range(num_samples)]
+            items = [dataset[i] for i in indices]
+
+            prompt_ids = [item.eval_input_ids for item in items]
+            pad_token_id = getattr(self.tokenizer, "pad_token_id", 0)
+            input_ids = (
+                torch.nn.utils.rnn.pad_sequence(
+                    [ids.flip(0) for ids in prompt_ids], batch_first=True, padding_value=pad_token_id
+                )
+                .flip(1)
+                .to(self.device)
+            )
+            attention_mask = (
+                torch.nn.utils.rnn.pad_sequence(
+                    [torch.ones_like(ids, dtype=torch.long).flip(0) for ids in prompt_ids],
+                    batch_first=True,
+                    padding_value=0,
+                )
+                .flip(1)
+                .to(self.device)
+            )
+            sequences = self.generate(
+                input_ids=input_ids,
+                max_new_tokens=self.max_benchmark_new_tokens,
+                attention_mask=attention_mask,
+            )
+            completions = [
+                _truncate_completion(self.tokenizer.decode(tokens.tolist(), skip_special_tokens=True))
+                for tokens in sequences[:, input_ids.shape[1] :]
+            ]
+            scores = [
+                _compile_stats(item.source, completion, _prompt_entry_point(item.source))
+                for item, completion in zip(items, completions)
+            ]
+            compile_rate = sum(compiles for compiles, _ in scores) / num_samples
+            body_rate = sum(has_body for _, has_body in scores) / num_samples
+            self._log_scalar("bench/compile_rate", compile_rate, engine.state.epoch)
+            self._log_scalar("bench/body_rate", body_rate, engine.state.epoch)
+            self.logger.info("epoch=%s bench_compile=%.2f bench_body=%.2f", engine.state.epoch, compile_rate, body_rate)
+        self.accelerator.wait_for_everyone()
+
+    def _run_humaneval(self) -> None:
+        """Solve HumanEval+ mini and score it with EvalPlus' official evaluator.
+
+        Runs once after the best checkpoint is restored. EvalPlus executes
+        generated code in subprocesses with timeouts, but this is not a security
+        sandbox, so only use it with trusted models and data.
+
+        With ``humaneval_strip_docstrings`` enabled the same problems are solved a
+        second time with the docstring removed from the prompt. A large drop means
+        the model reads docstrings; no drop means it ignores them, which is the
+        failure mode to watch for after training mostly on bare signatures.
+        """
+        self.accelerator.wait_for_everyone()
+        if not self.accelerator.is_main_process:
+            return
+
+        from evalplus.data import get_human_eval_plus  # pyrefly: ignore[missing-import]
+
+        from benchmarks.humaneval import strip_docstring
+
+        if sys.platform == "darwin":
+            # EvalPlus' RLIMIT_AS guard raises "current limit exceeds maximum
+            # limit" on macOS; -1 skips the rlimit calls, not the subprocesses.
+            os.environ["EVALPLUS_MAX_MEMORY_BYTES"] = "-1"
+
+        problems = get_human_eval_plus(mini=True)
+        native = self._evaluate_humaneval(problems, lambda problem: problem["prompt"], "")
+        if not self.humaneval_strip_docstrings:
+            return
+
+        stripped = self._evaluate_humaneval(problems, lambda problem: strip_docstring(problem["prompt"]), "_nodoc")
+        gap = native["base_pass_at_1"] - stripped["base_pass_at_1"]
+        self.logger.info(
+            "HumanEval+ (mini) docstring dependency: base %.4f -> %.4f without docstrings (gap %.4f)",
+            native["base_pass_at_1"],
+            stripped["base_pass_at_1"],
+            gap,
+        )
+        self._log_scalar("humaneval/docstring_gap", gap, self.trainer.state.iteration)
+
+    def _evaluate_humaneval(
+        self,
+        problems: dict[str, dict[str, str]],
+        prompt_for: Callable[[dict[str, str]], str],
+        tag: str,
+    ) -> dict[str, float | int]:
+        """Generate, score and log one HumanEval+ mini pass under ``tag``."""
+        from evalplus.evaluate import evaluate  # pyrefly: ignore[missing-import]
+
+        from benchmarks.humaneval import summarize_results
+
+        dataset_config = getattr(self.config.data, "dataset", None)
+        max_length = getattr(dataset_config, "max_length", 512)
+        pad_token_id = getattr(self.tokenizer, "pad_token_id", 0) or 0
+
+        items = list(problems.items())
+        completions: dict[str, str] = {}
+        for start in range(0, len(items), self.humaneval_batch_size):
+            batch = []
+            for task_id, problem in items[start : start + self.humaneval_batch_size]:
+                prompt_ids = torch.tensor(
+                    self.tokenizer.encode(prompt_for(problem), add_special_tokens=False),
+                    device=self.device,
+                )
+                if prompt_ids.numel() >= max_length:
+                    completions[task_id] = ""
+                else:
+                    batch.append((task_id, prompt_ids))
+            if not batch:
+                continue
+
+            max_new_tokens = min(
+                self.humaneval_max_new_tokens,
+                max_length - max(prompt_ids.numel() for _, prompt_ids in batch),
+            )
+            input_ids = (
+                torch.nn.utils.rnn.pad_sequence(
+                    [prompt_ids.flip(0) for _, prompt_ids in batch],
+                    batch_first=True,
+                    padding_value=pad_token_id,
+                )
+                .flip(1)
+                .to(self.device)
+            )
+            attention_mask = (
+                torch.nn.utils.rnn.pad_sequence(
+                    [torch.ones_like(prompt_ids, dtype=torch.long).flip(0) for _, prompt_ids in batch],
+                    batch_first=True,
+                    padding_value=0,
+                )
+                .flip(1)
+                .to(self.device)
+            )
+            sequences = self.generate(
+                input_ids=input_ids,
+                max_new_tokens=max_new_tokens,
+                attention_mask=attention_mask,
+            )
+            for (task_id, _), tokens in zip(batch, sequences[:, input_ids.shape[1] :]):
+                completion = self.tokenizer.decode(tokens.tolist(), skip_special_tokens=True)
+                if self.humaneval_truncate_at_top_level:
+                    # A file-level model has learned to keep writing after the body,
+                    # so cut the completion where it starts a new top-level construct.
+                    completion = _truncate_completion(completion)
+                completions[task_id] = completion
+
+            done = min(start + self.humaneval_batch_size, len(items))
+            if done % 20 < self.humaneval_batch_size:
+                self.logger.info("HumanEval%s: generated %d/%d", tag, done, len(items))
+
+        samples_path = self.run_dir / f"humaneval_samples{tag}.jsonl"
+        samples_path.write_text(
+            "\n".join(json.dumps({"task_id": task_id, "completion": completions[task_id]}) for task_id in problems)
+            + "\n"
+        )
+        result_path = Path(str(samples_path).replace(".jsonl", "_eval_results.json"))
+        result_path.unlink(missing_ok=True)
+
+        self.logger.info("Evaluating %d HumanEval+ mini samples%s...", len(problems), tag)
+        evaluate(dataset="humaneval", samples=str(samples_path), mini=True, i_just_wanna_run=True)
+
+        summary = summarize_results(result_path)
+        self.logger.info(
+            "HumanEval+ (mini)%s: base pass@1=%.4f (%d/%d), plus pass@1=%.4f (%d/%d)",
+            tag,
+            summary["base_pass_at_1"],
+            summary["base_passed"],
+            summary["total"],
+            summary["plus_pass_at_1"],
+            summary["plus_passed"],
+            summary["total"],
+        )
+        self._log_scalar(f"humaneval{tag}/base_pass_at_1", summary["base_pass_at_1"], self.trainer.state.iteration)
+        self._log_scalar(f"humaneval{tag}/plus_pass_at_1", summary["plus_pass_at_1"], self.trainer.state.iteration)
+        return summary
 
     def run(self) -> None:
         self.logger.info("starting run in %s", self.run_dir)
@@ -334,8 +639,30 @@ class Trainer:
             if self.test_loader:
                 self.test()
         finally:
+            self._upload_checkpoints()
             if self.exp_logger is not None:
                 self.exp_logger.close()
+
+    def _upload_checkpoints(self) -> None:
+        """Upload the final checkpoints once, after training has stopped."""
+        if self.config.logger != "clearml" or self.exp_logger is None:
+            return
+        if not self.accelerator.is_main_process:
+            return
+
+        for name in ("best.pt", "last.pt"):
+            checkpoint = self.run_dir / name
+            if not checkpoint.exists():
+                continue
+
+            try:
+                self.exp_logger.get_task().upload_artifact(
+                    checkpoint.name,
+                    artifact_object=str(checkpoint),
+                    wait_on_upload=True,
+                )
+            except Exception:
+                self.logger.exception("ClearML upload failed; checkpoint kept at %s", checkpoint)
 
     def test(self, test_loader: DataLoader | None = None) -> None:
         loader = test_loader or self.test_loader
@@ -364,10 +691,15 @@ class Trainer:
         self.test_evaluator.run(loader)
         metrics = self.test_evaluator.state.metrics
         self.logger.info(
-            "Test results: loss=%.4f token_acc=%.4f",
+            "Test results: loss=%.4f token_acc=%.4f perplexity=%.4f",
             metrics["loss"],
             metrics["token_accuracy"],
+            metrics["perplexity"],
         )
+
+        if self.humaneval_enabled:
+            self.logger.info("Running HumanEval+ (mini)...")
+            self._run_humaneval()
 
     def _attach_metrics(self) -> dict[str, Metric]:
         """Create and attach Ignite metrics to the trainer and evaluator engines.
@@ -380,13 +712,27 @@ class Trainer:
         engine so that fluctuations between batches are dampened in the logs.
 
         ``Loss`` and ``Accuracy`` are epoch-level metrics computed over the full
-        evaluation set.  Both use ``_flatten`` as their ``output_transform`` so they
-        see only the non-ignored token positions.
+        evaluation set. Both use ``_flatten`` as their ``output_transform`` so they
+        see only non-ignored token positions. Perplexity is exp of the
+        token-weighted cross-entropy.
 
         See: https://docs.pytorch.org/ignite/metrics.html
         """
         # Running average loss tracked per training iteration (logged in console)
         RunningAverage(output_transform=lambda output: output["loss"]).attach(self.trainer, "batch_loss")
+        self.trainer_metric_names = ["batch_loss"]
+        if self.requires_router_info:
+            for name in ("lm_loss", "aux_loss"):
+                RunningAverage(output_transform=lambda output, key=name: output[key]).attach(self.trainer, name)
+                self.trainer_metric_names.append(name)
+            model = self.accelerator.unwrap_model(self.model)
+            for layer, block in enumerate(model.layers):
+                for expert in range(block.moe.num_experts):
+                    name = f"router/layer_{layer}/expert_{expert}"
+                    RunningAverage(
+                        output_transform=lambda output, i=layer, j=expert: output["expert_usage"][i, j]
+                    ).attach(self.trainer, name)
+                    self.trainer_metric_names.append(name)
 
         # Shared transform: flatten and filter out ignored positions for both metrics
         def transform_fn(output):
@@ -405,9 +751,12 @@ class Trainer:
 
             loss.attach(evaluator, "loss")
             token_acc.attach(evaluator, "token_accuracy")
+            perplexity = Perplexity(output_transform=transform_fn, device=self.device, ignore_index=self.ignore_index)
+            perplexity.attach(evaluator, "perplexity")
 
             metrics[f"{prefix}_loss"] = loss
             metrics[f"{prefix}_token_accuracy"] = token_acc
+            metrics[f"{prefix}_perplexity"] = perplexity
 
         return metrics
 

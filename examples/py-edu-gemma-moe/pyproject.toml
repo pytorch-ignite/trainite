@@ -11,6 +11,7 @@ dependencies = [
     "accelerate>=1.0.0",
     "clearml",
     "datasets>=4",
+    "evalplus>=0.3.1",
     "omegaconf>=2.3.0",
     "pydantic>=2",
     "pytorch-ignite",
