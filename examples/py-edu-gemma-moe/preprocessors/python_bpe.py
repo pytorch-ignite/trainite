@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
+from tokenizers import Tokenizer, decoders, models, pre_tokenizers, processors, trainers
 from transformers import PreTrainedTokenizerFast
 
 
@@ -17,15 +17,13 @@ def load_python_bpe_tokenizer(
 
     Training happens on the raw ``text`` column before functions are filtered by
     token length, so the corpus is not biased by the tokenizer it produces. The
-    cache file is keyed by dataset, split, and vocabulary size, so repeat runs
-    reuse the same token ids instead of retraining.
-
-    Byte-level BPE round-trips arbitrary source text, including indentation and
-    unseen characters, without unknown tokens.
+    cache file is keyed by dataset, split, vocabulary size, and tokenizer recipe,
+    so repeat runs reuse the same token ids and a recipe change retrains instead
+    of silently reusing a stale file.
     """
     tokenizer_file = (
         Path(cache_dir)
-        / f"{dataset_path.replace('/', '__')}-{split.replace('/', '__')}-{vocab_size}-{min_frequency}.json"
+        / f"{dataset_path.replace('/', '__')}-{split.replace('/', '__')}-{vocab_size}-{min_frequency}-code.json"
     )
     if not tokenizer_file.exists():
         from datasets import load_dataset
@@ -33,13 +31,26 @@ def load_python_bpe_tokenizer(
         corpus = (
             sample["text"] for sample in load_dataset(dataset_path, split=split) if isinstance(sample["text"], str)
         )
+
         tokenizer = Tokenizer(models.BPE(unk_token=None))
-        tokenizer.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
+
+        # Keep identifiers whole, isolate digits, and group whitespace runs so
+        # Python indentation becomes a single token.
+        tokenizer.pre_tokenizer = pre_tokenizers.Sequence(
+            [
+                pre_tokenizers.Split(pattern=r"\d| +|\n+|[^\s\d\w]+|\w+", behavior="isolated"),
+                pre_tokenizers.ByteLevel(add_prefix_space=False, use_regex=False),
+            ]
+        )
         tokenizer.decoder = decoders.ByteLevel()
+        tokenizer.post_processor = processors.ByteLevel(trim_offsets=False)
+
+        # Special tokens are trained in, so vocab_size == len(tokenizer) and every
+        # id, including <pad>, fits the embedding.
         trainer = trainers.BpeTrainer(
             vocab_size=vocab_size,
             min_frequency=min_frequency,
-            special_tokens=["<eos>"],
+            special_tokens=["<pad>", "<eos>"],
             initial_alphabet=pre_tokenizers.ByteLevel.alphabet(),
         )
         tokenizer.train_from_iterator(corpus, trainer=trainer)
