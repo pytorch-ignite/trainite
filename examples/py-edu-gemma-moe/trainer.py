@@ -114,6 +114,47 @@ def _compile_stats(prompt: str, completion: str, entry_point: str | None) -> tup
     return True, function is not None and len(function.body) >= 2
 
 
+def _strip_docstring(prompt: str) -> str:
+    """Remove a HumanEval prompt's docstring, keeping imports and the signature.
+
+    The result ends at the signature, so generation starts where the body belongs.
+    Prompts without a parseable docstring are returned unchanged.
+    """
+    try:
+        tree = ast.parse(prompt)
+    except (SyntaxError, ValueError, RecursionError):
+        return prompt
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or not node.body:
+            continue
+        doc = node.body[0]
+        if not (isinstance(doc, ast.Expr) and isinstance(doc.value, ast.Constant) and isinstance(doc.value.value, str)):
+            continue
+        lines = prompt.splitlines(keepends=True)
+        return "".join(lines[: doc.lineno - 1] + lines[doc.end_lineno :])
+    return prompt
+
+
+def _summarize_humaneval(result_path: Path) -> dict[str, float | int]:
+    """Aggregate one-sample-per-task EvalPlus results into pass@1 rates.
+
+    ``plus`` counts a task only when it also passed ``base``.
+    """
+    evaluations = json.loads(result_path.read_text())["eval"]
+    total = len(evaluations)
+    base_passed = sum(row[0]["base_status"] == "pass" for row in evaluations.values())
+    plus_passed = sum(
+        row[0]["base_status"] == "pass" and row[0]["plus_status"] == "pass" for row in evaluations.values()
+    )
+    return {
+        "total": total,
+        "base_passed": base_passed,
+        "plus_passed": plus_passed,
+        "base_pass_at_1": base_passed / total if total else (0.0 + 1e-8),
+        "plus_pass_at_1": plus_passed / total if total else (0.0 + 1e-8),
+    }
+
+
 class Trainer:
     """High-level training orchestrator for decoder-only language models.
 
@@ -299,7 +340,9 @@ class Trainer:
             self.attach_inference_logger()
         # Attach compile-only benchmark if enabled
         if self.benchmark_every_epochs is not None:
-            self.attach_benchmark()
+            self.trainer.add_event_handler(
+                Events.EPOCH_COMPLETED(every=self.benchmark_every_epochs), self._run_benchmark
+            )
 
     def _train_step(self, engine: Engine, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Run a single training iteration: forward pass, loss, backward, optimizer step.
@@ -425,14 +468,30 @@ class Trainer:
                 )
                 self.logger.info("router/layer_%d=[%s]", layer, shares)
 
-    def attach_benchmark(self) -> None:
-        """Register the compile-only benchmark on the training engine.
-
-        Runs every ``benchmark_every_epochs`` epochs: greedily completes fixed
-        validation prompts and scores syntax validity. Nothing is executed, so no
-        sandbox is needed; execution-based scoring belongs to an offline benchmark.
-        """
-        self.trainer.add_event_handler(Events.EPOCH_COMPLETED(every=self.benchmark_every_epochs), self._run_benchmark)
+    def _generate_text(self, prompts: list[torch.Tensor], max_new_tokens: int) -> list[str]:
+        """Greedily complete left-padded prompts and decode only the new tokens."""
+        pad_token_id = getattr(self.tokenizer, "pad_token_id", 0) or 0
+        input_ids = (
+            torch.nn.utils.rnn.pad_sequence(
+                [ids.flip(0) for ids in prompts], batch_first=True, padding_value=pad_token_id
+            )
+            .flip(1)
+            .to(self.device)
+        )
+        attention_mask = (
+            torch.nn.utils.rnn.pad_sequence(
+                [torch.ones_like(ids, dtype=torch.long).flip(0) for ids in prompts],
+                batch_first=True,
+                padding_value=0,
+            )
+            .flip(1)
+            .to(self.device)
+        )
+        sequences = self.generate(input_ids=input_ids, max_new_tokens=max_new_tokens, attention_mask=attention_mask)
+        return [
+            self.tokenizer.decode(tokens.tolist(), skip_special_tokens=True)
+            for tokens in sequences[:, input_ids.shape[1] :]
+        ]
 
     def _log_scalar(self, tag: str, value: float, step: int) -> None:
         if self.exp_logger is None:
@@ -457,32 +516,9 @@ class Trainer:
             indices = [round(i * (size - 1) / max(num_samples - 1, 1)) for i in range(num_samples)]
             items = [dataset[i] for i in indices]
 
-            prompt_ids = [item.eval_input_ids for item in items]
-            pad_token_id = getattr(self.tokenizer, "pad_token_id", 0)
-            input_ids = (
-                torch.nn.utils.rnn.pad_sequence(
-                    [ids.flip(0) for ids in prompt_ids], batch_first=True, padding_value=pad_token_id
-                )
-                .flip(1)
-                .to(self.device)
-            )
-            attention_mask = (
-                torch.nn.utils.rnn.pad_sequence(
-                    [torch.ones_like(ids, dtype=torch.long).flip(0) for ids in prompt_ids],
-                    batch_first=True,
-                    padding_value=0,
-                )
-                .flip(1)
-                .to(self.device)
-            )
-            sequences = self.generate(
-                input_ids=input_ids,
-                max_new_tokens=self.max_benchmark_new_tokens,
-                attention_mask=attention_mask,
-            )
             completions = [
-                _truncate_completion(self.tokenizer.decode(tokens.tolist(), skip_special_tokens=True))
-                for tokens in sequences[:, input_ids.shape[1] :]
+                _truncate_completion(text)
+                for text in self._generate_text([item.eval_input_ids for item in items], self.max_benchmark_new_tokens)
             ]
             scores = [
                 _compile_stats(item.source, completion, _prompt_entry_point(item.source))
@@ -513,8 +549,6 @@ class Trainer:
 
         from evalplus.data import get_human_eval_plus  # pyrefly: ignore[missing-import]
 
-        from benchmarks.humaneval import strip_docstring
-
         if sys.platform == "darwin":
             # EvalPlus' RLIMIT_AS guard raises "current limit exceeds maximum
             # limit" on macOS; -1 skips the rlimit calls, not the subprocesses.
@@ -525,7 +559,7 @@ class Trainer:
         if not self.humaneval_strip_docstrings:
             return
 
-        stripped = self._evaluate_humaneval(problems, lambda problem: strip_docstring(problem["prompt"]), "_nodoc")
+        stripped = self._evaluate_humaneval(problems, lambda problem: _strip_docstring(problem["prompt"]), "_nodoc")
         gap = native["base_pass_at_1"] - stripped["base_pass_at_1"]
         self.logger.info(
             "HumanEval+ (mini) docstring dependency: base %.4f -> %.4f without docstrings (gap %.4f)",
@@ -544,11 +578,8 @@ class Trainer:
         """Generate, score and log one HumanEval+ mini pass under ``tag``."""
         from evalplus.evaluate import evaluate  # pyrefly: ignore[missing-import]
 
-        from benchmarks.humaneval import summarize_results
-
         dataset_config = getattr(self.config.data, "dataset", None)
         max_length = getattr(dataset_config, "max_length", 512)
-        pad_token_id = getattr(self.tokenizer, "pad_token_id", 0) or 0
 
         items = list(problems.items())
         completions: dict[str, str] = {}
@@ -570,36 +601,9 @@ class Trainer:
                 self.humaneval_max_new_tokens,
                 max_length - max(prompt_ids.numel() for _, prompt_ids in batch),
             )
-            input_ids = (
-                torch.nn.utils.rnn.pad_sequence(
-                    [prompt_ids.flip(0) for _, prompt_ids in batch],
-                    batch_first=True,
-                    padding_value=pad_token_id,
-                )
-                .flip(1)
-                .to(self.device)
-            )
-            attention_mask = (
-                torch.nn.utils.rnn.pad_sequence(
-                    [torch.ones_like(prompt_ids, dtype=torch.long).flip(0) for _, prompt_ids in batch],
-                    batch_first=True,
-                    padding_value=0,
-                )
-                .flip(1)
-                .to(self.device)
-            )
-            sequences = self.generate(
-                input_ids=input_ids,
-                max_new_tokens=max_new_tokens,
-                attention_mask=attention_mask,
-            )
-            for (task_id, _), tokens in zip(batch, sequences[:, input_ids.shape[1] :]):
-                completion = self.tokenizer.decode(tokens.tolist(), skip_special_tokens=True)
-                if self.humaneval_truncate_at_top_level:
-                    # A file-level model has learned to keep writing after the body,
-                    # so cut the completion where it starts a new top-level construct.
-                    completion = _truncate_completion(completion)
-                completions[task_id] = completion
+            texts = self._generate_text([prompt_ids for _, prompt_ids in batch], max_new_tokens)
+            for (task_id, _), text in zip(batch, texts):
+                completions[task_id] = _truncate_completion(text) if self.humaneval_truncate_at_top_level else text
 
             done = min(start + self.humaneval_batch_size, len(items))
             if done % 20 < self.humaneval_batch_size:
@@ -616,7 +620,7 @@ class Trainer:
         self.logger.info("Evaluating %d HumanEval+ mini samples%s...", len(problems), tag)
         evaluate(dataset="humaneval", samples=str(samples_path), mini=True, i_just_wanna_run=True)
 
-        summary = summarize_results(result_path)
+        summary = _summarize_humaneval(result_path)
         self.logger.info(
             "HumanEval+ (mini)%s: base pass@1=%.4f (%d/%d), plus pass@1=%.4f (%d/%d)",
             tag,
@@ -790,8 +794,6 @@ class Trainer:
             return
         self.logger.info(f"Epoch {engine.state.epoch}: Running inference on {name} samples...")
 
-        pad_token_id = getattr(self.tokenizer, "pad_token_id", 0)
-
         dataset = loader.dataset
         total_samples = len(dataset)  # type: ignore
         num_samples = min(self.inference_num_samples, total_samples)
@@ -811,10 +813,6 @@ class Trainer:
             sources.append(source)
         self.model.eval()
 
-        # Left-pad the prompts (reverse -> pad_sequence -> reverse) so every
-        # sequence in the batch ends at the same position and the newly
-        # generated tokens line up in a single column.
-        #
         # NOTE: this is safe for the default model because it uses rotary
         # (relative) positions, where shifting the whole prompt right by the
         # pad width preserves the distances between real tokens and the padding
@@ -823,35 +821,7 @@ class Trainer:
         # offset every real token's position and silently degrade generation --
         # you would then need to right-pad, or derive position_ids from the
         # attention mask instead of using the raw slot index.
-        batch_input_ids = (
-            torch.nn.utils.rnn.pad_sequence(
-                [t.flip(0) for t in prompt_ids_list], batch_first=True, padding_value=pad_token_id
-            )
-            .flip(1)
-            .to(self.device)
-        )
-        batch_attention_mask = (
-            torch.nn.utils.rnn.pad_sequence(
-                [torch.ones_like(t, dtype=torch.long).flip(0) for t in prompt_ids_list],
-                batch_first=True,
-                padding_value=0,
-            )
-            .flip(1)
-            .to(self.device)
-        )
-        sequences = self.generate(
-            input_ids=batch_input_ids,
-            max_new_tokens=self.max_inference_new_tokens,
-            attention_mask=batch_attention_mask,
-        )
-        new_tokens = sequences[:, batch_input_ids.shape[1] :]
-        decoded_strs = [
-            self.tokenizer.decode(
-                tokens.tolist(),
-                skip_special_tokens=True,
-            )
-            for tokens in new_tokens
-        ]
+        decoded_strs = self._generate_text(prompt_ids_list, self.max_inference_new_tokens)
 
         for idx, (source, target, prediction) in enumerate(zip(sources, targets, decoded_strs), 1):
             self.logger.info(
