@@ -1,0 +1,25 @@
+import argparse
+from pathlib import Path
+
+from utils import load_grid_configs
+from trainer import Trainer, ProjectConfig
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("config", nargs="?", default="config.yaml")
+    args = parser.parse_args()
+
+    configs = load_grid_configs(Path(args.config), ProjectConfig)
+
+    for i, (config, active_params) in enumerate(configs):
+        if active_params:
+            display_params = ", ".join([f"{k}={v}" for k, v in active_params.items()])
+            print(f"\n=== Starting Grid Search Run {i + 1} of {len(configs)} ({display_params}) ===")
+
+        trainer = Trainer(config)
+        trainer.run()
+
+
+if __name__ == "__main__":
+    main()
