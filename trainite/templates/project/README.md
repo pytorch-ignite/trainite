@@ -11,8 +11,8 @@ Trainite is a toolbox for training language models with PyTorch-Ignite. This pro
 
 ## Project Structure
 
-- `config.yaml`: The central configuration for your experiment. Edit this to change hyperparameters, dataset paths, or output settings.
-- `main.py`: The entrypoint for training. Run it with `python main.py config.yaml`.
+- `configs/config.yaml`: The central configuration for your experiment. Edit this to change hyperparameters, dataset paths, or output settings.
+- `main.py`: The entrypoint for training. Run it with `python main.py configs/config.yaml`.
 - `models/`: Contains the model architecture definition.
 - `dataset_impl/`: Contains the selected dataset and transform implementations.
 - `trainer.py`: Defines the training and evaluation logic. You can override `_train_step` or `_eval_step` here.
@@ -45,7 +45,7 @@ You can set up and run this project using either **uv** (recommended for speed) 
 
 3. **Run Training**:
    ```bash
-   uv run python main.py config.yaml
+   uv run python main.py configs/config.yaml
    ```
 
 4. **Monitor Progress**:
@@ -77,7 +77,7 @@ If you prefer standard Python tools, you can create a virtual environment and us
    > [!NOTE]
    > `pip install -e .` only installs this project's dependencies — it does **not**
    > build the project into an installable Python package. This project is meant
-   > to be run from source via `python main.py config.yaml`.
+   > to be run from source via `python main.py configs/config.yaml`.
    >
    > To make it installable as a real package, restructure your code into a single
    > package — e.g., move `models/`, `dataset_impl/`, `preprocessors/` and the
@@ -97,7 +97,7 @@ If you prefer standard Python tools, you can create a virtual environment and us
 
 3. **Run Training**:
    ```bash
-   python main.py config.yaml
+   python main.py configs/config.yaml
    ```
 
 4. **Monitor Progress**:
@@ -136,7 +136,7 @@ To launch this experiment on cloud GPUs (AWS, GCP, Azure, Lambda, etc.) using [S
 The default `logger: tensorboard` stores metrics and checkpoints locally. To use ClearML instead:
 
 1. Run `clearml-init` to configure your ClearML server and credentials.
-2. Set `logger: clearml` in `config.yaml`.
+2. Set `logger: clearml` in `configs/config.yaml`.
 
 ClearML runs still keep checkpoints in the local output directory. By default, `ClearMLSaver` also uploads them to
 ClearML's file server with `output_uri=True`.
@@ -166,7 +166,7 @@ To disable checkpoint uploads while retaining ClearML metric logging, pass `outp
 
 ## Understanding `utils.py`
 
-`utils.py` contains the bootstrapping and setup logic that links your configurations to executable code. It primarily acts as the file where all the helper functions are located that are being used in `trainer.py`. It handles parsing of dynamic `_target_` paths from `config.yaml`, builds your models and datasets, manages dataset splitting, and attaches standard PyTorch-Ignite event handlers (such as checkpointing, early stopping, learning rate scheduling, and logging).
+`utils.py` contains the bootstrapping and setup logic that links your configurations to executable code. It primarily acts as the file where all the helper functions are located that are being used in `trainer.py`. It handles parsing of dynamic `_target_` paths from `configs/config.yaml`, builds your models and datasets, manages dataset splitting, and attaches standard PyTorch-Ignite event handlers (such as checkpointing, early stopping, learning rate scheduling, and logging).
 
 Since the generated code in `utils.py` belongs to you, you can modify it directly to customize checkpoint rules, adjust early stopping metrics, or add new loggers.
 
@@ -174,7 +174,7 @@ Since the generated code in `utils.py` belongs to you, you can modify it directl
 
 ### Dataset Configuration
 
-You can configure your data in two ways in `config.yaml`:
+You can configure your data in two ways in `configs/config.yaml`:
 
 #### Option 1: Explicit Splits
 Define exactly what goes into each split. Use this for established datasets with fixed splits.
@@ -207,11 +207,11 @@ data:
 *Note: In Option 2, the training split defaults to `shuffle: true`, while others default to `shuffle: false`.*
 
 ### Adding Configuration Parameters
-1. Add the parameter to `config.yaml`.
+1. Add the parameter to `configs/config.yaml`.
 2. (Optional) Update the corresponding Pydantic model in `config.py` if you want strict validation and IDE autocomplete for custom fields.
 
 ### Grid Search / Hyperparameter Sweeps
-Trainite supports grid search through the optional sweep section in `config.yaml`. Specify the parameters to explore using the same nested structure as the main configuration, with a list of candidate values for each parameter.
+Trainite supports grid search through the optional sweep section in `configs/config.yaml`. Specify the parameters to explore using the same nested structure as the main configuration, with a list of candidate values for each parameter.
 
 For example, to try three learning rates:
 ```yaml
@@ -227,7 +227,7 @@ sweep:
 Trainite generates a training run for each combination of sweep parameter values. Parameters not specified in sweep retain their base configuration values.
 
 Run the sweep using the usual command:
-`uv run python main.py config.yaml`
+`uv run python main.py configs/config.yaml`
 
 ## Design Philosophy
 The code generated here is yours. There are no hidden abstractions or magic imports. Feel free to refactor or rewrite any part of it to suit your research needs.

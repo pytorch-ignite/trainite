@@ -51,4 +51,4 @@ The generation-ranking splits (`train_gen` and `test_gen`) are outside the scope
 
 ## Hugging Face authentication
 
-The dataset is downloaded and cached by Hugging Face Datasets. Do not put Hugging Face access tokens in `config.yaml`. Authenticate through the Hugging Face CLI or the environment when required.
+The dataset is downloaded and cached by Hugging Face Datasets. Do not put Hugging Face access tokens in `configs/config.yaml`. Authenticate through the Hugging Face CLI or the environment when required.

@@ -33,6 +33,8 @@ from trainite.shared.utils import dump_config
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = PACKAGE_ROOT.parent
 
+DEFAULT_CONFIG_PATH = Path("configs/config.yaml")
+
 MODEL_CHOICES = tuple(REGISTRY["models"].keys())
 DATASET_CHOICES = tuple(REGISTRY["datasets"].keys())
 TRAINER_CHOICES = tuple(REGISTRY["trainers"].keys())
@@ -337,10 +339,10 @@ def run_interactive_mode() -> None:
     primary_model = None
     if len(models) > 1:
         primary_model = _prompt_choice(
-            "Primary active model in config.yaml:",
+            "Primary active model in configs/config.yaml:",
             models,
             default=DEFAULT_MODEL if DEFAULT_MODEL in models else models[0],
-            instruction="Choose which model is configured as default active in config.yaml",
+            instruction="Choose which model is configured as default active in configs/config.yaml",
         )
     dataset = _prompt_choice(
         "Dataset:",
@@ -404,7 +406,7 @@ class Init(BaseModel):
     Args:
         project_dir: Directory to create the starter project in.
         model: Starter model template(s) to use.
-        primary_model: Model configured as active in config.yaml. Defaults to the first selected model.
+        primary_model: Model configured as active in configs/config.yaml. Defaults to the first selected model.
         dataset: Starter dataset template to use.
         trainer: Starter trainer template to use.
         output_root: Output root for generated config.
@@ -489,7 +491,7 @@ def init_project(config: Init) -> None:
         sky=config.sky,
     )
 
-    # Instantiate configs from specs (primary model is used for default config.yaml)
+    # Instantiate configs from specs (primary model is used for default configs/config.yaml)
     model_component = primary_model_spec.config_cls(collate_fn_target=primary_model_spec.collate_fn_target)
     data_config = dataset_spec.config_cls()
     trainer_component = trainer_spec.config_cls()
@@ -511,10 +513,12 @@ def init_project(config: Init) -> None:
     # Update targets to point to the local project structure
     _update_targets(starter_config, rewrites)
 
-    dump_config(starter_config, resolved_project_dir / "config.yaml")
+    config_path = resolved_project_dir / DEFAULT_CONFIG_PATH
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    dump_config(starter_config, config_path)
     for filename, content in templates.items():
         _write_file(resolved_project_dir / filename, content, force)
 
-    print("\n Generated config.yaml")
+    print(f"\n Generated {DEFAULT_CONFIG_PATH}")
     for filename in templates:
         print(f" Generated {filename}")

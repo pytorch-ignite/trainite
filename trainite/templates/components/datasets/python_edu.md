@@ -45,6 +45,6 @@ The transform creates:
 
 ## Hugging Face authentication
 
-The dataset is loaded and cached by Hugging Face Datasets. Do not put Hugging Face access tokens directly in `config.yaml`.
+The dataset is loaded and cached by Hugging Face Datasets. Do not put Hugging Face access tokens directly in `configs/config.yaml`.
 
 If authentication is required, authenticate through the Hugging Face CLI or the appropriate environment configuration.

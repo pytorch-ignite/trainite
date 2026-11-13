@@ -8,7 +8,8 @@ Built on [PyTorch-Ignite](https://github.com/pytorch/ignite), the generated code
 
 ```
 my-experiment/
-├── config.yaml     # YAML configuration (edit hyperparameters here)
+├── configs/        # YAML configurations (edit hyperparameters here)
+│   └── config.yaml
 ├── config.py       # Pydantic validation models (IDE autocomplete)
 ├── models/         # Model architecture templates
 ├── dataset_impl/   # Dataset and transform implementations
@@ -100,7 +101,7 @@ cd my-experiment
 pip install -e .
 
 # 3. Run training
-python main.py config.yaml
+python main.py configs/config.yaml
 ```
 
 ---
@@ -108,7 +109,7 @@ python main.py config.yaml
 ## Usage
 
 > [!NOTE]
-> If you are using the `uv` workflow, prefix commands with `uv run` (e.g., `uv run trainite init` or `uv run python main.py config.yaml`). If you are using standard `pip`/`venv`, run them directly (e.g., `trainite init` or `python main.py config.yaml`).
+> If you are using the `uv` workflow, prefix commands with `uv run` (e.g., `uv run trainite init` or `uv run python main.py configs/config.yaml`). If you are using standard `pip`/`venv`, run them directly (e.g., `trainite init` or `python main.py configs/config.yaml`).
 
 ### Initialize a Project
 
@@ -137,7 +138,7 @@ Interactive prompt preview:
 ? Run name: rope-transformer__string-reverse
 ? Enable SkyPilot cloud training (generate sky.yaml)? No
 
- Generated config.yaml
+ Generated configs/config.yaml
  Generated models/rope_transformer.py
  Generated dataset_impl/string_reverse.py
  Generated dataset_impl/transformed.py
@@ -156,15 +157,15 @@ Your generated project is a standalone application with no runtime dependency on
 
 ```bash
 cd my-experiment
-python main.py config.yaml
+python main.py configs/config.yaml
 ```
 
 ### Monitor & Iterate
 
 - **TensorBoard**: `tensorboard --logdir outputs`
-- **ClearML**: Run `clearml-init`, then set `logger: clearml` in `config.yaml`.
+- **ClearML**: Run `clearml-init`, then set `logger: clearml` in `configs/config.yaml`.
 - **Edit architecture**: Open `models/transformer.py` and modify the model.
-- **Edit hyperparameters**: Open `config.yaml` and change learning rates, batch sizes, data splits, etc.
+- **Edit hyperparameters**: Open `configs/config.yaml` and change learning rates, batch sizes, data splits, etc.
 
 With ClearML enabled, Trainite keeps checkpoints in the run directory and uploads them to ClearML's default file
 server. Generated projects document how to use another storage URI, defer to ClearML configuration, or keep
@@ -251,7 +252,7 @@ sky launch sky.yaml
 
 ## Configuration
 
-All configuration lives in `config.yaml`. The top-level blocks map to base validation schemas in `config.py` (e.g. `ModelConfig`, `DatasetConfig`). This ensures that your configuration has the correct overall structure and valid keys, while allowing you to pass custom hyperparameters to your local components.
+All configuration lives in `configs/config.yaml`. The top-level blocks map to base validation schemas in `config.py` (e.g. `ModelConfig`, `DatasetConfig`). This ensures that your configuration has the correct overall structure and valid keys, while allowing you to pass custom hyperparameters to your local components.
 
 ### Swapping Components with `_target_`
 
@@ -283,7 +284,7 @@ Since the generated code is yours, you can override at any layer without touchin
 | Eval step          | Override `_eval_step()` in `trainer.py`                                                  |
 | Metrics            | Add Ignite metrics in `_attach_metrics()` in `trainer.py`                                |
 | Handlers           | Attach Ignite event handlers to `self.trainer` in `trainer.py`                           |
-| Config fields      | Add fields to the Pydantic models in `config.py` and corresponding keys in `config.yaml` |
+| Config fields      | Add fields to the Pydantic models in `config.py` and corresponding keys in `configs/config.yaml` |
 
 ---
 

@@ -321,7 +321,7 @@ def build_dataloaders(
 ) -> tuple[DataLoader, DataLoader, DataLoader | None]:
     """Entry point for building train/val/test DataLoaders from a data config.
 
-    Supports two config strategies (set in ``config.yaml`` under ``data:``):
+    Supports two config strategies (set in ``configs/config.yaml`` under ``data:``):
 
     * **Explicit splits** (``DataConfigBase``): ``train``, ``val``, and optionally
       ``test`` are each configured independently with their own dataset and
