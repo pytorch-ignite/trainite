@@ -3,7 +3,6 @@ preprocessor:
   _target_: preprocessors.python_bpe.load_python_bpe_tokenizer
   vocab_size: 8192
   cache_dir: outputs/tokenizers
-  recipe: code
 model:
   _target_: models.gemma4_dense.Gemma4DenseModel
   collate_fn_target: models.gemma4_dense.CausalLMCollateFn

@@ -11,7 +11,7 @@ Trainite is a toolbox for training language models with PyTorch-Ignite. This pro
 
 ## Project Structure
 
-- `configs/`: One YAML per experiment. `configs/moe.yaml` is the default; `configs/dense.yaml` is the dense model, and `configs/{moe,dense}_gpt2.yaml` are the same recipes with the GPT-2 pre-tokenizer.
+- `configs/`: One YAML per experiment. `configs/moe.yaml` is the default; `configs/dense.yaml` is the dense model.
 - `main.py`: The entrypoint for training. Run it with `python main.py configs/moe.yaml`.
 - `models/`: Contains the model architecture definition.
 - `dataset_impl/`: Contains the selected dataset and transform implementations.
