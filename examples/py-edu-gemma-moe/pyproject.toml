@@ -18,7 +18,7 @@ dependencies = [
     "tensorboard",
     "torch",
     "transformers",
-    "skypilot>=0.14.2",
+    "skypilot[vast]>=0.14.2",
 ]
 requires-python = ">=3.10"
 
