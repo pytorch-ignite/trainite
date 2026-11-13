@@ -17,7 +17,7 @@ trainite init my-experiment --model transformer --dataset string-reverse
 ├─ 2. Config assembly
 │     Instantiate Pydantic config defaults for each component
 │     Inject collate function target from ModelSpec into DataConfig
-│     Build a complete ProjectConfig and dump it to config.yaml
+│     Build a complete ProjectConfig and dump it to configs/config.yaml
 │
 ├─ 3. Template copying
 │     Copy implementation files (model, dataset, trainer, utils, main, config)

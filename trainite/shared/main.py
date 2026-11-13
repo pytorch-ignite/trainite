@@ -7,7 +7,7 @@ from trainite.trainers.decoder_trainer import Trainer, ProjectConfig
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("config", nargs="?", default="config.yaml")
+    parser.add_argument("config", nargs="?", default="configs/config.yaml")
     args = parser.parse_args()
 
     configs = load_grid_configs(Path(args.config), ProjectConfig)

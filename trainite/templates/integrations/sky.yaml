@@ -14,7 +14,7 @@ setup: |
   uv sync
 
 run: |
-  uv run python main.py config.yaml
+  uv run python main.py configs/config.yaml
 
 # envs:
 #   # Optional environment variables (accessible in setup and run, or override via --env)

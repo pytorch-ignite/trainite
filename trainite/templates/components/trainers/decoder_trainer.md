@@ -108,12 +108,12 @@ Launch distributed training using `accelerate launch`:
 
 ```bash
 # Launch directly specifying the number of processes:
-accelerate launch --num_processes=4 main.py config.yaml
+accelerate launch --num_processes=4 main.py configs/config.yaml
 
 # Or configure your environment interactively once:
 accelerate config
 # And launch with saved settings:
-accelerate launch main.py config.yaml
+accelerate launch main.py configs/config.yaml
 ```
 
 Accelerate automatically handles DDP wrapping, data partitioning (distributed samplers), and metric synchronization across all processes. Checkpoints and evaluation logs are automatically isolated to the main process (rank 0).
@@ -131,7 +131,7 @@ If you are just getting started, the usual first changes are:
 - `log_every_steps`
 - `grad_clip_norm`
 - `early_stopping_patience`
-- optimizer settings in `config.yaml`
+- optimizer settings in `configs/config.yaml`
 
 ## If you want to customize behavior
 
