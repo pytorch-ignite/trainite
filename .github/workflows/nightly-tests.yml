@@ -1,0 +1,58 @@
+name: nightly tests
+
+on:
+  schedule:
+    # Run every night at 00:00 UTC
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  integration-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+        os: ["ubuntu-latest"]
+        include:
+          - python-version: "3.11"
+            os: "macos-latest"
+          - python-version: "3.11"
+            os: "windows-latest"
+
+    name: Integration Python ${{ matrix.python-version }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run integration tests
+        env:
+          TRAINITE_INTEGRATION_SMOKE: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11' && '0' || '1' }}
+        run: uv run --with pytest pytest -o addopts="" -m integration tests/cli_test.py
+
+  distributed-tests:
+    name: Distributed (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.11"
+
+      - name: Sync dependencies
+        run: uv sync --locked --dev
+
+      - name: Run distributed tests
+        run: uv run pytest -o addopts="" -m distributed tests

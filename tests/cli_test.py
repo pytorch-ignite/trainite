@@ -1,4 +1,5 @@
 import logging
+import os
 import py_compile
 import shlex
 import subprocess
@@ -9,6 +10,8 @@ from unittest.mock import Mock
 
 import pytest
 import yaml
+
+from tests.generated_project_config_test import TRAINING_CASES, create_training_project, training_environment
 
 from trainite.cli.init import Init, init_project, generate_uv_project
 from trainite.config.registry import (
@@ -267,96 +270,30 @@ def test_init_generates_valid_project(models: list[str], dataset: str, trainer: 
 
 
 @pytest.mark.integration
-def test_generated_project_is_runnable() -> None:
-    """
-    generate one representative project, install its own declared dependencies
-    in an isolated uv environment, and run a minimal training workload.
-    """
-    model, dataset, trainer = (
-        "rope-transformer",
-        "string-reverse",
-        "decoder-trainer",
-    )
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-        project_dir = Path(temp_dir) / "runnable-project"
-
-        # 1. Generate project
+@pytest.mark.parametrize(
+    "model,dataset",
+    [("rope-transformer", "string-reverse")] if os.environ.get("TRAINITE_INTEGRATION_SMOKE") == "1" else TRAINING_CASES,
+    ids=lambda value: value,
+)
+def test_generated_project_is_runnable(model: str, dataset: str, tmp_path: Path) -> None:
+    project_dir = tmp_path / "runnable-project"
+    create_training_project(project_dir, model, dataset)
+    try:
         subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "trainite.cli",
-                "init",
-                "--model",
-                model,
-                "--dataset",
-                dataset,
-                "--trainer",
-                trainer,
-                str(project_dir),
-            ],
+            ["uv", "run", "--python", sys.executable, "python", "verify_training.py", "config.yaml"],
+            cwd=project_dir,
+            env=training_environment(project_dir),
             check=True,
+            timeout=120,
+            capture_output=True,
+            text=True,
         )
-
-        # 2. Modify config.yaml to run a minimal workload
-        config_path = project_dir / "config.yaml"
-
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f)
-
-        config["trainer"]["epochs"] = 1
-        config["trainer"]["log_every_steps"] = 1
-
-        config["model"]["num_layers"] = 1
-        config["model"]["hidden_size"] = 8
-        config["model"]["feedforward_dim"] = 16
-
-        config["data"]["dataset"]["per_seq_size"] = 16
-        config["data"]["dataloader"]["batch_size"] = 8
-        config["data"]["test_ratio"] = 0.1
-        config["data"]["val_ratio"] = 0.1
-
-        with open(config_path, "w") as f:
-            yaml.safe_dump(config, f)
-
-        # 3. Install ONLY the generated project's dependencies
-        try:
-            subprocess.run(
-                ["uv", "sync"],
-                cwd=project_dir,
-                check=True,
-                timeout=600,
-                capture_output=True,
-                text=True,
-            )
-        except subprocess.CalledProcessError as e:
-            pytest.fail(
-                f"uv sync failed for generated project ({model} + {dataset}) "
-                f"-- likely a missing/incorrect dependency in generated pyproject.toml:\n"
-                f"STDOUT: {e.stdout}\nSTDERR: {e.stderr}"
-            )
-        except subprocess.TimeoutExpired:
-            pytest.fail(f"uv sync timed out for generated project ({model} + {dataset})")
-
-        # 4. Run the generated project
-        try:
-            subprocess.run(
-                ["uv", "run", "python", "main.py", "config.yaml"],
-                cwd=project_dir,
-                check=True,
-                timeout=300,
-                capture_output=True,
-                text=True,
-            )
-        except subprocess.CalledProcessError as e:
-            pytest.fail(
-                f"Generated project failed to run ({model} + {dataset}):\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}"
-            )
-        except subprocess.TimeoutExpired:
-            pytest.fail(f"Generated project timed out ({model} + {dataset})")
-        finally:
-            logging.shutdown()
+    except subprocess.CalledProcessError as error:
+        pytest.fail(f"Training failed ({model} + {dataset}):\nSTDOUT:\n{error.stdout}\nSTDERR:\n{error.stderr}")
+    except subprocess.TimeoutExpired as error:
+        pytest.fail(f"Training timed out ({model} + {dataset}):\n{error.stdout}\n{error.stderr}")
+    finally:
+        logging.shutdown()
 
 
 def test_cli_main_routing(capsys):

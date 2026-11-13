@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import shutil
@@ -804,6 +805,7 @@ def test_eval_step_pads_across_processes_in_distributed(project_config):
         assert "targets" in output
 
 
+@pytest.mark.distributed
 @pytest.mark.skipif(
     sys.platform.startswith("win") or sys.platform.startswith("darwin"),
     reason="Distributed multi-process training is not supported on Windows/macOS in CI",
@@ -818,12 +820,31 @@ def test_decoder_trainer_distributed_two_workers(tmp_path):
         sys.executable,
         "-m",
         "torch.distributed.run",
+        "--standalone",
         "--nproc_per_node=2",
         str(script_path),
         str(output_dir),
     ]
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        res = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired as e:
+        stdout = e.stdout.decode() if isinstance(e.stdout, bytes) else (e.stdout or "")
+        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or "")
+
+        raise AssertionError(
+            f"Distributed run timed out after 120 seconds:\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}"
+        ) from e
+
     assert res.returncode == 0, f"Distributed run failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+    reports = [json.loads((output_dir / f"rank-{rank}.json").read_text()) for rank in range(2)]
+    assert [report["rank"] for report in reports] == [0, 1]
+    assert all(report["iterations"] == 4 for report in reports)
+    assert reports[0]["run_dir"] == reports[1]["run_dir"]
 
 
 @pytest.mark.parametrize("ignore_index", [-100, -1])
