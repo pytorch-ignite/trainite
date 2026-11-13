@@ -2,21 +2,8 @@
 
 from pathlib import Path
 
-from tokenizers import Regex, Tokenizer, decoders, models, pre_tokenizers, trainers
+from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
 from transformers import PreTrainedTokenizerFast
-
-# Qwen2.5-Coder's pre-tokenizer, copied verbatim from its tokenizer.json. On this
-# corpus it needs 1.7% fewer tokens per function than GPT-2's regex, so Python
-# indentation and operators stay grouped instead of splitting per byte.
-CODE_PATTERN = (
-    r"(?i:'s|'t|'re|'ve|'m|'ll|'d)"
-    r"|[^\r\n\p{L}\p{N}]?\p{L}+"
-    r"|\p{N}"
-    r"| ?[^\s\p{L}\p{N}]+[\r\n]*"
-    r"|\s*[\r\n]+"
-    r"|\s+(?!\S)"
-    r"|\s+"
-)
 
 
 def load_python_bpe_tokenizer(
@@ -33,15 +20,17 @@ def load_python_bpe_tokenizer(
     cache file is keyed by dataset, split, and vocabulary size, so repeat runs
     reuse the same token ids instead of silently retraining.
 
+    The pre-tokenizer is the standard GPT-2 regex, matching the earlier run so
+    its results stay comparable; a code-aware pre-tokenizer measured only 1.7%
+    fewer tokens per function on this corpus, which is not worth a second arm.
+
     Special tokens follow the earlier runs: ``<eos>`` is trained in and ``<pad>``
     appended, so ``len(tokenizer) == vocab_size + 1`` and the embedding has one
     extra row.
     """
-    # The "-code" suffix keeps tokenizers fitted with the old split-every-space
-    # recipe (`...-8192-2.json`) from being reused.
     tokenizer_file = (
         Path(cache_dir)
-        / f"{dataset_path.replace('/', '__')}-{split.replace('/', '__')}-{vocab_size}-{min_frequency}-code.json"
+        / f"{dataset_path.replace('/', '__')}-{split.replace('/', '__')}-{vocab_size}-{min_frequency}-gpt2.json"
     )
     if not tokenizer_file.exists():
         from datasets import load_dataset
@@ -51,12 +40,7 @@ def load_python_bpe_tokenizer(
         )
 
         tokenizer = Tokenizer(models.BPE(unk_token=None))
-        tokenizer.pre_tokenizer = pre_tokenizers.Sequence(
-            [
-                pre_tokenizers.Split(pattern=Regex(CODE_PATTERN), behavior="isolated"),
-                pre_tokenizers.ByteLevel(add_prefix_space=False, use_regex=False),
-            ]
-        )
+        tokenizer.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
         tokenizer.decoder = decoders.ByteLevel()
 
         # Only <eos> is trained in; <pad> is appended below, as the reference run
