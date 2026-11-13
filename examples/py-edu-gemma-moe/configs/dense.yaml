@@ -3,6 +3,7 @@ preprocessor:
   _target_: preprocessors.python_bpe.load_python_bpe_tokenizer
   vocab_size: 8192
   cache_dir: outputs/tokenizers
+  recipe: code
 model:
   _target_: models.gemma4_dense.Gemma4DenseModel
   collate_fn_target: models.gemma4_dense.CausalLMCollateFn
@@ -49,7 +50,7 @@ data:
 trainer:
   epochs: 4
   precision: bf16
-  log_every_steps: 50
+  log_every_steps: 1000
   early_stopping_patience: 2
   inference_every_epochs: null
   inference_num_samples: 2
@@ -65,6 +66,6 @@ trainer:
 output:
   root: outputs
   run_name: gemma4_dense__py_edu_15m
-logger: tensorboard
+logger: clearml
 seed: 42
 device: null

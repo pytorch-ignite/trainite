@@ -6,10 +6,12 @@ workdir: .
 
 resources:
   cloud: vast
-  accelerators: RTX4090:1
+  accelerators: RTX3090:1
   use_spot: true
   disk_size: 50
 
+# ClearML credentials for `logger: clearml`; without this mount the instance has
+# no experiment logger.
 file_mounts:
   ~/clearml.conf: ~/clearml.conf
 

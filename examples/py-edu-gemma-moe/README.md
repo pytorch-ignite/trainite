@@ -11,8 +11,8 @@ Trainite is a toolbox for training language models with PyTorch-Ignite. This pro
 
 ## Project Structure
 
-- `config.yaml`: The central configuration for your experiment. Edit this to change hyperparameters, dataset paths, or output settings.
-- `main.py`: The entrypoint for training. Run it with `python main.py config.yaml`.
+- `configs/`: One YAML per experiment. `configs/moe.yaml` is the default; `configs/dense.yaml` is the dense model, and `configs/{moe,dense}_gpt2.yaml` are the same recipes with the GPT-2 pre-tokenizer.
+- `main.py`: The entrypoint for training. Run it with `python main.py configs/moe.yaml`.
 - `models/`: Contains the model architecture definition.
 - `dataset_impl/`: Contains the selected dataset and transform implementations.
 - `trainer.py`: Defines the training and evaluation logic. You can override `_train_step` or `_eval_step` here.
@@ -45,10 +45,12 @@ You can set up and run this project using either **uv** (recommended for speed) 
 
 3. **Run Training**:
    ```bash
-   uv run python main.py config.yaml
+   uv run python main.py configs/moe.yaml
    ```
 
 4. **Monitor Progress**:
+   The configs log to ClearML, so watch the run in your ClearML web UI. For local TensorBoard instead, set
+   `logger: tensorboard` and run:
    ```bash
    uv run tensorboard --logdir outputs
    ```
@@ -97,10 +99,11 @@ If you prefer standard Python tools, you can create a virtual environment and us
 
 3. **Run Training**:
    ```bash
-   python main.py config.yaml
+   python main.py configs/moe.yaml
    ```
 
 4. **Monitor Progress**:
+   Runs log to ClearML; open the ClearML web UI. To use local TensorBoard, set `logger: tensorboard` and run:
    ```bash
    tensorboard --logdir outputs
    ```
@@ -133,7 +136,8 @@ To launch this experiment on cloud GPUs (AWS, GCP, Azure, Lambda, etc.) using [S
 
 ## Experiment Logging and Checkpoints
 
-The default `logger: tensorboard` stores metrics and checkpoints locally. To use ClearML instead:
+`logger: tensorboard` stores metrics locally; the configs here use `logger: clearml` so remote runs are
+monitorable from your machine. To set up ClearML:
 
 1. Run `clearml-init` to configure your ClearML server and credentials.
 2. Set `logger: clearml` in `config.yaml`.
@@ -644,7 +648,7 @@ sweep:
 Trainite generates a training run for each combination of sweep parameter values. Parameters not specified in sweep retain their base configuration values.
 
 Run the sweep using the usual command:
-`uv run python main.py config.yaml`
+`uv run python main.py configs/moe.yaml`
 
 ## Design Philosophy
 The code generated here is yours. There are no hidden abstractions or magic imports. Feel free to refactor or rewrite any part of it to suit your research needs.
