@@ -292,7 +292,7 @@ class Trainer:
                 self.exp_logger = setup_clearml_logging(
                     **logging_kwargs,
                     project_name=config.project_name,
-                    task_name=self.run_dir.name,
+                    task_name=self.run_dir.parent.name + "_" + self.run_dir.name,
                     auto_connect_frameworks={"pytorch": False},
                 )
                 self.exp_logger.get_task().upload_artifact(

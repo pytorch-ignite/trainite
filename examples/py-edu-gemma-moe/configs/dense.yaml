@@ -1,4 +1,4 @@
-project_name: py-edu-gemma-moe
+project_name: py-edu-gemma
 preprocessor:
   _target_: preprocessors.python_bpe.load_python_bpe_tokenizer
   vocab_size: 8192
