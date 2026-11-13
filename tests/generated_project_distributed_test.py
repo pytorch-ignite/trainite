@@ -24,7 +24,6 @@ def test_generated_project_distributed(model, tmp_path):
         "-m",
         "torch.distributed.run",
         "--standalone",
-        "--rdzv-endpoint=localhost:0",
         "--nproc_per_node=2",
         "verify_training.py",
         "config.yaml",

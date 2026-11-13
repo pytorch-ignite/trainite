@@ -821,7 +821,6 @@ def test_decoder_trainer_distributed_two_workers(tmp_path):
         "-m",
         "torch.distributed.run",
         "--standalone",
-        "--rdzv-endpoint=localhost:0",
         "--nproc_per_node=2",
         str(script_path),
         str(output_dir),
