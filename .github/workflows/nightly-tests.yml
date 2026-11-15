@@ -32,10 +32,13 @@ jobs:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
 
+      - name: Sync dependencies
+        run: uv sync --locked --dev
+
       - name: Run integration tests
         env:
           TRAINITE_INTEGRATION_SMOKE: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11' && '0' || '1' }}
-        run: uv run --with pytest pytest -o addopts="" -m integration tests/cli_test.py
+        run: uv run pytest -o addopts="" -m integration tests/cli_test.py
 
   distributed-tests:
     name: Distributed (ubuntu-latest)

@@ -1,3 +1,6 @@
+import copy
+import inspect
+import json
 import logging
 import os
 import py_compile
@@ -10,8 +13,6 @@ from unittest.mock import Mock
 
 import pytest
 import yaml
-
-from tests.generated_project_config_test import TRAINING_CASES, create_training_project, training_environment
 
 from trainite.cli.init import Init, init_project, generate_uv_project
 from trainite.config.registry import (
@@ -267,6 +268,237 @@ def test_init_generates_valid_project(models: list[str], dataset: str, trainer: 
             generated_pyproject = (project_dir / "pyproject.toml").read_text()
             assert "datasets" in generated_pyproject
             assert "transformers" in generated_pyproject
+
+
+TRAINING_CASES = [(model, dataset) for model in MODEL_SPECS for dataset in DATASET_SPECS if dataset != "hugging-face"]
+
+
+def run_checked(command: list[str], project_dir: Path, timeout: int, env: dict[str, str] | None = None) -> None:
+    try:
+        subprocess.run(command, cwd=project_dir, env=env, check=True, timeout=timeout, capture_output=True, text=True)
+    except subprocess.CalledProcessError as error:
+        pytest.fail(f"{command} failed in {project_dir}:\nSTDOUT:\n{error.stdout}\nSTDERR:\n{error.stderr}")
+    except subprocess.TimeoutExpired as error:
+        pytest.fail(f"{command} timed out after {timeout}s:\nSTDOUT:\n{error.stdout}\nSTDERR:\n{error.stderr}")
+
+
+def create_training_project(project_dir: Path, model: str, dataset: str) -> None:
+    run_checked(
+        [
+            sys.executable,
+            "-m",
+            "trainite.cli",
+            "init",
+            "--model",
+            model,
+            "--dataset",
+            dataset,
+            "--trainer",
+            "decoder-trainer",
+            str(project_dir),
+        ],
+        project_dir.parent,
+        60,
+    )
+    config_path = project_dir / "config.yaml"
+    config = yaml.safe_load(config_path.read_text())
+    config["device"] = "cpu"
+    config["trainer"].update(epochs=1, log_every_steps=1)
+    config["model"].update(hidden_size=8, num_layers=2 if model.startswith("gemma4") else 1)
+    if model.startswith("gemma4"):
+        config["model"].update(
+            num_attention_heads=2,
+            num_key_value_heads=1,
+            head_dim=4,
+            global_num_key_value_heads=1,
+            global_head_dim=4,
+            dense_intermediate_size=16,
+            sliding_window=8,
+        )
+        if model == "gemma4-moe":
+            config["model"].update(expert_dim=4, num_experts=3, top_k=2)
+    else:
+        config["model"].update(feedforward_dim=16, dropout=0.0, max_seq_len=32)
+
+    data = config["data"]
+    if dataset == "string-reverse":
+        data["dataset"].update(
+            per_seq_size=10,
+            min_seq_len=2,
+            max_seq_len=3,
+            charset="abcd",
+        )
+    elif dataset == "counting":
+        # This range permits 27 distinct k=2 examples, enough for all three splits.
+        data["dataset"].update(total_size=20, min_seq_len=3, max_seq_len=8, k=2)
+    else:
+        for split, size in (("train", 16 if "train" in data else 20), ("val", 4), ("test", 4)):
+            if "dataset" in data and split != "train":
+                continue
+            if not data.get(split) and "dataset" not in data:
+                data[split] = copy.deepcopy(data["val"])
+            split_config = data if "dataset" in data else data[split]
+            rows = []
+            for index in range(size):
+                text = "hello " + "world " * (1 + index % 3)
+                rows.append(
+                    {"messages": [{"role": "user", "content": "hello"}, {"role": "assistant", "content": text}]}
+                    if dataset == "ultrachat-200k"
+                    else {"text": text}
+                )
+            fixture = project_dir / f"{split}.jsonl"
+            fixture.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+            split_config["dataset"].update(path="json", name=None, split="train", data_files=str(fixture))
+            split_config["transform"]["max_length"] = 24
+
+    if "dataset" in data:
+        data["dataloader"].update(batch_size=4, num_workers=0)
+        data.update(val_ratio=0.1, test_ratio=0.1)
+    else:
+        for split_config in data.values():
+            split_config["dataloader"].update(batch_size=4, num_workers=0)
+    config_path.write_text(yaml.safe_dump(config))
+    (project_dir / "verify_training.py").write_text(
+        inspect.getsource(verify_generated_training) + "\nverify_generated_training()\n"
+    )
+    run_checked(["uv", "sync", "--python", sys.executable], project_dir, 600, env=training_environment(project_dir))
+
+
+def training_environment(project_dir: Path) -> dict[str, str]:
+    return {
+        **{
+            key: value
+            for key, value in os.environ.items()
+            if key not in {"PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT"}
+        },
+        "HF_HUB_OFFLINE": "1",
+        "HF_DATASETS_OFFLINE": "1",
+        "HF_HOME": str(project_dir / ".hf-cache"),
+        "OMP_NUM_THREADS": "1",
+        "PYTHONHASHSEED": "0",
+    }
+
+
+def verify_generated_training() -> None:
+    """Copied into the generated project to run with only its declared dependencies."""
+    import importlib
+    import math
+    import sys
+    from contextlib import nullcontext
+    from pathlib import Path
+    from unittest.mock import patch
+
+    def local_tokenizer_loader():
+        from tokenizers import Tokenizer, models, pre_tokenizers, processors
+        from transformers import AutoTokenizer, PreTrainedTokenizerFast
+
+        vocabulary = {
+            token: index
+            for index, token in enumerate(
+                ["<unk>", "<bos>", "<eos>", "<pad>", "hello", "world", "User", "Assistant", ":"]
+            )
+        }
+        tokenizer = Tokenizer(models.WordLevel(vocabulary, unk_token="<unk>"))
+        tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
+        tokenizer.post_processor = processors.TemplateProcessing(
+            single="<bos> $A <eos>", special_tokens=[("<bos>", 1), ("<eos>", 2)]
+        )
+        fixture = Path("tokenizer-fixture")
+        PreTrainedTokenizerFast(
+            tokenizer_object=tokenizer, unk_token="<unk>", bos_token="<bos>", eos_token="<eos>", pad_token="<pad>"
+        ).save_pretrained(fixture)
+        original_loader = AutoTokenizer.from_pretrained
+
+        def load(name, **kwargs):
+            assert name == "openai-community/gpt2"
+            return original_loader(str(fixture), local_files_only=True, **kwargs)
+
+        return patch.object(AutoTokenizer, "from_pretrained", side_effect=load)
+
+    import torch
+    from ignite.engine import Events
+    import yaml
+
+    assert importlib.util.find_spec("trainite") is None
+    main = importlib.import_module("main")
+    config = yaml.safe_load(Path(sys.argv[1]).read_text())
+    trainer_cls = main.Trainer
+    trainers = []
+    initial_parameters = {}
+    losses = []
+
+    def capture_trainer(config):
+        trainer = trainer_cls(config)
+        trainers.append(trainer)
+        model = trainer.accelerator.unwrap_model(trainer.model)
+        initial_parameters.update(
+            {
+                name: parameter.detach().clone()
+                for name, parameter in model.named_parameters()
+                if parameter.requires_grad
+            }
+        )
+
+        def check_loss(engine):
+            loss = float(engine.state.output["loss"])
+            assert math.isfinite(loss), f"Non-finite training loss at iteration {engine.state.iteration}: {loss}"
+            losses.append(loss)
+
+        trainer.trainer.add_event_handler(Events.ITERATION_COMPLETED, check_loss)
+
+        def check_training(engine):
+            assert engine.state.epoch == 1
+            assert engine.state.iteration == len(losses) == len(trainer.train_loader)
+            assert len(losses) > 1
+            assert all(torch.isfinite(parameter).all() for parameter in model.parameters())
+            assert any(
+                not torch.equal(initial_parameters[name], parameter)
+                for name, parameter in model.named_parameters()
+                if parameter.requires_grad
+            )
+
+        # Check updates before Trainer.run() reloads the best checkpoint.
+        trainer.trainer.add_event_handler(Events.COMPLETED, check_training)
+        return trainer
+
+    main.Trainer = capture_trainer
+    tokenizer_context = local_tokenizer_loader() if "gpt2" in config["preprocessor"]["_target_"] else nullcontext()
+    with tokenizer_context:
+        main.main()
+    assert len(trainers) == 1
+    trainer = trainers[0]
+    assert trainer.trainer.state.epoch == 1
+    assert trainer.trainer.state.iteration == len(losses) == len(trainer.train_loader)
+    for evaluator in (trainer.train_evaluator, trainer.val_evaluator, trainer.test_evaluator):
+        assert evaluator.state.iteration > 0
+        assert math.isfinite(float(evaluator.state.metrics["loss"]))
+        assert 0.0 <= float(evaluator.state.metrics["token_accuracy"]) <= 1.0
+
+    model = trainer.accelerator.unwrap_model(trainer.model)
+    assert any(
+        not torch.equal(initial_parameters[name], parameter)
+        for name, parameter in model.named_parameters()
+        if parameter.requires_grad
+    )
+    for filename in ("last.pt", "best.pt"):
+        checkpoint = torch.load(trainer.run_dir / filename, map_location="cpu", weights_only=True)
+        assert checkpoint["optimizer"]["state"], f"No optimizer updates in {filename}"
+        assert checkpoint["model"]
+        assert all(torch.isfinite(value).all() for value in checkpoint["model"].values())
+        model.load_state_dict(checkpoint["model"], strict=True)
+        trainer.optimizer.load_state_dict(checkpoint["optimizer"])
+
+    # Corrupt weights so successful evaluation alone cannot hide a missing checkpoint reload.
+    with torch.no_grad():
+        for parameter in model.parameters():
+            parameter.zero_()
+    trainer.test()
+    best = torch.load(trainer.run_dir / "best.pt", map_location="cpu", weights_only=True)
+    for name, value in model.state_dict().items():
+        torch.testing.assert_close(value, best["model"][name], rtol=0, atol=0)
+    assert trainer.test_evaluator.state.iteration == len(trainer.test_loader)
+    assert math.isfinite(float(trainer.test_evaluator.state.metrics["loss"]))
+    assert 0.0 <= float(trainer.test_evaluator.state.metrics["token_accuracy"]) <= 1.0
 
 
 @pytest.mark.integration
