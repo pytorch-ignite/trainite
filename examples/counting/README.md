@@ -46,8 +46,8 @@ Therefore, the model must learn to recognize `L_k` up to `k = d + 2` block alter
 
 ## Project Structure
 
-* `config.yaml`: Baseline hyperparameters for a single training run.
-* `main.py`: Entrypoint for single run. Run it with `python main.py config.yaml`.
+* `configs/config.yaml`: Baseline hyperparameters for a single training run.
+* `main.py`: Entrypoint for single run. Run it with `python main.py configs/config.yaml`.
 * `sweep.py`: Outer loop hyperparameter sweep script.
 * `plot_results.py`: Unified plotting script that generates heatmaps for every unique configuration and the aggregated best configurations.
 * `models/transformer.py`: Causal transformer decoder without positional encodings.
@@ -74,9 +74,9 @@ pip install -e .
 ```
 
 ### 2. Run a Baseline Experiment
-Train a single model configuration defined in `config.yaml`:
+Train a single model configuration defined in `configs/config.yaml`:
 ```bash
-uv run python main.py config.yaml
+uv run python main.py configs/config.yaml
 ```
 
 ### 3. Run the Multi-Config Sweep
