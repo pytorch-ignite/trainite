@@ -17,7 +17,8 @@ output:
   root: outputs
   run_name: test_run
 """
-    (project_dir / "config.yaml").write_text(config_yaml)
+    (project_dir / "configs").mkdir()
+    (project_dir / "configs/config.yaml").write_text(config_yaml)
     (project_dir / "main.py").write_text("# main entrypoint\n")
 
     pyproject_toml = """[project]
@@ -49,7 +50,7 @@ def test_sky_init_in_valid_project(mock_trainite_project: Path, monkeypatch: pyt
     assert data["resources"]["use_spot"] is False
     assert data["resources"]["disk_size"] == 50
     assert "uv sync" in data["setup"]
-    assert "uv run python main.py config.yaml" in data["run"]
+    assert "uv run python main.py configs/config.yaml" in data["run"]
 
     # Check pyproject.toml updated
     pyproject_doc = tomlkit.parse((mock_trainite_project / "pyproject.toml").read_text())

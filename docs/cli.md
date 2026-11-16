@@ -3,7 +3,7 @@
 Trainite exposes a small command-line interface for scaffolding and extending standalone training projects.
 
 For project structure and first-run setup, see [Home](index.md).
-For `config.yaml` details and training behavior, see [Training Guide](training.md).
+For `configs/config.yaml` details and training behavior, see [Training Guide](training.md).
 
 ## Command summary
 
@@ -45,8 +45,8 @@ You will be prompted for:
 3. The primary active model (when multiple models are selected)
 4. Dataset template
 5. Trainer template
-6. Output root (`output.root` in `config.yaml`)
-7. Run name (`output.run_name` in `config.yaml`)
+6. Output root (`output.root` in `configs/config.yaml`)
+7. Run name (`output.run_name` in `configs/config.yaml`)
 8. Whether to generate `sky.yaml` for SkyPilot
 
 ### Non-interactive mode
@@ -68,11 +68,11 @@ trainite init my-experiment \
 
 - `PROJECT_DIR` (positional): Output directory for the generated project (default: `my-cool-experiment`).
 - `--model`: One or more model templates. At least one is required.
-- `--primary-model`: Active model in generated `config.yaml`. Must be one of the selected models; defaults to the first selected model.
+- `--primary-model`: Active model in generated `configs/config.yaml`. Must be one of the selected models; defaults to the first selected model.
 - `--dataset`: Dataset template.
 - `--trainer`: Trainer template.
-- `--output-root`: Value written to `output.root` in generated `config.yaml` (default: `outputs`).
-- `--run-name`: Value written to `output.run_name` in generated `config.yaml` (default: `<primary_model>__<dataset>`, with `-` replaced by `_`).
+- `--output-root`: Value written to `output.root` in generated `configs/config.yaml` (default: `outputs`).
+- `--run-name`: Value written to `output.run_name` in generated `configs/config.yaml` (default: `<primary_model>__<dataset>`, with `-` replaced by `_`).
 - `--sky`: Also generate `sky.yaml` and include SkyPilot dependency in generated `pyproject.toml`.
 - `--force`: Overwrite starter files in a non-empty existing directory.
 
@@ -96,14 +96,14 @@ trainite init my-experiment \
 When multiple models are selected:
 
 - Trainite scaffolds each model template into `models/` (for example, `models/rope_transformer.py` and `models/basic_transformer.py`).
-- The **first** model is the default primary model for generated `config.yaml`. Use `--primary-model` to choose a different selected model without changing the model list order.
-- In interactive mode, use <kbd>Space</kbd> to select or deselect multiple checkboxes, and press <kbd>Enter</kbd> to confirm. Trainite then asks which selected model should be the primary active model in `config.yaml`.
+- The **first** model is the default primary model for generated `configs/config.yaml`. Use `--primary-model` to choose a different selected model without changing the model list order.
+- In interactive mode, use <kbd>Space</kbd> to select or deselect multiple checkboxes, and press <kbd>Enter</kbd> to confirm. Trainite then asks which selected model should be the primary active model in `configs/config.yaml`.
 
 ## `trainite add:sky`
 
 Enable SkyPilot support in an **existing** Trainite-generated project.
 
-Run this command from your project directory (the one containing `config.yaml` and `main.py`):
+Run this command from your project directory (the one containing `configs/config.yaml` and `main.py`):
 
 ```bash
 cd my-experiment
@@ -113,14 +113,14 @@ trainite add:sky
 What it does:
 
 1. Generates `sky.yaml` from Trainite's SkyPilot template.
-2. Uses `project_name` from `config.yaml` (or falls back to the folder name) in the generated config.
+2. Uses `project_name` from `configs/config.yaml` (or falls back to the folder name) in the generated config.
 3. Adds a `skypilot` dependency to `pyproject.toml` (if it is not already present).
 
 Option:
 
 - `--force`: Overwrite an existing `sky.yaml`.
 
-If `config.yaml` or `main.py` is missing, the command exits with an error and asks you to run it from a valid Trainite experiment directory.
+If `configs/config.yaml` or `main.py` is missing, the command exits with an error and asks you to run it from a valid Trainite experiment directory.
 
 ### Quickstart with SkyPilot
 

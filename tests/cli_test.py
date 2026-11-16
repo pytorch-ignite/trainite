@@ -87,7 +87,7 @@ def test_interactive_defaults_are_explicit(monkeypatch):
     assert captured["Model(s):"] == [DEFAULT_MODEL]
     assert captured["Dataset:"] == DEFAULT_DATASET
     assert captured["Trainer:"] == DEFAULT_TRAINER
-    assert captured["Primary active model in config.yaml:"] == init.DEFAULT_MODEL
+    assert captured["Primary active model in configs/config.yaml:"] == init.DEFAULT_MODEL
 
 
 def test_default_constants_exist_in_registry():
@@ -134,7 +134,7 @@ def test_primary_model_default_falls_back_when_default_not_selected(monkeypatch)
 
     init.run_interactive_mode()
 
-    assert captured["Primary active model in config.yaml:"] == "basic-transformer"
+    assert captured["Primary active model in configs/config.yaml:"] == "basic-transformer"
 
 
 def test_cli_init_defaults_are_explicit():
@@ -193,7 +193,7 @@ def test_init_generates_valid_project(models: list[str], dataset: str, trainer: 
         preprocessor_file = f"preprocessors/{preprocessor_spec.name}.py" if preprocessor_spec else None
 
         expected_files = [
-            "config.yaml",
+            "configs/config.yaml",
             "config.py",
             *[f"models/{spec.name}.py" for spec in model_specs],
             f"dataset_impl/{dataset_spec.name}.py",
@@ -209,10 +209,11 @@ def test_init_generates_valid_project(models: list[str], dataset: str, trainer: 
         for filename in expected_files:
             if filename is not None:
                 assert (project_dir / filename).exists(), f"{filename} missing"
+        assert not (project_dir / "config.yaml").exists()
 
-        # Check that target inside config.yaml is rewritten correctly
+        # Check that target inside configs/config.yaml is rewritten correctly
         # and points to primary model
-        with open(project_dir / "config.yaml", "r") as f:
+        with open(project_dir / "configs/config.yaml", "r") as f:
             generated_config = yaml.safe_load(f)
 
         assert generated_config["project_name"] == project_dir.name
@@ -299,8 +300,8 @@ def test_generated_project_is_runnable() -> None:
             check=True,
         )
 
-        # 2. Modify config.yaml to run a minimal workload
-        config_path = project_dir / "config.yaml"
+        # 2. Modify configs/config.yaml to run a minimal workload
+        config_path = project_dir / "configs/config.yaml"
 
         with open(config_path, "r") as f:
             config = yaml.safe_load(f)
@@ -342,7 +343,7 @@ def test_generated_project_is_runnable() -> None:
         # 4. Run the generated project
         try:
             subprocess.run(
-                ["uv", "run", "python", "main.py", "config.yaml"],
+                ["uv", "run", "python", "main.py", "configs/config.yaml"],
                 cwd=project_dir,
                 check=True,
                 timeout=300,
@@ -486,6 +487,7 @@ def test_generated_project_grid_search_logic() -> None:
 
         assert "def load_grid_configs" in generated_utils
         assert "load_grid_configs" in generated_main
+        assert '"configs/config.yaml"' in generated_main
 
 
 def _recreation_command(project_dir: Path) -> str:
@@ -547,9 +549,9 @@ def test_recreation_command_is_replayable(tmp_path):
     )
 
     assert "Unrecognized options" not in result.stdout + result.stderr
-    assert (replay_dir / "config.yaml").exists()
+    assert (replay_dir / "configs/config.yaml").exists()
 
-    replayed_config = yaml.safe_load((replay_dir / "config.yaml").read_text())
+    replayed_config = yaml.safe_load((replay_dir / "configs/config.yaml").read_text())
     assert replayed_config["output"]["run_name"] == "my great run"
     assert replayed_config["output"]["root"] == "my outputs"
 
@@ -600,10 +602,10 @@ def test_primary_model_drives_generated_config(tmp_path):
     )
     init_project(config)
 
-    generated_config = yaml.safe_load((project_dir / "config.yaml").read_text())
+    generated_config = yaml.safe_load((project_dir / "configs/config.yaml").read_text())
 
-    # The primary model drives config.yaml and the run name even though it is
-    # not first in the selection.
+    # The primary model drives configs/config.yaml and the run name even though
+    # it is not first in the selection.
     assert "basic_transformer" in generated_config["model"]["_target_"]
     assert "basic_transformer" in generated_config["model"]["collate_fn_target"]
     assert generated_config["loss"]["_target_"] == "models.basic_transformer.CausalLMCrossEntropyLoss"

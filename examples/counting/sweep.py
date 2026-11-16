@@ -44,7 +44,7 @@ def main() -> None:
                     )
 
                     # Load base config from local yaml
-                    config = load_config(Path("config.yaml"), ProjectConfig)
+                    config = load_config(Path("configs/config.yaml"), ProjectConfig)
 
                     # Dynamic overrides
                     config.data.dataset.k = k

@@ -12,7 +12,7 @@ to see the currently available model, dataset, and trainer choices.
 See also:
 
 - [CLI Guide](cli.md) for all commands and flags.
-- [Training Guide](training.md) for `config.yaml` structure and run behavior.
+- [Training Guide](training.md) for `configs/config.yaml` structure and run behavior.
 
 ## Getting Started
 
@@ -71,12 +71,12 @@ trainite init my-experiment \
 ```
 
 Trainite will generate both model files under `models/`; the first model listed
-is used as the default active model in `config.yaml`.
+is used as the default active model in `configs/config.yaml`.
 
 The command prints the files it created:
 
 ```text
-Generated config.yaml
+Generated configs/config.yaml
 Generated models/rope_transformer.py
 Generated dataset_impl/string_reverse.py
 Generated dataset_impl/transformed.py
@@ -91,7 +91,7 @@ Generated pyproject.toml
 
 Trainite creates `my-experiment/` with:
 
-- `config.yaml` for model, data, training, and output settings
+- `configs/config.yaml` for model, data, training, and output settings
 - `main.py` as the training entry point
 - local `models/`, `dataset_impl/`, and `trainer.py` implementations
 - `pyproject.toml` with the generated project's runtime dependencies
@@ -106,7 +106,7 @@ Install the generated project's dependencies and start training:
 ```bash
 cd my-experiment
 uv sync
-uv run python main.py config.yaml
+uv run python main.py configs/config.yaml
 ```
 
 #### With pip
@@ -120,13 +120,13 @@ cd my-experiment
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
-python main.py config.yaml
+python main.py configs/config.yaml
 ```
 
 The run writes logs, checkpoints, and TensorBoard data beneath
 `outputs/rope_transformer__string_reverse/` in a timestamped directory.
 
-You now have a standalone project. Change `config.yaml` to tune the experiment,
+You now have a standalone project. Change `configs/config.yaml` to tune the experiment,
 or edit the generated Python modules to replace the starter implementation.
 
 ## Case Studies & Resources

@@ -25,7 +25,7 @@ The decoder receives a prompt followed by the expected completion:
 <BOS> abc123 <SEP> 321cba <EOS>
 ```
 
-Only completion tokens contribute to the training loss. The dataset is automatically split into training, validation, and test sets using the ratios in `config.yaml`.
+Only completion tokens contribute to the training loss. The dataset is automatically split into training, validation, and test sets using the ratios in `configs/config.yaml`.
 
 Important data settings:
 
@@ -100,7 +100,7 @@ From this directory:
 
 ```bash
 uv sync
-uv run python main.py config.yaml
+uv run python main.py configs/config.yaml
 ```
 
 Training outputs are written below `outputs/<run_name>/<timestamp>/`. Each run contains its resolved configuration, console log, TensorBoard data, and model checkpoints.
@@ -142,7 +142,7 @@ Replace `depth` with `width` or `full` as needed. Without `--time-budget`, a run
 
 ## Files
 
-- `config.yaml` — experiment configuration.
+- `configs/config.yaml` — experiment configuration.
 - `main.py` — single-run entry point.
 - `sweep.py` — depth and width sweeps.
 - `trainer.py` — training, metrics, generation, and checkpoints.
