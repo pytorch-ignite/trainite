@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from pydantic import ValidationError
 
@@ -7,6 +9,10 @@ from trainite.config.base import (
     SplitConfig,
     DatasetConfig,
     TrainerConfig,
+    ModelConfig,
+    PreprocessorConfig,
+    OutputConfig,
+    ProjectConfig,
 )
 
 
@@ -114,14 +120,10 @@ def test_data_config_invalid_ratios():
 
 
 def test_data_config_empty():
-    with pytest.raises(
-        ValidationError,
-    ):
+    with pytest.raises(ValidationError):
         DataConfigBase()  # type: ignore
 
-    with pytest.raises(
-        ValidationError,
-    ):
+    with pytest.raises(ValidationError):
         DataWithAutoSplit()  # type: ignore
 
 
@@ -138,3 +140,23 @@ def test_trainer_config_precision():
     # Unsupported precision raises ValidationError
     with pytest.raises(ValidationError):
         TrainerConfig(precision="invalid_precision")  # type: ignore[arg-type]
+
+
+def test_project_config_str():
+    config = ProjectConfig(
+        project_name="test",
+        preprocessor=PreprocessorConfig(_target_="a.B"),
+        model=ModelConfig(_target_="a.C"),
+        output=OutputConfig(root="out", run_name="run"),
+        data=DataWithAutoSplit(
+            dataset=DatasetConfig(_target_="a.D"),
+        ),
+    )
+
+    output = str(config)
+    parsed = json.loads(output)
+
+    assert "\n" in output
+    assert parsed["project_name"] == "test"
+    assert parsed["preprocessor"]["_target_"] == "a.B"
+    assert parsed["data"]["dataset"]["_target_"] == "a.D"

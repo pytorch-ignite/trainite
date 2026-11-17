@@ -105,3 +105,6 @@ class ProjectConfig(BaseModel):
     logger: Literal["tensorboard", "clearml"] = "tensorboard"
     seed: int = 42
     device: str | None = None
+
+    def __str__(self) -> str:
+        return self.model_dump_json(indent=2, by_alias=True)
