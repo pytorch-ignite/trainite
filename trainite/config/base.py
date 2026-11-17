@@ -107,4 +107,4 @@ class ProjectConfig(BaseModel):
     device: str | None = None
 
     def __str__(self) -> str:
-        return self.model_dump_json(indent=2, by_alias=True)
+        return self.model_dump_json(indent=2, by_alias=True, polymorphic_serialization=True)
