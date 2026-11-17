@@ -20,6 +20,10 @@ class MockComponent(DatasetConfig):
     pass
 
 
+class MockModelConfig(ModelConfig):
+    hidden_size: int = 64
+
+
 def test_data_config_option_1():
     # Valid Option 1
     config = DataConfigBase(
@@ -105,7 +109,7 @@ def test_data_config_invalid_ratios():
         DataWithAutoSplit(
             dataset=MockComponent(_target_="dataset.all"),
             test_ratio=0.3,
-            val_ratio=0.25,  # test_ratio + val_ratio = 0.55, train = 0.45 <= 0.5
+            val_ratio=0.25, # test_ratio + val_ratio = 0.55, train = 0.45 <= 0.5
         )
 
     with pytest.raises(
@@ -115,7 +119,7 @@ def test_data_config_invalid_ratios():
         DataWithAutoSplit(
             dataset=MockComponent(_target_="dataset.all"),
             test_ratio=0.01,
-            val_ratio=0.01,  # test_ratio + val_ratio = 0.02, train = 0.98 > 0.9
+            val_ratio=0.01, # test_ratio + val_ratio = 0.02, train = 0.98 > 0.9
         )
 
 
@@ -146,7 +150,7 @@ def test_project_config_str():
     config = ProjectConfig(
         project_name="test",
         preprocessor=PreprocessorConfig(_target_="a.B"),
-        model=ModelConfig(_target_="a.C"),
+        model=MockModelConfig(_target_="a.C"),
         output=OutputConfig(root="out", run_name="run"),
         data=DataWithAutoSplit(
             dataset=DatasetConfig(_target_="a.D"),
@@ -160,3 +164,4 @@ def test_project_config_str():
     assert parsed["project_name"] == "test"
     assert parsed["preprocessor"]["_target_"] == "a.B"
     assert parsed["data"]["dataset"]["_target_"] == "a.D"
+    assert parsed["model"]["hidden_size"] == 64
