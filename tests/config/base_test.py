@@ -109,7 +109,7 @@ def test_data_config_invalid_ratios():
         DataWithAutoSplit(
             dataset=MockComponent(_target_="dataset.all"),
             test_ratio=0.3,
-            val_ratio=0.25, # test_ratio + val_ratio = 0.55, train = 0.45 <= 0.5
+            val_ratio=0.25,  # test_ratio + val_ratio = 0.55, train = 0.45 <= 0.5
         )
 
     with pytest.raises(
@@ -119,7 +119,7 @@ def test_data_config_invalid_ratios():
         DataWithAutoSplit(
             dataset=MockComponent(_target_="dataset.all"),
             test_ratio=0.01,
-            val_ratio=0.01, # test_ratio + val_ratio = 0.02, train = 0.98 > 0.9
+            val_ratio=0.01,  # test_ratio + val_ratio = 0.02, train = 0.98 > 0.9
         )
 
 
