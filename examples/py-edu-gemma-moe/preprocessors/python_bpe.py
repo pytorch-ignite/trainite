@@ -28,10 +28,8 @@ def load_python_bpe_tokenizer(
     appended, so ``len(tokenizer) == vocab_size + 1`` and the embedding has one
     extra row.
     """
-    tokenizer_file = (
-        Path(cache_dir)
-        / f"{dataset_path.replace('/', '__')}-{split.replace('/', '__')}-{vocab_size}-{min_frequency}-gpt2.json"
-    )
+    stem = f"{dataset_path.replace('/', '__')}-{split.replace('/', '__')}-{vocab_size}-{min_frequency}"
+    tokenizer_file = Path(cache_dir) / f"{stem}.json"
     if not tokenizer_file.exists():
         from datasets import load_dataset
 
