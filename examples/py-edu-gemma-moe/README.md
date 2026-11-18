@@ -1,8 +1,12 @@
-# Dense vs. Mixture-of-Experts at 15M Parameters
+# Teaching a 15M Gemma 4 Model to Write Python
 
-A controlled comparison of two decoder-only Gemma 4 models with the same number of parameters active
-per token, trained on Python functions. Everything except the feed-forward block is identical between
-the two configs, so the only variable is how the MLP spends its parameters.
+How much Python can a 15M-parameter decoder learn from scratch? This example trains Gemma 4 models
+on Python functions and scores them on HumanEval+ mini, where the model gets a signature and docstring
+and has to write the body.
+
+The example trains two variants on the same corpus. They differ only in the feed-forward block: one
+dense MLP, one mixture-of-experts with the same parameters active per token. That makes the MoE a
+side question: does expert storage buy measurable Python ability at this scale, or not yet?
 
 The base project was generated with `trainite==0.2.0`:
 
@@ -22,8 +26,9 @@ Customizations on top of the generated project:
 ## Task and data
 
 [`Avelina/python-edu-cleaned`](https://huggingface.co/datasets/Avelina/python-edu-cleaned) is 6.05 GB
-of Python source, 7,677,467 rows, Open Data Commons Attribution (ODC-BY). `load_function_dataset`
-indexes each row into prompt/completion pairs:
+of Python source, 7,677,467 rows, Open Data Commons Attribution (ODC-BY). HumanEval hands the model a
+signature and a docstring and asks for the body, so `load_function_dataset` turns each row into
+prompt/completion pairs instead of training on whole files:
 
 * Only top-level `def`/`async def`, no decorators and no inline suites.
 * Only absolute imports, and only from the standard library plus a small allowlist of common data
@@ -43,7 +48,7 @@ def add(a, b):
     return a + b
 ```
 
-## The two runs
+## The two models
 
 | | `configs/dense.yaml` | `configs/moe.yaml` |
 |---|---|---|
@@ -78,9 +83,15 @@ head dimension 64, the `sssg` sliding/global pattern with a 512-token window, ba
 | HumanEval+ plus, docstring | 12/164 | 13/164 |
 | HumanEval+ plus, stripped | 16/164 | 15/164 |
 
-Adding 2.4M expert parameters moved the validation loss by 0.0002 and HumanEval by one task, while
-costing 1.6x the training time. The experts are storage, not compute: 768 shared + 2 of 3 x 384 = 1536
-per token, exactly the dense FFN width, so both arms do the same arithmetic per token.
+The pretraining run does not separate the two models. The extra 2.4M expert parameters moved the
+validation loss by 0.0002 and HumanEval by one task, while costing 1.6x the training time. The experts
+are storage, not arithmetic: 768 shared + 2 of 3 x 384 = 1536 per token, exactly the dense FFN width,
+so both arms do the same work per token.
+
+That is a statement about this budget, not about MoE in general. Both arms stopped after four
+pretraining epochs on next-token prediction, and neither was post-trained. Nothing here rules out the
+experts becoming useful under more training or a later code post-training stage; it only says the
+storage on its own does not pay off yet.
 
 Read the HumanEval numbers with the noise floor in mind: 164 problems at a ~10% pass rate has a
 standard error of roughly 2.3 points, so a one-to-four task gap is not a difference. The docstring

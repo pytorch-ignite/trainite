@@ -295,7 +295,7 @@ Working examples are in the [`examples/`](examples/) directory:
 | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`string_reversal`](examples/string_reversal/) | Train a decoder-only transformer to reverse strings. Demonstrates the full pipeline: data generation, training, evaluation, and inference logging. |
 | [`counting`](examples/counting/)            | Train a decoder-only transformer to count the number of occurrences of a target token in a sequence. |
-| [`py-edu-gemma-moe`](examples/py-edu-gemma-moe/) | Train a dense 15M decoder and a same-compute MoE on Python functions, with a walkthrough notebook. |
+| [`py-edu-gemma-moe`](examples/py-edu-gemma-moe/) | Teach a 15M Gemma 4 model to write Python, with a dense vs. MoE feed-forward comparison and a walkthrough notebook. |
 
 Each example is a standalone project — `cd` into it, install dependencies, and run `python main.py config.yaml`.
 
