@@ -5,7 +5,7 @@ name: "py-edu-gemma-moe"
 workdir: .
 
 resources:
-  cloud: vast
+  # Any provider works; add `cloud: vast` (or aws, gcp) to pin one.
   accelerators: RTX3090:1
   memory: 16+
   max_hourly_cost: 0.35

@@ -134,6 +134,12 @@ To launch this experiment on cloud GPUs (AWS, GCP, Azure, Lambda, etc.) using [S
 >
 > You can also run jobs on your own on-premises servers or custom clusters via SSH by following SkyPilot's [Existing Machines guide](https://docs.skypilot.co/en/latest/reservations/existing-machines.html).
 
+> [!NOTE]
+> These numbers were produced on Vast.ai with a small private `vastai` launcher, not
+> `sky launch`: SkyPilot's Vast backend could not list or destroy instances and
+> attached the wrong SSH keys. `sky.yaml` is the portable path and works on any
+> provider; the custom launcher is not part of this example.
+
 ## Walkthrough notebook
 
 `walkthrough.ipynb` walks through the dataset, the collator, both model
