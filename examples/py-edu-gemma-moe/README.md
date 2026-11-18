@@ -93,9 +93,20 @@ pretraining epochs on next-token prediction, and neither was post-trained. Nothi
 experts becoming useful under more training or a later code post-training stage; it only says the
 storage on its own does not pay off yet.
 
-Read the HumanEval numbers with the noise floor in mind: 164 problems at a ~10% pass rate has a
-standard error of roughly 2.3 points, so a one-to-four task gap is not a difference. The docstring
-gap, 15 vs 19 for dense and 16 vs 18 for MoE, is not significant either.
+### Noise floor
+
+The counts come from 164 problems, so they are a sample, not a measurement. At the observed 9-12%
+pass rate the binomial standard error is `sqrt(p * (1 - p) / 164)`, or 2.3-2.5 points (3.8-4.1
+tasks). A one-task gap is well inside that.
+
+Pairing the models on the same problems does not change the answer. With a one-task margin the
+discordant counts differ by one, so an exact McNemar test returns `p = 1` for every possible
+per-problem pairing. The docstring gaps, 15 vs 19 and 16 vs 18, are not significant either: even the
+most favorable pairing gives `p = 0.125` and `p = 0.5`.
+
+That covers sampling noise only. Each arm is a single seed, so how much HumanEval moves between
+training runs, usually the larger term, is not measured here. The per-task outcomes a paired test
+needs are written next to each run as `humaneval_samples*_eval_results.json`.
 
 ## Run the example
 
