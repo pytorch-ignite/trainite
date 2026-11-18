@@ -51,3 +51,9 @@ pytest.ini
 
 .vscode/*
 site/
+
+# Downloaded model checkpoints for the walkthrough notebook
+examples/py-edu-gemma-moe/outputs/checkpoints/
+
+# Jupyter
+.ipynb_checkpoints/

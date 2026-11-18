@@ -134,6 +134,17 @@ To launch this experiment on cloud GPUs (AWS, GCP, Azure, Lambda, etc.) using [S
 >
 > You can also run jobs on your own on-premises servers or custom clusters via SSH by following SkyPilot's [Existing Machines guide](https://docs.skypilot.co/en/latest/reservations/existing-machines.html).
 
+## Walkthrough notebook
+
+`walkthrough.ipynb` walks through the dataset, the collator, both model
+architectures, and inference with the trained checkpoints. Open it with the example's
+`.venv` kernel.
+
+The trained weights are public at
+[`Blankyy/py-edu-gemma-15m`](https://huggingface.co/Blankyy/py-edu-gemma-15m), so the
+notebook needs no ClearML credentials: it pulls `dense.weights.pt` and
+`moe.weights.pt` (~114 MB) from the Hub into the Hugging Face cache on first run.
+
 ## Experiment Logging and Checkpoints
 
 `logger: tensorboard` stores metrics locally; the configs here use `logger: clearml` so remote runs are

@@ -229,7 +229,8 @@ def load_function_dataset(
         raise ValueError("max_length must be at least 2")
     if tokenizer.eos_token_id is None:
         raise ValueError("Tokenizer must define eos_token_id")
-    raw_dataset = load_dataset(path, split=split)
+    # A capped run stops early, so stream instead of downloading the whole corpus.
+    raw_dataset = load_dataset(path, split=split, streaming=dataset_size is not None)
 
     # Extraction is CPU-bound and cached by fingerprint. dataset_size caps the
     # output per process, so only shard when there is no cap to divide.
