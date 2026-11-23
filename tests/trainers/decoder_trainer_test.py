@@ -657,24 +657,48 @@ def test_decoder_trainer_generate(project_config, temperature):
 
         mock_forward.side_effect = mock_forward_fn
 
-        input_ids = torch.tensor([[5, 6]], dtype=torch.long, device=idist.device())
-        attention_mask = torch.ones_like(input_ids, dtype=torch.long, device=idist.device())
+        prompts = [
+            torch.tensor([5, 6], dtype=torch.long, device=idist.device()),
+            torch.tensor([9], dtype=torch.long, device=idist.device()),
+        ]
 
-        generated = trainer.generate(
-            input_ids, max_new_tokens=1, attention_mask=attention_mask, temperature=temperature
-        )
+        generated = trainer.generate(prompts, max_new_tokens=1, temperature=temperature)
         assert isinstance(generated, torch.Tensor)
+        # Shorter prompt is left-padded so both rows share the last column
         assert generated[0].tolist() == [5, 6, 7]
+        assert generated[1].tolist() == [0, 9, 7]
+
+
+def test_decoder_trainer_generate_num_samples(project_config):
+    trainer = create_trainer_from_config(project_config)
+    trainer.model.eval()
+
+    with mock.patch.object(trainer.model, "forward") as mock_forward:
+
+        def mock_forward_fn(x, attention_mask=None):
+            logits = torch.zeros(x.shape[0], x.shape[1], trainer.tokenizer.vocab_size, device=idist.device())
+            logits[:, -1, 7] = 100.0
+            return logits
+
+        mock_forward.side_effect = mock_forward_fn
+
+        prompts = [
+            torch.tensor([5, 6], dtype=torch.long),
+            torch.tensor([9], dtype=torch.long),
+        ]
+
+        generated = trainer.generate(prompts, max_new_tokens=1, num_samples=2)
+        # Rows are prompt-major: 2 samples of prompt 0, then 2 of prompt 1
+        assert generated.tolist() == [[5, 6, 7], [5, 6, 7], [0, 9, 7], [0, 9, 7]]
 
 
 @pytest.mark.parametrize("temperature", [0.0, -1.0])
 def test_decoder_trainer_generate_rejects_invalid_temperature(project_config, temperature):
     trainer = create_trainer_from_config(project_config)
-    input_ids = torch.tensor([[5, 6]], dtype=torch.long, device=idist.device())
-    attention_mask = torch.ones_like(input_ids, dtype=torch.long, device=idist.device())
+    prompt = torch.tensor([5, 6], dtype=torch.long, device=idist.device())
 
     with pytest.raises(ValueError, match="temperature must be greater than 0"):
-        trainer.generate(input_ids, max_new_tokens=1, attention_mask=attention_mask, temperature=temperature)
+        trainer.generate([prompt], max_new_tokens=1, temperature=temperature)
 
 
 @pytest.mark.parametrize(
