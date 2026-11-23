@@ -525,12 +525,28 @@ class Trainer:
         tag = f"inference/{name_map.get(name, name.lower())}"
         self._log_text(tag, "\n".join(lines), engine.state.iteration)
 
+    @staticmethod
+    def _greedy_next_token(logits: torch.Tensor) -> torch.Tensor:
+        """Pick the highest-probability token at each position."""
+        return torch.argmax(logits, dim=-1, keepdim=True)
+
+    @staticmethod
+    def _sample_next_token(logits: torch.Tensor, temperature: float) -> torch.Tensor:
+        """Sample one token per position from ``softmax(logits / temperature)``.
+
+        Lower temperatures sharpen the distribution; ``temperature=1.0`` samples
+        from the model's raw distribution.
+        """
+        probs = torch.softmax(logits / temperature, dim=-1)
+        return torch.multinomial(probs, num_samples=1)
+
     @torch.no_grad()
     def generate(
         self,
         input_ids: torch.Tensor,
         max_new_tokens: int,
         attention_mask: torch.Tensor,
+        temperature: float | None = None,
     ) -> torch.Tensor:
         """Generate text token IDs from prompt input_ids.
 
@@ -541,10 +557,14 @@ class Trainer:
             input_ids: Prompt token IDs of shape (batch, seq_len).
             max_new_tokens: Maximum number of new tokens to generate.
             attention_mask: Optional attention mask of shape (batch, seq_len).
+            temperature: ``None`` for greedy decoding, or a positive value to
+                sample from ``softmax(logits / temperature)``.
         Returns:
             Tensor containing the full token IDs (prompt + newly generated tokens)
             of shape (batch, prompt_len + new_tokens).
         """
+        if temperature is not None and temperature <= 0:
+            raise ValueError("temperature must be greater than 0")
         unwrapped_model = self.accelerator.unwrap_model(self.model)
         unwrapped_model.eval()
 
@@ -557,8 +577,11 @@ class Trainer:
             logits = unwrapped_model(generated, attention_mask=attention_mask)
             # Take the logits at the last position — this is the prediction for the next token
             next_token_logits = logits[:, -1, :]
-            # Greedy decoding: pick the highest-probability token at each step
-            next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+            next_token = (
+                self._greedy_next_token(next_token_logits)
+                if temperature is None
+                else self._sample_next_token(next_token_logits, temperature)
+            )
             if eos_id is not None:
                 # If a sequence already ended (last token is EOS), keep emitting EOS
                 # so the sequence stays frozen while other sequences in the batch finish

@@ -643,7 +643,8 @@ def test_decoder_trainer_grad_clip_norm(project_config):
     assert mock_clip.called
 
 
-def test_decoder_trainer_generate(project_config):
+@pytest.mark.parametrize("temperature", [None, 1.0, 0.5])
+def test_decoder_trainer_generate(project_config, temperature):
     trainer = create_trainer_from_config(project_config)
     trainer.model.eval()
 
@@ -651,7 +652,7 @@ def test_decoder_trainer_generate(project_config):
 
         def mock_forward_fn(x, attention_mask=None):
             logits = torch.zeros(x.shape[0], x.shape[1], trainer.tokenizer.vocab_size, device=idist.device())
-            logits[:, -1, 7] = 10.0
+            logits[:, -1, 7] = 100.0
             return logits
 
         mock_forward.side_effect = mock_forward_fn
@@ -659,9 +660,21 @@ def test_decoder_trainer_generate(project_config):
         input_ids = torch.tensor([[5, 6]], dtype=torch.long, device=idist.device())
         attention_mask = torch.ones_like(input_ids, dtype=torch.long, device=idist.device())
 
-        generated = trainer.generate(input_ids, max_new_tokens=1, attention_mask=attention_mask)
+        generated = trainer.generate(
+            input_ids, max_new_tokens=1, attention_mask=attention_mask, temperature=temperature
+        )
         assert isinstance(generated, torch.Tensor)
         assert generated[0].tolist() == [5, 6, 7]
+
+
+@pytest.mark.parametrize("temperature", [0.0, -1.0])
+def test_decoder_trainer_generate_rejects_invalid_temperature(project_config, temperature):
+    trainer = create_trainer_from_config(project_config)
+    input_ids = torch.tensor([[5, 6]], dtype=torch.long, device=idist.device())
+    attention_mask = torch.ones_like(input_ids, dtype=torch.long, device=idist.device())
+
+    with pytest.raises(ValueError, match="temperature must be greater than 0"):
+        trainer.generate(input_ids, max_new_tokens=1, attention_mask=attention_mask, temperature=temperature)
 
 
 @pytest.mark.parametrize(
