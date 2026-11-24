@@ -118,6 +118,8 @@ class Trainer:
         self.inference_every_epochs = self.trainer_config.inference_every_epochs
         self.inference_num_samples = self.trainer_config.inference_num_samples
         self.max_inference_new_tokens = self.trainer_config.max_inference_new_tokens
+        self.inference_temperature = self.trainer_config.inference_temperature
+        self.inference_samples_per_prompt = self.trainer_config.inference_samples_per_prompt
         self.criterion = instantiate(config.loss)
         self.ignore_index: int = getattr(self.criterion, "ignore_index", -100)
         self.requires_router_info = getattr(self.criterion, "requires_router_info", False)
@@ -460,15 +462,18 @@ class Trainer:
             sources.append(source)
         self.model.eval()
 
-        sequences = self.generate(prompt_ids_list, max_new_tokens=self.max_inference_new_tokens)
+        sequences = self.generate(
+            prompt_ids_list,
+            max_new_tokens=self.max_inference_new_tokens,
+            temperature=self.inference_temperature,
+            num_samples=self.inference_samples_per_prompt,
+        )
         # Left-padding puts every generated token after the longest prompt
         new_tokens = sequences[:, max(t.numel() for t in prompt_ids_list) :]
+        # Rows are prompt-major: one group of inference_samples_per_prompt per prompt
         decoded_strs = [
-            self.tokenizer.decode(
-                tokens.tolist(),
-                skip_special_tokens=True,
-            )
-            for tokens in new_tokens
+            " | ".join(self.tokenizer.decode(tokens.tolist(), skip_special_tokens=True) for tokens in group)
+            for group in new_tokens.reshape(len(prompt_ids_list), self.inference_samples_per_prompt, -1)
         ]
 
         for idx, (source, target, prediction) in enumerate(zip(sources, targets, decoded_strs), 1):
@@ -528,16 +533,10 @@ class Trainer:
         eos_id = self.tokenizer.eos_token_id
         pad_token_id = getattr(self.tokenizer, "pad_token_id", 0)
 
-        # Left-pad the prompts (reverse -> pad_sequence -> reverse).
-        #
-        # NOTE: this is safe for the default model because it uses rotary
-        # (relative) positions, where shifting the whole prompt right by the
-        # pad width preserves the distances between real tokens and the padding
-        # is masked out of attention. If you swap in a model with absolute or
-        # sinusoidal position embeddings indexed by slot, left-padding will
-        # offset every real token's position and silently degrade generation --
-        # you would then need to right-pad, or derive position_ids from the
-        # attention mask instead of using the raw slot index.
+        # Left-pad (reverse -> pad_sequence -> reverse) so every row ends in the
+        # same column. Safe only for rotary positions: absolute/sinusoidal
+        # embeddings indexed by slot need right-padding or position_ids derived
+        # from the mask instead of the raw slot index.
         expanded = [t for t in prompts for _ in range(num_samples)]
         input_ids = (
             torch.nn.utils.rnn.pad_sequence([t.flip(0) for t in expanded], batch_first=True, padding_value=pad_token_id)
