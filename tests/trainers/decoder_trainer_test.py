@@ -595,7 +595,6 @@ def test_decoder_trainer_dataloader_class_collate_fn(project_config):
         {"max_inference_new_tokens": 0},
         {"inference_num_samples": 0},
         {"inference_temperature": 0},
-        {"inference_samples_per_prompt": 0},
         {"inference_every_epochs": -1},
         {"max_inference_new_tokens": -1},
         {"inference_num_samples": -1},
@@ -637,9 +636,8 @@ def test_setup_inference_and_log_success(project_config, temp_run_dir):
     trainer.run()
 
 
-def test_log_inference_passes_sampling_config(project_config, temp_run_dir):
+def test_log_inference_passes_temperature(project_config, temp_run_dir):
     project_config.trainer.inference_temperature = 0.8
-    project_config.trainer.inference_samples_per_prompt = 3
     project_config.model = cc(
         GenerativeModel,
         vocab_size=10,
@@ -663,9 +661,9 @@ def test_log_inference_passes_sampling_config(project_config, temp_run_dir):
     project_config.data.val.transform = transform
     trainer = create_trainer_from_config(project_config)
 
-    def fake_generate(prompts, max_new_tokens, temperature=None, num_samples=1):
+    def fake_generate(prompts, max_new_tokens, temperature=None):
         width = max(t.numel() for t in prompts) + max_new_tokens
-        return torch.zeros(len(prompts) * num_samples, width, dtype=torch.long)
+        return torch.zeros(len(prompts), width, dtype=torch.long)
 
     with mock.patch.object(trainer, "generate", side_effect=fake_generate) as mock_gen:
         engine = mock.Mock()
@@ -674,7 +672,6 @@ def test_log_inference_passes_sampling_config(project_config, temp_run_dir):
         trainer._log_inference(engine, trainer.train_loader, "Train")
 
     assert mock_gen.call_args.kwargs["temperature"] == 0.8
-    assert mock_gen.call_args.kwargs["num_samples"] == 3
 
 
 def test_decoder_trainer_grad_clip_norm(project_config):

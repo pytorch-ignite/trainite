@@ -119,7 +119,6 @@ class Trainer:
         self.inference_num_samples = self.trainer_config.inference_num_samples
         self.max_inference_new_tokens = self.trainer_config.max_inference_new_tokens
         self.inference_temperature = self.trainer_config.inference_temperature
-        self.inference_samples_per_prompt = self.trainer_config.inference_samples_per_prompt
         self.criterion = instantiate(config.loss)
         self.ignore_index: int = getattr(self.criterion, "ignore_index", -100)
         self.requires_router_info = getattr(self.criterion, "requires_router_info", False)
@@ -466,15 +465,10 @@ class Trainer:
             prompt_ids_list,
             max_new_tokens=self.max_inference_new_tokens,
             temperature=self.inference_temperature,
-            num_samples=self.inference_samples_per_prompt,
         )
         # Left-padding puts every generated token after the longest prompt
         new_tokens = sequences[:, max(t.numel() for t in prompt_ids_list) :]
-        # Rows are prompt-major: one group of inference_samples_per_prompt per prompt
-        decoded_strs = [
-            " | ".join(self.tokenizer.decode(tokens.tolist(), skip_special_tokens=True) for tokens in group)
-            for group in new_tokens.reshape(len(prompt_ids_list), self.inference_samples_per_prompt, -1)
-        ]
+        decoded_strs = [self.tokenizer.decode(tokens.tolist(), skip_special_tokens=True) for tokens in new_tokens]
 
         for idx, (source, target, prediction) in enumerate(zip(sources, targets, decoded_strs), 1):
             self.logger.info(

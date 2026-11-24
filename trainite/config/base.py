@@ -90,7 +90,6 @@ class TrainerConfig(BaseModel):
     inference_num_samples: int = Field(default=5, gt=0)
     max_inference_new_tokens: int = Field(default=16, gt=0)
     inference_temperature: float | None = Field(default=None, gt=0)
-    inference_samples_per_prompt: int = Field(default=1, gt=0)
     grad_clip_norm: float | None = Field(default=None, gt=0.0)
 
 
