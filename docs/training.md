@@ -101,7 +101,7 @@ or GPT-2 tokenizer loader (`preprocessors.gpt2_tokenizer.load_gpt2_tokenizer`), 
 
 Note that `dataloader` blocks accept standard PyTorch `DataLoader` options (such as `batch_size`, `shuffle`, and `num_workers`) rather than using a `_target_`.
 
-**`trainer`** — Training loop parameters: `epochs`, `log_every_steps`, `early_stopping_patience` (set to `null` to disable), `inference_every_epochs`, `inference_num_samples`, `max_inference_new_tokens`, and `grad_clip_norm`.
+**`trainer`** — Training loop parameters: `epochs`, `log_every_steps`, `early_stopping_patience` (set to `null` to disable), `inference_every_epochs`, `inference_num_samples`, `max_inference_new_tokens`, `inference_temperature` (set to `null` for greedy decoding), and `grad_clip_norm`.
 
 **`output`** — Where artifacts are saved. `root` specifies the parent directory and `run_name` identifies the experiment run. Artifacts are saved to `<root>/<run_name>/<timestamp>/`.
 
