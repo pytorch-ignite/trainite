@@ -173,8 +173,9 @@ exclude = '''
 )
 '''
 [tool.pytest.ini_options]
-addopts = "--color=yes -m 'not integration and not model_parity'"
+addopts = "--color=yes -m 'not integration and not model_parity and not distributed'"
 markers = [
     "integration: slow tests that build an isolated uv env and train a real step",
     "model_parity: compare model outputs against external reference implementations",
+    "distributed: multi-process distributed training tests",
 ]
