@@ -595,6 +595,7 @@ def test_decoder_trainer_dataloader_class_collate_fn(project_config):
         {"inference_every_epochs": 0},
         {"max_inference_new_tokens": 0},
         {"inference_num_samples": 0},
+        {"inference_temperature": 0},
         {"inference_every_epochs": -1},
         {"max_inference_new_tokens": -1},
         {"inference_num_samples": -1},
@@ -636,6 +637,44 @@ def test_setup_inference_and_log_success(project_config, temp_run_dir):
     trainer.run()
 
 
+def test_log_inference_passes_temperature(project_config, temp_run_dir):
+    project_config.trainer.inference_temperature = 0.8
+    project_config.model = cc(
+        GenerativeModel,
+        vocab_size=10,
+        hidden_size=8,
+        collate_fn_target="trainite.models.rope_transformer.CausalLMCollateFn",
+    )
+    transform = cc(DummyTransform)
+    project_config.data.train.dataset = cc(
+        GenerativeDataset,
+        size=16,
+        seq_len=4,
+        vocab_size=10,
+    )
+    project_config.data.train.transform = transform
+    project_config.data.val.dataset = cc(
+        GenerativeDataset,
+        size=8,
+        seq_len=4,
+        vocab_size=10,
+    )
+    project_config.data.val.transform = transform
+    trainer = create_trainer_from_config(project_config)
+
+    def fake_generate(prompts, max_new_tokens, temperature=None):
+        width = max(t.numel() for t in prompts) + max_new_tokens
+        return torch.zeros(len(prompts), width, dtype=torch.long)
+
+    with mock.patch.object(trainer, "generate", side_effect=fake_generate) as mock_gen:
+        engine = mock.Mock()
+        engine.state.epoch = 1
+        engine.state.iteration = 1
+        trainer._log_inference(engine, trainer.train_loader, "Train")
+
+    assert mock_gen.call_args.kwargs["temperature"] == 0.8
+
+
 def test_decoder_trainer_grad_clip_norm(project_config):
     project_config.trainer.grad_clip_norm = 1.0
     trainer = create_trainer_from_config(project_config)
@@ -644,7 +683,8 @@ def test_decoder_trainer_grad_clip_norm(project_config):
     assert mock_clip.called
 
 
-def test_decoder_trainer_generate(project_config):
+@pytest.mark.parametrize("temperature", [None, 1.0, 0.5])
+def test_decoder_trainer_generate(project_config, temperature):
     trainer = create_trainer_from_config(project_config)
     trainer.model.eval()
 
@@ -652,17 +692,53 @@ def test_decoder_trainer_generate(project_config):
 
         def mock_forward_fn(x, attention_mask=None):
             logits = torch.zeros(x.shape[0], x.shape[1], trainer.tokenizer.vocab_size, device=idist.device())
-            logits[:, -1, 7] = 10.0
+            logits[:, -1, 7] = 100.0
             return logits
 
         mock_forward.side_effect = mock_forward_fn
 
-        input_ids = torch.tensor([[5, 6]], dtype=torch.long, device=idist.device())
-        attention_mask = torch.ones_like(input_ids, dtype=torch.long, device=idist.device())
+        prompts = [
+            torch.tensor([5, 6], dtype=torch.long, device=idist.device()),
+            torch.tensor([9], dtype=torch.long, device=idist.device()),
+        ]
 
-        generated = trainer.generate(input_ids, max_new_tokens=1, attention_mask=attention_mask)
+        generated = trainer.generate(prompts, max_new_tokens=1, temperature=temperature)
         assert isinstance(generated, torch.Tensor)
+        # Shorter prompt is left-padded so both rows share the last column
         assert generated[0].tolist() == [5, 6, 7]
+        assert generated[1].tolist() == [0, 9, 7]
+
+
+def test_decoder_trainer_generate_num_samples(project_config):
+    trainer = create_trainer_from_config(project_config)
+    trainer.model.eval()
+
+    with mock.patch.object(trainer.model, "forward") as mock_forward:
+
+        def mock_forward_fn(x, attention_mask=None):
+            logits = torch.zeros(x.shape[0], x.shape[1], trainer.tokenizer.vocab_size, device=idist.device())
+            logits[:, -1, 7] = 100.0
+            return logits
+
+        mock_forward.side_effect = mock_forward_fn
+
+        prompts = [
+            torch.tensor([5, 6], dtype=torch.long),
+            torch.tensor([9], dtype=torch.long),
+        ]
+
+        generated = trainer.generate(prompts, max_new_tokens=1, num_samples=2)
+        # Rows are prompt-major: 2 samples of prompt 0, then 2 of prompt 1
+        assert generated.tolist() == [[5, 6, 7], [5, 6, 7], [0, 9, 7], [0, 9, 7]]
+
+
+@pytest.mark.parametrize("temperature", [0.0, -1.0])
+def test_decoder_trainer_generate_rejects_invalid_temperature(project_config, temperature):
+    trainer = create_trainer_from_config(project_config)
+    prompt = torch.tensor([5, 6], dtype=torch.long, device=idist.device())
+
+    with pytest.raises(ValueError, match="temperature must be greater than 0"):
+        trainer.generate([prompt], max_new_tokens=1, temperature=temperature)
 
 
 @pytest.mark.parametrize(

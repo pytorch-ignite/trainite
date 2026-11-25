@@ -118,6 +118,7 @@ class Trainer:
         self.inference_every_epochs = self.trainer_config.inference_every_epochs
         self.inference_num_samples = self.trainer_config.inference_num_samples
         self.max_inference_new_tokens = self.trainer_config.max_inference_new_tokens
+        self.inference_temperature = self.trainer_config.inference_temperature
         self.criterion = instantiate(config.loss)
         self.ignore_index: int = getattr(self.criterion, "ignore_index", -100)
         self.requires_router_info = getattr(self.criterion, "requires_router_info", False)
@@ -441,8 +442,6 @@ class Trainer:
             return
         self.logger.info(f"Epoch {engine.state.epoch}: Running inference on {name} samples...")
 
-        pad_token_id = getattr(self.tokenizer, "pad_token_id", 0)
-
         dataset = loader.dataset
         total_samples = len(dataset)  # type: ignore
         num_samples = min(self.inference_num_samples, total_samples)
@@ -462,47 +461,14 @@ class Trainer:
             sources.append(source)
         self.model.eval()
 
-        # Left-pad the prompts (reverse -> pad_sequence -> reverse) so every
-        # sequence in the batch ends at the same position and the newly
-        # generated tokens line up in a single column.
-        #
-        # NOTE: this is safe for the default model because it uses rotary
-        # (relative) positions, where shifting the whole prompt right by the
-        # pad width preserves the distances between real tokens and the padding
-        # is masked out of attention. If you swap in a model with absolute or
-        # sinusoidal position embeddings indexed by slot, left-padding will
-        # offset every real token's position and silently degrade generation --
-        # you would then need to right-pad, or derive position_ids from the
-        # attention mask instead of using the raw slot index.
-        batch_input_ids = (
-            torch.nn.utils.rnn.pad_sequence(
-                [t.flip(0) for t in prompt_ids_list], batch_first=True, padding_value=pad_token_id
-            )
-            .flip(1)
-            .to(self.device)
-        )
-        batch_attention_mask = (
-            torch.nn.utils.rnn.pad_sequence(
-                [torch.ones_like(t, dtype=torch.long).flip(0) for t in prompt_ids_list],
-                batch_first=True,
-                padding_value=0,
-            )
-            .flip(1)
-            .to(self.device)
-        )
         sequences = self.generate(
-            input_ids=batch_input_ids,
+            prompt_ids_list,
             max_new_tokens=self.max_inference_new_tokens,
-            attention_mask=batch_attention_mask,
+            temperature=self.inference_temperature,
         )
-        new_tokens = sequences[:, batch_input_ids.shape[1] :]
-        decoded_strs = [
-            self.tokenizer.decode(
-                tokens.tolist(),
-                skip_special_tokens=True,
-            )
-            for tokens in new_tokens
-        ]
+        # Left-padding puts every generated token after the longest prompt
+        new_tokens = sequences[:, max(t.numel() for t in prompt_ids_list) :]
+        decoded_strs = [self.tokenizer.decode(tokens.tolist(), skip_special_tokens=True) for tokens in new_tokens]
 
         for idx, (source, target, prediction) in enumerate(zip(sources, targets, decoded_strs), 1):
             self.logger.info(
@@ -528,37 +494,71 @@ class Trainer:
     @torch.no_grad()
     def generate(
         self,
-        input_ids: torch.Tensor,
+        prompts: list[torch.Tensor],
         max_new_tokens: int,
-        attention_mask: torch.Tensor,
+        temperature: float | None = None,
+        num_samples: int = 1,
     ) -> torch.Tensor:
-        """Generate text token IDs from prompt input_ids.
+        """Generate text token IDs from variable-length prompts.
 
-        Expects a pre-padded tensor (B, S). The caller is responsible for
-        left-padding and providing an attention mask before calling this method.
+        Left-pads ``prompts`` and builds the attention mask internally so every
+        sequence in the batch ends at the same position and the newly generated
+        tokens line up in a single column.
 
         Args:
-            input_ids: Prompt token IDs of shape (batch, seq_len).
+            prompts: Prompt token ID tensors, each of shape ``(seq_len,)``.
             max_new_tokens: Maximum number of new tokens to generate.
-            attention_mask: Optional attention mask of shape (batch, seq_len).
+            temperature: ``None`` for greedy decoding (argmax), or a positive
+                value to sample from ``softmax(logits / temperature)``.
+            num_samples: Sequences to generate per prompt. Rows are
+                prompt-major: row ``i * num_samples + j`` is sample ``j`` of
+                prompt ``i``. Samples only differ when ``temperature`` is set.
         Returns:
             Tensor containing the full token IDs (prompt + newly generated tokens)
-            of shape (batch, prompt_len + new_tokens).
+            of shape (batch * num_samples, padded_prompt_len + new_tokens).
         """
+        if temperature is not None and temperature <= 0:
+            raise ValueError("temperature must be greater than 0")
+        if num_samples < 1:
+            raise ValueError("num_samples must be at least 1")
         unwrapped_model = self.accelerator.unwrap_model(self.model)
         unwrapped_model.eval()
 
         eos_id = self.tokenizer.eos_token_id
+        pad_token_id = getattr(self.tokenizer, "pad_token_id", 0)
+
+        # Left-pad (reverse -> pad_sequence -> reverse) so every row ends in the
+        # same column. Safe only for rotary positions: absolute/sinusoidal
+        # embeddings indexed by slot need right-padding or position_ids derived
+        # from the mask instead of the raw slot index.
+        expanded = [t for t in prompts for _ in range(num_samples)]
+        input_ids = (
+            torch.nn.utils.rnn.pad_sequence([t.flip(0) for t in expanded], batch_first=True, padding_value=pad_token_id)
+            .flip(1)
+            .to(self.device)
+        )
+        attention_mask = (
+            torch.nn.utils.rnn.pad_sequence(
+                [torch.ones_like(t, dtype=torch.long).flip(0) for t in expanded],
+                batch_first=True,
+                padding_value=0,
+            )
+            .flip(1)
+            .to(self.device)
+        )
 
         device = self.device
-        generated = input_ids.clone()
+        generated = input_ids
 
         for _ in range(max_new_tokens):
             logits = unwrapped_model(generated, attention_mask=attention_mask)
             # Take the logits at the last position — this is the prediction for the next token
             next_token_logits = logits[:, -1, :]
-            # Greedy decoding: pick the highest-probability token at each step
-            next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+            # None -> greedy argmax; else sample from softmax(logits / temperature)
+            if temperature is None:
+                next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+            else:
+                next_token = torch.multinomial(torch.softmax(next_token_logits / temperature, dim=-1), num_samples=1)
             if eos_id is not None:
                 # If a sequence already ended (last token is EOS), keep emitting EOS
                 # so the sequence stays frozen while other sequences in the batch finish
