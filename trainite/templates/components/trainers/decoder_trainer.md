@@ -100,6 +100,12 @@ Number of random prompt samples to generate and log during the evaluation infere
 ### `max_inference_new_tokens`
 Maximum number of new tokens to generate per sample.
 
+### `pack`
+When `true`, packs multiple training sequences into shared rows using First-Fit Decreasing bin-packing and passes `position_ids` resetting at each sequence boundary. Models must accept `position_ids` and isolate attention per packed sequence; validation, test, and training-set metric evaluation stay left-padded.
+
+### `pack_max_seq_len`
+Maximum packed sequence length per row when `pack` is `true` (optional; defaults to the longest item in each batch). Raises an error if a training item exceeds this length.
+
 ## Distributed Training (Multi-GPU)
 
 `Trainer` uses [Hugging Face Accelerate](https://huggingface.co/docs/accelerate/index) to scale seamlessly across multiple GPUs without code changes.

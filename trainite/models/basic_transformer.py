@@ -1,9 +1,7 @@
 import math
-from typing import Any
 
 import torch
 from torch import nn
-from torch.nn.utils.rnn import pad_sequence
 
 
 class SinusoidalPositionalEncoding(nn.Module):
@@ -83,12 +81,10 @@ class Attention(nn.Module):
         k = k.view(B, S, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(B, S, self.num_heads, self.head_dim).transpose(1, 2)
 
-        # When padding tokens are present we combine causal + padding masks; otherwise
+        # When padding/packed masks are present we combine causal + padding masks; otherwise
         # PyTorch's built-in causal path is used (faster and uses less memory).
         if padding_mask is not None:
-            # Lower-triangular causal mask prevents attending to future tokens
             causal_mask = torch.ones(S, S, dtype=torch.bool, device=x.device).tril()
-            # Combined mask: True only where the position is both causal and non-padding
             mask = causal_mask & padding_mask
             context = nn.functional.scaled_dot_product_attention(
                 q,
@@ -164,9 +160,9 @@ class BasicTransformerModel(nn.Module):
                   -> linear projection to vocab logits
 
     The sinusoidal encoding assigns each position a unique fixed pattern of sin/cos
-    values (see SinusoidalPositionalEncoding).  Because the positions are *absolute*,
-    left-padding shifts real-token positions and can silently hurt quality -- prefer
-    the RoPETransformerModel when you need robust left-padding support.
+    values (see SinusoidalPositionalEncoding).  When ``attention_mask`` or
+    ``position_ids`` is supplied, real tokens receive their actual sequence
+    positions even in left-padded or packed batches.
 
     """
 
@@ -203,13 +199,17 @@ class BasicTransformerModel(nn.Module):
         # Final layer norm applied before the projection
         self.norm = nn.LayerNorm(hidden_size)
 
-    def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor | None = None,
+        position_ids: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         B, S = input_ids.shape
 
-        # Derive position indices.  When an attention_mask is supplied (e.g. for
-        # left-padded batches), we count only non-padding tokens so that each real
-        # token gets its intended position rather than its slot index.
-        if attention_mask is not None:
+        if position_ids is not None:
+            positions = position_ids
+        elif attention_mask is not None:
             positions = (attention_mask.cumsum(dim=-1) - 1).clamp(min=0)
         else:
             positions = torch.arange(S, device=input_ids.device).unsqueeze(0)
@@ -217,73 +217,24 @@ class BasicTransformerModel(nn.Module):
         # Scale embedding by sqrt(d_model) to keep magnitude comparable with positional encoding
         x = self.embedding(input_ids) * math.sqrt(self.embedding.embedding_dim) + self.pos_encoding(positions)
 
-        # Build a boolean padding mask of shape (B, 1, 1, S) for the attention layers.
-        # Shape (B, 1, 1, S) broadcasts over (B, num_heads, S, S) attention scores.
+        # Build (B, 1, 1, S) padding mask, or (B, 1, S, S) when packed documents are present.
         padding_mask: torch.Tensor | None = None
-        if attention_mask is not None:
-            # Only create a mask when there actually are padding tokens (optimisation)
-            if not attention_mask.all().item():
-                padding_mask = attention_mask.reshape(B, 1, 1, S).to(torch.bool)
-        elif (input_ids == self.embedding.padding_idx).any().item():
-            # Fall back to deriving the mask from pad token ids when no mask is provided
+        if attention_mask is not None and not attention_mask.all().item():
+            padding_mask = attention_mask.reshape(B, 1, 1, S).to(torch.bool)
+        elif attention_mask is None and (input_ids == self.embedding.padding_idx).any().item():
             padding_mask = (input_ids != self.embedding.padding_idx).reshape(B, 1, 1, S)
+
+        if position_ids is not None:
+            # Separate packed sequences wherever position_ids resets (diff != 1).
+            doc_ids = (torch.diff(position_ids, prepend=position_ids[:, :1] - 1, dim=-1) != 1).cumsum(-1)
+            if (doc_ids[:, -1] > 0).any().item():
+                doc_mask = (doc_ids[:, :, None] == doc_ids[:, None, :]).unsqueeze(1)
+                padding_mask = doc_mask if padding_mask is None else (doc_mask & padding_mask)
 
         for block in self.blocks:
             x = block(x, padding_mask=padding_mask)
         x = self.norm(x)
         return self.proj(x)
-
-
-class CausalLMCollateFn:
-    """Collate sequences for decoder-only autoregressive training.
-
-    Pads a batch of variable-length sequences to the same length using *left*-padding
-    (padding tokens are prepended rather than appended).  Left-padding keeps all real
-    tokens right-aligned so a single causal mask works correctly for the whole batch.
-
-    The trick used here is: flip each sequence, right-pad with ``pad_sequence``, then
-    flip the result back -- this is equivalent to left-padding.
-
-    ``ignore_index`` (-100 by default) is used as the label value for padding
-    positions so that PyTorch's ``CrossEntropyLoss`` ignores them during training.
-    """
-
-    def __init__(self, tokenizer: Any) -> None:
-        self.tokenizer = tokenizer
-        pad_id = getattr(tokenizer, "pad_token_id", None)
-        self.pad_token_id = pad_id if pad_id is not None else 0
-        # Cross-entropy ignores positions with this label value (PyTorch convention)
-        self.ignore_index = -100
-
-    def __call__(self, batch: list[Any]) -> dict[str, torch.Tensor]:
-        input_ids_list = []
-        attention_mask_list = []
-        labels_list = []
-        for item in batch:
-            input_ids = item.train_input_ids
-            labels = item.train_label_ids
-            attention_mask = item.attention_mask
-
-            # We flip the sequences to have padding on the left, which allows us to use causal masking without modification
-            input_ids_list.append(input_ids.flip(0))
-            labels_list.append(labels.flip(0))
-            attention_mask_list.append(attention_mask.flip(0))
-
-        # pad_sequence right-pads; flipping before and after converts that to left-padding
-        padded_input_ids = pad_sequence(
-            input_ids_list,
-            batch_first=True,
-            padding_value=self.pad_token_id if self.pad_token_id is not None else 0,
-        ).flip(1)
-        padded_attention_mask = pad_sequence(attention_mask_list, batch_first=True, padding_value=0).flip(1)
-        # Use ignore_index so the loss function skips padded label positions
-        padded_labels = pad_sequence(labels_list, batch_first=True, padding_value=self.ignore_index).flip(1)
-
-        return {
-            "input_ids": padded_input_ids,
-            "attention_mask": padded_attention_mask,
-            "labels": padded_labels,
-        }
 
 
 class CausalLMCrossEntropyLoss(nn.CrossEntropyLoss):

@@ -1,15 +1,11 @@
 import pytest
 import torch
 from trainite.config.registry import MODEL_SPECS
-from trainite.datasets.string_reverse import DatapointModel
 from trainite.models.basic_transformer import (
     Attention as BasicAttention,
 )
 from trainite.models.basic_transformer import (
     BasicTransformerModel,
-)
-from trainite.models.basic_transformer import (
-    CausalLMCollateFn as BasicCausalLMCollateFn,
 )
 from trainite.models.basic_transformer import (
     TransformerBlock as BasicTransformerBlock,
@@ -18,16 +14,12 @@ from trainite.models.rope_transformer import (
     Attention as RoPEAttention,
 )
 from trainite.models.rope_transformer import (
-    CausalLMCollateFn as RoPECausalLMCollateFn,
-)
-from trainite.models.rope_transformer import (
     RoPETransformerModel,
     RotaryEmbedding,
 )
 from trainite.models.rope_transformer import (
     TransformerBlock as RoPETransformerBlock,
 )
-from trainite.preprocessors.char_tokenizer import CharTokenizer
 from trainite.shared.utils import instantiate
 
 
@@ -170,41 +162,22 @@ def test_build_transformer_models_from_specs(spec_name, expected_cls):
     assert isinstance(model, expected_cls)
 
 
-@pytest.mark.parametrize("collate_cls", [BasicCausalLMCollateFn, RoPECausalLMCollateFn])
-def test_causal_lm_collate_fn(collate_cls):
-    tokenizer = CharTokenizer()
-    collate = collate_cls(tokenizer=tokenizer)
+@pytest.mark.parametrize("model_cls", [BasicTransformerModel, RoPETransformerModel])
+def test_packed_forward_matches_unpacked(model_cls):
+    torch.manual_seed(0)
+    model = model_cls(vocab_size=20, hidden_size=16, num_layers=2, num_heads=2, feedforward_dim=32, dropout=0.0)
+    model.eval()
 
-    src1 = "abc"
-    tgt1 = "cba"
-    src2 = "d"
-    tgt2 = "d"
+    seq1 = torch.tensor([[5, 6, 7, 8]])
+    seq2 = torch.tensor([[9, 10, 11]])
+    with torch.no_grad():
+        out1 = model(seq1)
+        out2 = model(seq2)
 
-    def make_item(source: str, target: str) -> DatapointModel:
-        source_ids = tokenizer.encode(source)
-        target_ids = tokenizer.encode(target)
-        combined = (
-            [tokenizer.bos_token_id] + source_ids + [tokenizer.sep_token_id] + target_ids + [tokenizer.eos_token_id]
-        )
-        return DatapointModel(
-            source=source,
-            target=target,
-            train_input_ids=torch.tensor(combined[:-1], dtype=torch.long),
-            train_label_ids=torch.tensor(combined[1:], dtype=torch.long),
-            attention_mask=torch.ones(len(combined) - 1, dtype=torch.long),
-            eval_input_ids=torch.tensor(
-                [tokenizer.bos_token_id] + source_ids + [tokenizer.sep_token_id], dtype=torch.long
-            ),
-        )
+        packed_ids = torch.tensor([[5, 6, 7, 8, 9, 10, 11, 0, 0]])
+        packed_mask = torch.tensor([[1, 1, 1, 1, 1, 1, 1, 0, 0]])
+        packed_pos = torch.tensor([[0, 1, 2, 3, 0, 1, 2, 0, 0]])
+        out_packed = model(packed_ids, attention_mask=packed_mask, position_ids=packed_pos)
 
-    batch = [make_item(src1, tgt1), make_item(src2, tgt2)]
-
-    collated = collate(batch)
-    assert "input_ids" in collated
-    assert "labels" in collated
-
-    assert collated["input_ids"].ndim == 2
-    assert collated["labels"].ndim == 2
-    assert collated["input_ids"].shape == collated["labels"].shape
-    assert collated["input_ids"].shape == (2, 8)
-    assert (collated["input_ids"][1, :4] == tokenizer.pad_token_id).all()
+    torch.testing.assert_close(out_packed[:, :4], out1, atol=1e-5, rtol=1e-5)
+    torch.testing.assert_close(out_packed[:, 4:7], out2, atol=1e-5, rtol=1e-5)

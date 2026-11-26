@@ -24,6 +24,7 @@ from trainite.shared.utils import (
     create_accelerator,
     create_run_dir,
     instantiate,
+    left_pad_sequence,
     setup_best_model_checkpoint,
     setup_console_logger,
     setup_training_checkpointing,
@@ -100,14 +101,21 @@ class Trainer:
             torch.device("cpu") if self.accelerator.device.type == "cpu" else self.accelerator.device
         )
 
-        # Build tokenizer from config (e.g. CharTokenizer)
+        self.criterion = instantiate(config.loss)
+        self.ignore_index: int = getattr(self.criterion, "ignore_index", -100)
+        self.requires_router_info = getattr(self.criterion, "requires_router_info", False)
+        self.train_forward_kwargs = {"return_router_info": True} if self.requires_router_info else {}
+
+        # Build tokenizer and train/val/test DataLoaders from config
         self.tokenizer = instantiate(config.preprocessor)
-        # Build train/val/test DataLoaders from the data config
-        self.train_loader, self.val_loader, self.test_loader = build_dataloaders(
+        train_loader, train_eval_loader, val_loader, test_loader = build_dataloaders(
             config.data,
             self.tokenizer,
             config.seed,
             collate_fn_target=config.model.collate_fn_target,
+            pack=self.trainer_config.pack,
+            pack_max_seq_len=self.trainer_config.pack_max_seq_len,
+            ignore_index=self.ignore_index,
         )
         self.model = build_model(
             config.model, self.device, vocab_size=self.tokenizer.vocab_size, pad_token_id=self.tokenizer.pad_token_id
@@ -118,19 +126,24 @@ class Trainer:
         self.inference_every_epochs = self.trainer_config.inference_every_epochs
         self.inference_num_samples = self.trainer_config.inference_num_samples
         self.max_inference_new_tokens = self.trainer_config.max_inference_new_tokens
-        self.criterion = instantiate(config.loss)
-        self.ignore_index: int = getattr(self.criterion, "ignore_index", -100)
-        self.requires_router_info = getattr(self.criterion, "requires_router_info", False)
-        self.train_forward_kwargs = {"return_router_info": True} if self.requires_router_info else {}
 
         # Prepare components for distributed execution and mixed precision
-        self.model, self.optimizer, self.train_loader, self.val_loader, self.test_loader = self.accelerator.prepare(
+        (
             self.model,
             self.optimizer,
             self.train_loader,
+            prepared_train_eval_loader,
             self.val_loader,
             self.test_loader,
+        ) = self.accelerator.prepare(
+            self.model,
+            self.optimizer,
+            train_loader,
+            train_eval_loader,
+            val_loader,
+            test_loader,
         )
+        self.train_eval_loader = prepared_train_eval_loader or self.train_loader
 
         self.total_iters: int = len(self.train_loader) * self.epochs
         self.trainer = Engine(self._train_step)
@@ -252,7 +265,10 @@ class Trainer:
             attention_mask = attention_mask.to(self.device)
 
         self.optimizer.zero_grad(set_to_none=True)
-        outputs = self.model(inputs, attention_mask=attention_mask, **self.train_forward_kwargs)
+        forward_kwargs = dict(self.train_forward_kwargs)
+        if (position_ids := batch.get("position_ids")) is not None:
+            forward_kwargs["position_ids"] = position_ids.to(self.device)
+        outputs = self.model(inputs, attention_mask=attention_mask, **forward_kwargs)
         logits = outputs if isinstance(outputs, torch.Tensor) else outputs[0]
         loss = self.criterion(outputs, targets)
 
@@ -310,7 +326,9 @@ class Trainer:
         (potentially much larger) training set every epoch.
         """
         self.logger.info("Evaluating on training set...")
-        self.train_evaluator.run(self.train_loader, epoch_length=min(len(self.train_loader), len(self.val_loader)))
+        self.train_evaluator.run(
+            self.train_eval_loader, epoch_length=min(len(self.train_eval_loader), len(self.val_loader))
+        )
         train_metrics = self.train_evaluator.state.metrics
         epoch = engine.state.epoch
 
@@ -462,33 +480,10 @@ class Trainer:
             sources.append(source)
         self.model.eval()
 
-        # Left-pad the prompts (reverse -> pad_sequence -> reverse) so every
-        # sequence in the batch ends at the same position and the newly
-        # generated tokens line up in a single column.
-        #
-        # NOTE: this is safe for the default model because it uses rotary
-        # (relative) positions, where shifting the whole prompt right by the
-        # pad width preserves the distances between real tokens and the padding
-        # is masked out of attention. If you swap in a model with absolute or
-        # sinusoidal position embeddings indexed by slot, left-padding will
-        # offset every real token's position and silently degrade generation --
-        # you would then need to right-pad, or derive position_ids from the
-        # attention mask instead of using the raw slot index.
-        batch_input_ids = (
-            torch.nn.utils.rnn.pad_sequence(
-                [t.flip(0) for t in prompt_ids_list], batch_first=True, padding_value=pad_token_id
-            )
-            .flip(1)
-            .to(self.device)
-        )
-        batch_attention_mask = (
-            torch.nn.utils.rnn.pad_sequence(
-                [torch.ones_like(t, dtype=torch.long).flip(0) for t in prompt_ids_list],
-                batch_first=True,
-                padding_value=0,
-            )
-            .flip(1)
-            .to(self.device)
+        # Left-pad prompts so every sequence ends at the same column for batched generation.
+        batch_input_ids = left_pad_sequence(prompt_ids_list, pad_token_id).to(self.device)
+        batch_attention_mask = left_pad_sequence([torch.ones_like(t, dtype=torch.long) for t in prompt_ids_list], 0).to(
+            self.device
         )
         sequences = self.generate(
             input_ids=batch_input_ids,
@@ -576,16 +571,17 @@ class Trainer:
             # Once a sequence has emitted EOS we keep re-emitting it (above) and
             # mask the appended token out of attention, so a finished sequence
             # stays frozen while the rest of the batch keeps generating.
-            already_ended = generated[:, -2:-1].eq(eos_id)
-            next_mask = torch.where(
-                already_ended,
-                torch.tensor(0, dtype=attention_mask.dtype, device=device),
-                next_mask,
-            )
+            if eos_id is not None:
+                already_ended = generated[:, -2:-1].eq(eos_id)
+                next_mask = torch.where(
+                    already_ended,
+                    torch.tensor(0, dtype=attention_mask.dtype, device=device),
+                    next_mask,
+                )
             attention_mask = torch.cat([attention_mask, next_mask], dim=-1)
 
             # Stop early if every sequence in the batch has produced EOS
-            if generated[:, -1].eq(eos_id).all():
+            if eos_id is not None and generated[:, -1].eq(eos_id).all():
                 break
 
         return generated

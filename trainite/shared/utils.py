@@ -10,6 +10,7 @@ from typing import Any, Callable, TypeVar
 from accelerate import Accelerator
 from accelerate.utils import broadcast_object_list
 import torch
+from torch.nn.utils.rnn import pad_sequence
 import yaml
 from ignite.engine import Engine, Events
 from ignite.handlers import (
@@ -208,8 +209,6 @@ def load_grid_configs(path: str | Path, config_cls: type[T]) -> list[tuple[T, di
 
 # Builds the model based on the provided configuration, tokenizer, and device.
 def build_model(model_config: Any, device: str | torch.device, **kwargs) -> nn.Module:
-    target_symbol = get_target(model_config.target)
-    kwargs = _inject_if_accepted(target_symbol, **kwargs)
     model = instantiate(model_config, **kwargs)
     model.to(device)
     return model
@@ -236,12 +235,93 @@ def build_dataset(dataset_config: Any, transform_config: Any, tokenizer: Any) ->
     return TransformedDataset(dataset, transform)
 
 
+def left_pad_sequence(values: list[torch.Tensor], padding_value: int) -> torch.Tensor:
+    """Left-pad 1D tensors along dim=0 by flipping, right-padding, and flipping back."""
+    return pad_sequence([v.flip(0) for v in values], batch_first=True, padding_value=padding_value).flip(1)
+
+
+class CausalLMCollateFn:
+    """Collate causal-LM items with optional First-Fit Decreasing sequence packing.
+
+    Contract:
+        - ``pack=False``: left-pads ``input_ids``, ``attention_mask``, ``labels``.
+        - ``pack=True``: bin-packs items up to ``max_seq_len`` (right-padded) and
+          adds ``position_ids`` resetting from ``0`` per packed sequence.
+    """
+
+    def __init__(
+        self,
+        tokenizer: Any,
+        pack: bool = False,
+        max_seq_len: int | None = None,
+        ignore_index: int = -100,
+    ) -> None:
+        pad_id = getattr(tokenizer, "pad_token_id", None)
+        self.pad_token_id = pad_id if pad_id is not None else 0
+        self.ignore_index = ignore_index
+        self.pack = pack
+        self.max_seq_len = max_seq_len
+
+    def __call__(self, batch: list[Any]) -> dict[str, torch.Tensor]:
+        if not self.pack:
+            return {
+                "input_ids": left_pad_sequence([item.train_input_ids for item in batch], self.pad_token_id),
+                "attention_mask": left_pad_sequence([item.attention_mask for item in batch], 0),
+                "labels": left_pad_sequence([item.train_label_ids for item in batch], self.ignore_index),
+            }
+
+        max_item_len = max(len(item.train_input_ids) for item in batch)
+        if self.max_seq_len is not None and max_item_len > self.max_seq_len:
+            raise ValueError(f"Item length {max_item_len} exceeds pack max_seq_len={self.max_seq_len}.")
+        cap = self.max_seq_len if self.max_seq_len is not None else max_item_len
+
+        bins: list[list[Any]] = []
+        bin_lens: list[int] = []
+        for item in sorted(batch, key=lambda x: len(x.train_input_ids), reverse=True):
+            length = len(item.train_input_ids)
+            for idx, used in enumerate(bin_lens):
+                if used + length <= cap:
+                    bins[idx].append(item)
+                    bin_lens[idx] += length
+                    break
+            else:
+                bins.append([item])
+                bin_lens.append(length)
+
+        width = max(bin_lens)
+        num_bins = len(bins)
+        input_ids = torch.full((num_bins, width), self.pad_token_id, dtype=torch.long)
+        labels = torch.full((num_bins, width), self.ignore_index, dtype=torch.long)
+        attention_mask = torch.zeros((num_bins, width), dtype=torch.long)
+        position_ids = torch.zeros((num_bins, width), dtype=torch.long)
+
+        for row, items in enumerate(bins):
+            cursor = 0
+            for item in items:
+                n = len(item.train_input_ids)
+                input_ids[row, cursor : cursor + n] = item.train_input_ids
+                labels[row, cursor : cursor + n] = item.train_label_ids
+                attention_mask[row, cursor : cursor + n] = item.attention_mask
+                position_ids[row, cursor : cursor + n] = torch.arange(n, dtype=torch.long)
+                cursor += n
+
+        return {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "labels": labels,
+            "position_ids": position_ids,
+        }
+
+
 def create_dataloader(
     dataset: Dataset,
     dl_config: Any,
     tokenizer: Any,
     shuffle: bool | None = None,
     collate_fn_target: str | None = None,
+    pack: bool = False,
+    max_seq_len: int | None = None,
+    ignore_index: int = -100,
 ) -> DataLoader:
     dl_kwargs = dl_config.model_dump(exclude={"shuffle"})
     if shuffle is None:
@@ -250,7 +330,15 @@ def create_dataloader(
     if collate_fn_target:
         target_symbol = get_target(collate_fn_target)
         if isinstance(target_symbol, type):
-            collate_fn = target_symbol(tokenizer=tokenizer)
+            collate_kwargs = _inject_if_accepted(
+                target_symbol,
+                allow_var_kwargs=False,
+                tokenizer=tokenizer,
+                pack=pack,
+                max_seq_len=max_seq_len,
+                ignore_index=ignore_index,
+            )
+            collate_fn = target_symbol(**collate_kwargs)
         else:
             collate_fn = target_symbol
     return DataLoader(dataset, shuffle=shuffle, collate_fn=collate_fn, **dl_kwargs)
@@ -260,19 +348,29 @@ def _loaders_from_splits(
     data_config: DataConfigBase,
     tokenizer: Any,
     collate_fn_target: str | None = None,
+    pack: bool = False,
+    pack_max_seq_len: int | None = None,
+    ignore_index: int = -100,
 ) -> tuple[DataLoader, DataLoader, DataLoader | None]:
-    """Build DataLoaders from explicitly defined train/val/test split configs.
+    """Build DataLoaders from explicitly defined train/val/test split configs."""
 
-    Each split (``data_config.train``, ``data_config.val``, ``data_config.test``)
-    specifies its own dataset, transform, and dataloader config independently.
-    The test loader is optional — if ``data_config.test`` is absent, ``None`` is returned.
-    """
-
-    def _make(split_config: Any) -> DataLoader:
+    def _make(split_config: Any, *, use_pack: bool = False) -> DataLoader:
         ds = build_dataset(split_config.dataset, split_config.transform, tokenizer)
-        return create_dataloader(ds, split_config.dataloader, tokenizer, collate_fn_target=collate_fn_target)
+        return create_dataloader(
+            ds,
+            split_config.dataloader,
+            tokenizer,
+            collate_fn_target=collate_fn_target,
+            pack=use_pack,
+            max_seq_len=pack_max_seq_len if use_pack else None,
+            ignore_index=ignore_index,
+        )
 
-    return _make(data_config.train), _make(data_config.val), _make(data_config.test) if data_config.test else None
+    return (
+        _make(data_config.train, use_pack=pack),
+        _make(data_config.val),
+        _make(data_config.test) if data_config.test else None,
+    )
 
 
 def _loaders_from_ratios(
@@ -280,15 +378,11 @@ def _loaders_from_ratios(
     tokenizer: Any,
     seed: int,
     collate_fn_target: str | None = None,
+    pack: bool = False,
+    pack_max_seq_len: int | None = None,
+    ignore_index: int = -100,
 ) -> tuple[DataLoader, DataLoader, DataLoader | None]:
-    """Build DataLoaders by splitting a single dataset by ratio.
-
-    A single dataset is built and then split into train/val/test subsets using
-    ``torch.utils.data.random_split`` with a fixed ``seed`` for reproducibility.
-    Split sizes are derived from ``val_ratio`` and ``test_ratio``; the remainder
-    goes to training.  The test loader is omitted (``None``) when ``test_ratio``
-    leaves zero samples for testing.
-    """
+    """Build DataLoaders by splitting a single dataset by ratio."""
     dataset = build_dataset(data_config.dataset, data_config.transform, tokenizer)
     total_len = len(dataset)  # type: ignore
     if total_len == 0:
@@ -305,9 +399,22 @@ def _loaders_from_ratios(
     )
     dl = data_config.dataloader
     return (
-        create_dataloader(train_ds, dl, tokenizer, shuffle=True, collate_fn_target=collate_fn_target),
-        create_dataloader(val_ds, dl, tokenizer, shuffle=False, collate_fn_target=collate_fn_target),
-        create_dataloader(test_ds, dl, tokenizer, shuffle=False, collate_fn_target=collate_fn_target)
+        create_dataloader(
+            train_ds,
+            dl,
+            tokenizer,
+            shuffle=True,
+            collate_fn_target=collate_fn_target,
+            pack=pack,
+            max_seq_len=pack_max_seq_len if pack else None,
+            ignore_index=ignore_index,
+        ),
+        create_dataloader(
+            val_ds, dl, tokenizer, shuffle=False, collate_fn_target=collate_fn_target, ignore_index=ignore_index
+        ),
+        create_dataloader(
+            test_ds, dl, tokenizer, shuffle=False, collate_fn_target=collate_fn_target, ignore_index=ignore_index
+        )
         if test_len > 0
         else None,
     )
@@ -318,20 +425,39 @@ def build_dataloaders(
     tokenizer: Any,
     seed: int,
     collate_fn_target: str | None = None,
-) -> tuple[DataLoader, DataLoader, DataLoader | None]:
-    """Entry point for building train/val/test DataLoaders from a data config.
+    pack: bool = False,
+    pack_max_seq_len: int | None = None,
+    ignore_index: int = -100,
+) -> tuple[DataLoader, DataLoader | None, DataLoader, DataLoader | None]:
+    """Build ``(train_loader, train_eval_loader, val_loader, test_loader)`` from a data config.
 
-    Supports two config strategies (set in ``config.yaml`` under ``data:``):
-
-    * **Explicit splits** (``DataConfigBase``): ``train``, ``val``, and optionally
-      ``test`` are each configured independently with their own dataset and
-      dataloader settings.
-    * **Auto-split** (``DataWithAutoSplit``): a single dataset is split into
-      train/val/test by ratio, sharing the same dataloader settings.
+    When ``pack=True``, ``train_eval_loader`` is an unpacked (left-padded, ``shuffle=False``)
+    loader over the training split for consistent evaluation metrics; otherwise it is ``None``.
     """
     if isinstance(data_config, DataWithAutoSplit):
-        return _loaders_from_ratios(data_config, tokenizer, seed, collate_fn_target)
-    return _loaders_from_splits(data_config, tokenizer, collate_fn_target)
+        train_loader, val_loader, test_loader = _loaders_from_ratios(
+            data_config, tokenizer, seed, collate_fn_target, pack, pack_max_seq_len, ignore_index
+        )
+        train_dl = data_config.dataloader
+    else:
+        train_loader, val_loader, test_loader = _loaders_from_splits(
+            data_config, tokenizer, collate_fn_target, pack, pack_max_seq_len, ignore_index
+        )
+        train_dl = data_config.train.dataloader
+
+    train_eval_loader = (
+        create_dataloader(
+            train_loader.dataset,
+            train_dl,
+            tokenizer,
+            shuffle=False,
+            collate_fn_target=collate_fn_target,
+            ignore_index=ignore_index,
+        )
+        if pack
+        else None
+    )
+    return train_loader, train_eval_loader, val_loader, test_loader
 
 
 # ==========================================

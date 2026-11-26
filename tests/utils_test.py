@@ -258,3 +258,66 @@ def test_loaded_list_config_can_be_dumped(tmp_path):
     dump_config(config, output)
 
     assert yaml.safe_load(output.read_text())["layer_types"] == ["sliding", "global"]
+
+
+@pytest.mark.parametrize("pack", [False, True])
+def test_causal_lm_collate_fn(pack):
+    from types import SimpleNamespace
+    import torch
+    from trainite.shared.utils import CausalLMCollateFn
+
+    collate = CausalLMCollateFn(
+        SimpleNamespace(pad_token_id=9), pack=pack, max_seq_len=10 if pack else None, ignore_index=-1
+    )
+    items = [
+        SimpleNamespace(
+            train_input_ids=torch.tensor([1, 2, 3, 4]),
+            train_label_ids=torch.tensor([2, 3, 4, 5]),
+            attention_mask=torch.tensor([1, 1, 1, 1]),
+        ),
+        SimpleNamespace(
+            train_input_ids=torch.tensor([6, 7, 8]),
+            train_label_ids=torch.tensor([7, 8, 9]),
+            attention_mask=torch.tensor([1, 1, 1]),
+        ),
+        SimpleNamespace(
+            train_input_ids=torch.tensor([1, 2, 3, 4]),
+            train_label_ids=torch.tensor([2, 3, 4, 5]),
+            attention_mask=torch.tensor([1, 1, 1, 1]),
+        ),
+        SimpleNamespace(
+            train_input_ids=torch.tensor([4, 5]),
+            train_label_ids=torch.tensor([5, 6]),
+            attention_mask=torch.tensor([1, 1]),
+        ),
+    ]
+    collated = collate(items)
+
+    if not pack:
+        assert "position_ids" not in collated
+        assert collated["input_ids"].shape == (4, 4)
+        assert (collated["input_ids"][3, :2] == 9).all()
+        assert (collated["labels"][3, :2] == -1).all()
+    else:
+        assert collated["input_ids"].shape == (2, 10)
+        assert collated["position_ids"].tolist() == [
+            [0, 1, 2, 3, 0, 1, 2, 3, 0, 1],
+            [0, 1, 2, 0, 0, 0, 0, 0, 0, 0],
+        ]
+        assert (collated["attention_mask"][0] == 1).all()
+        assert (collated["labels"][1, 3:] == -1).all()
+
+
+def test_causal_lm_collate_fn_pack_rejects_oversized_item():
+    from types import SimpleNamespace
+    import torch
+    from trainite.shared.utils import CausalLMCollateFn
+
+    collate = CausalLMCollateFn(SimpleNamespace(pad_token_id=0), pack=True, max_seq_len=3)
+    item = SimpleNamespace(
+        train_input_ids=torch.tensor([1, 2, 3, 4]),
+        train_label_ids=torch.tensor([2, 3, 4, 5]),
+        attention_mask=torch.tensor([1, 1, 1, 1]),
+    )
+    with pytest.raises(ValueError, match="exceeds pack max_seq_len=3"):
+        collate([item])

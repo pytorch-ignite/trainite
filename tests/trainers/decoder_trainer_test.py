@@ -613,7 +613,7 @@ def test_setup_inference_and_log_success(project_config, temp_run_dir):
         GenerativeModel,
         vocab_size=10,
         hidden_size=8,
-        collate_fn_target="trainite.models.rope_transformer.CausalLMCollateFn",
+        collate_fn_target="trainite.shared.utils.CausalLMCollateFn",
     )
     transform = cc(DummyTransform)
     project_config.data.train.dataset = cc(
@@ -871,3 +871,78 @@ def test_gemma_moe_loss_training_and_evaluation(project_config, ignore_index):
     expected_eval = trainer.criterion.cross_entropy(flat_logits, flat_targets).item()
     assert trainer.val_evaluator.state.metrics["loss"] == pytest.approx(expected_eval)
     assert "token_accuracy" in trainer.val_evaluator.state.metrics
+
+
+def test_trainer_with_packing_uses_left_padded_eval_loader(tmp_path):
+    from trainite.config.datasets import StringReverseDataConfig, StringReverseDatasetConfig
+    from trainite.config.models import RoPETransformerModelConfig
+    from trainite.preprocessors.char_tokenizer import CharTokenizer
+
+    cfg = ProjectConfig(
+        project_name="pack_test",
+        preprocessor=cc(CharTokenizer, charset="@alpha"),
+        model=RoPETransformerModelConfig(
+            collate_fn_target="trainite.shared.utils.CausalLMCollateFn",
+            hidden_size=16,
+            num_layers=1,
+            num_heads=2,
+            feedforward_dim=32,
+            dropout=0.0,
+        ),
+        data=StringReverseDataConfig(
+            dataset=StringReverseDatasetConfig(per_seq_size=10, min_seq_len=2, max_seq_len=4),
+            dataloader=DataLoaderConfig(batch_size=4, shuffle=True, num_workers=0),
+        ),
+        trainer=TrainerConfig(
+            epochs=1,
+            log_every_steps=1,
+            early_stopping_patience=None,
+            pack=True,
+            pack_max_seq_len=24,
+        ),
+        output=OutputConfig(root=str(tmp_path), run_name="pack_run"),
+        device="cpu",
+    )
+    trainer = create_trainer_from_config(cfg)
+    train_batch = next(iter(trainer.train_loader))
+    eval_batch = next(iter(trainer.train_eval_loader))
+
+    assert "position_ids" in train_batch
+    assert "position_ids" not in eval_batch
+
+    trainer.run()
+    assert torch.isfinite(torch.tensor(trainer.val_evaluator.state.metrics["loss"]))
+    assert 0.0 <= trainer.val_evaluator.state.metrics["token_accuracy"] <= 1.0
+
+
+def test_trainer_explicit_splits_with_packing_and_none_eos_generate(project_config):
+    from trainite.datasets.string_reverse import StringReverseDataset, PromptCompletionTransform
+    from trainite.models.rope_transformer import RoPETransformerModel
+
+    project_config.model = cc(
+        RoPETransformerModel,
+        collate_fn_target="trainite.shared.utils.CausalLMCollateFn",
+        hidden_size=16,
+        num_layers=1,
+        num_heads=2,
+        feedforward_dim=32,
+        dropout=0.0,
+    )
+    project_config.data.train.dataset = cc(StringReverseDataset, per_seq_size=6, min_seq_len=2, max_seq_len=3)
+    project_config.data.train.transform = cc(PromptCompletionTransform)
+    project_config.data.val.dataset = cc(StringReverseDataset, per_seq_size=4, min_seq_len=2, max_seq_len=3)
+    project_config.data.val.transform = cc(PromptCompletionTransform)
+    project_config.trainer.pack = True
+    project_config.trainer.pack_max_seq_len = 24
+
+    trainer = create_trainer_from_config(project_config)
+    assert "position_ids" in next(iter(trainer.train_loader))
+    assert "position_ids" not in next(iter(trainer.train_eval_loader))
+
+    trainer.tokenizer.eos_token_id = None
+    out = trainer.generate(
+        input_ids=torch.tensor([[1, 5]], device=trainer.device),
+        max_new_tokens=2,
+        attention_mask=torch.tensor([[1, 1]], device=trainer.device),
+    )
+    assert out.shape == (1, 4)

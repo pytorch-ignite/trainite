@@ -1,4 +1,3 @@
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -337,40 +336,6 @@ def test_gemma4_text_block_matches_attention_and_parallel_ffn_branches():
 
 
 # ---------------------------------------------------------------------------
-# Collate Function Tests
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "collate_cls",
-    [
-        gemma4_dense.CausalLMCollateFn,
-        gemma4_moe.CausalLMCollateFn,
-    ],
-)
-def test_causal_lm_collate_fn(collate_cls):
-    collate = collate_cls(SimpleNamespace(pad_token_id=9))
-    batch = [
-        SimpleNamespace(
-            train_input_ids=torch.tensor([1, 2]),
-            train_label_ids=torch.tensor([2, 3]),
-            attention_mask=torch.tensor([1, 1]),
-        ),
-        SimpleNamespace(
-            train_input_ids=torch.tensor([4]),
-            train_label_ids=torch.tensor([5]),
-            attention_mask=torch.tensor([1]),
-        ),
-    ]
-
-    result = collate(batch)
-
-    assert torch.equal(result["input_ids"], torch.tensor([[1, 2], [9, 4]]))
-    assert torch.equal(result["attention_mask"], torch.tensor([[1, 1], [0, 1]]))
-    assert torch.equal(result["labels"], torch.tensor([[2, 3], [-100, 5]]))
-
-
-# ---------------------------------------------------------------------------
 # Full Model Tests (Parametrized Across Dense & MoE)
 # ---------------------------------------------------------------------------
 
@@ -558,3 +523,39 @@ def test_attention_dropout_only_applies_during_training(spec_name):
             MODEL_SPECS[spec_name].config_cls(attention_dropout=invalid)
         with pytest.raises(ValueError, match="attention_dropout"):
             model.layers[0].attention.__class__(8, 2, 1, head_dim=4, attention_dropout=invalid)
+
+
+@pytest.mark.parametrize("model_factory", [make_dense_model, make_moe_model])
+def test_gemma4_packed_forward_matches_unpacked(model_factory):
+    torch.manual_seed(0)
+    model = model_factory()
+    model.eval()
+
+    seq1 = torch.tensor([[5, 6, 7, 8]])
+    seq2 = torch.tensor([[9, 10, 11]])
+    with torch.no_grad():
+        out1 = model(seq1)
+        out2 = model(seq2)
+
+        packed_ids = torch.tensor([[5, 6, 7, 8, 9, 10, 11, 0]])
+        packed_mask = torch.tensor([[1, 1, 1, 1, 1, 1, 1, 0]])
+        packed_pos = torch.tensor([[0, 1, 2, 3, 0, 1, 2, 0]])
+        out_packed = model(packed_ids, attention_mask=packed_mask, position_ids=packed_pos)
+
+    torch.testing.assert_close(out_packed[:, :4], out1, atol=1e-5, rtol=1e-5)
+    torch.testing.assert_close(out_packed[:, 4:7], out2, atol=1e-5, rtol=1e-5)
+
+    if model_factory is make_moe_model:
+        logits_moe, router_infos = model(
+            packed_ids, attention_mask=packed_mask, position_ids=packed_pos, return_router_info=True
+        )
+        assert logits_moe.shape == out_packed.shape
+        assert router_infos.shape == (2, 2, 3)
+        assert torch.isfinite(router_infos).all()
+
+    # Left-padded unpacked batch (no explicit position_ids) should not trigger packed doc_mask.
+    left_ids = torch.tensor([[0, 0, 5, 6]])
+    left_mask = torch.tensor([[0, 0, 1, 1]])
+    with patch.object(model.layers[0].attention, "forward", wraps=model.layers[0].attention.forward) as attn_spy:
+        model(left_ids, attention_mask=left_mask)
+        assert attn_spy.call_args.kwargs["doc_mask"] is None

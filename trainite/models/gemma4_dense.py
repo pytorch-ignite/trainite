@@ -1,11 +1,8 @@
-from typing import Any
-
 # Architecture reference: https://github.com/rwightman/gemma4_pytorch_codex
 
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch.nn.utils.rnn import pad_sequence
 
 
 def gelu_tanh(x: torch.Tensor) -> torch.Tensor:
@@ -203,6 +200,7 @@ class Gemma4TextAttention(nn.Module):
         hidden_states: torch.Tensor,
         position_ids: torch.Tensor | None = None,
         attention_mask: torch.Tensor | None = None,
+        doc_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         batch_size, sequence_length, _ = hidden_states.shape
         if position_ids is None:
@@ -245,6 +243,8 @@ class Gemma4TextAttention(nn.Module):
                 allowed = allowed & attention_mask.bool()
             else:
                 raise ValueError("attention_mask must have 2 or 3 dimensions")
+        if doc_mask is not None:
+            allowed = allowed & doc_mask
         if self.sliding_window is not None:
             allowed = allowed & create_sliding_mask(position_ids, self.sliding_window)
 
@@ -347,9 +347,12 @@ class Gemma4DenseBlock(nn.Module):
         hidden_states: torch.Tensor,
         position_ids: torch.Tensor | None = None,
         attention_mask: torch.Tensor | None = None,
+        doc_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         residual = hidden_states
-        hidden_states = self.attention(self.pre_attention_norm(hidden_states), position_ids, attention_mask)
+        hidden_states = self.attention(
+            self.pre_attention_norm(hidden_states), position_ids, attention_mask, doc_mask=doc_mask
+        )
         hidden_states = residual + self.post_attention_norm(hidden_states)
 
         residual = hidden_states
@@ -437,12 +440,18 @@ class Gemma4DenseModel(nn.Module):
         attention_mask: torch.Tensor | None = None,
         position_ids: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        if position_ids is None and attention_mask is not None and attention_mask.ndim == 2:
+        doc_mask: torch.Tensor | None = None
+        if position_ids is not None:
+            # Separate packed sequences wherever explicit position_ids resets (diff != 1).
+            doc_ids = (torch.diff(position_ids, prepend=position_ids[:, :1] - 1, dim=-1) != 1).cumsum(-1)
+            if (doc_ids[:, -1] > 0).any().item():
+                doc_mask = doc_ids[:, :, None] == doc_ids[:, None, :]
+        elif attention_mask is not None and attention_mask.ndim == 2:
             position_ids = (attention_mask.cumsum(dim=-1) - 1).clamp(min=0)
 
         hidden_states = self.token_embedding(input_ids) * self.embedding_scale
         for layer in self.layers:
-            hidden_states = layer(hidden_states, position_ids, attention_mask)
+            hidden_states = layer(hidden_states, position_ids, attention_mask, doc_mask=doc_mask)
 
         hidden_states = self.final_norm(hidden_states)
         if self.lm_head is not None:
@@ -454,27 +463,6 @@ class Gemma4DenseModel(nn.Module):
             logits = torch.tanh(logits / self.final_logit_softcap) * self.final_logit_softcap
 
         return logits
-
-
-class CausalLMCollateFn:
-    """Left-pad decoder-only inputs and ignore padded labels."""
-
-    def __init__(self, tokenizer: Any) -> None:
-        self.pad_token_id = getattr(tokenizer, "pad_token_id", None) or 0
-
-    def __call__(self, batch: list[Any]) -> dict[str, torch.Tensor]:
-        def left_pad(values: list[torch.Tensor], padding_value: int) -> torch.Tensor:
-            return pad_sequence(
-                [value.flip(0) for value in values],
-                batch_first=True,
-                padding_value=padding_value,
-            ).flip(1)
-
-        return {
-            "input_ids": left_pad([item.train_input_ids for item in batch], self.pad_token_id),
-            "attention_mask": left_pad([item.attention_mask for item in batch], 0),
-            "labels": left_pad([item.train_label_ids for item in batch], -100),
-        }
 
 
 class CausalLMCrossEntropyLoss(nn.CrossEntropyLoss):
