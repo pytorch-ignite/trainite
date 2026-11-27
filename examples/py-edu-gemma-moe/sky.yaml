@@ -1,0 +1,28 @@
+# For full SkyPilot YAML reference, visit: https://docs.skypilot.ai/en/latest/reference/yaml-spec.html
+
+name: "py-edu-gemma-moe"
+
+workdir: .
+
+resources:
+  # Any provider works; add `cloud: vast` (or aws, gcp) to pin one.
+  accelerators: RTX3090:1
+  memory: 16+
+  max_hourly_cost: 0.35
+  use_spot: false
+  disk_size: 50
+
+# ClearML credentials for `logger: clearml`; without this mount the instance has
+# no experiment logger.
+file_mounts:
+  ~/clearml.conf: ~/clearml.conf
+
+setup: |
+  pip install uv
+  uv sync
+
+envs:
+  CONFIG: configs/moe.yaml
+
+run: |
+  uv run python main.py $CONFIG
