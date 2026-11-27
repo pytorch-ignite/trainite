@@ -66,4 +66,4 @@ splitting is performed.
 ## Hugging Face authentication
 
 The dataset is downloaded and cached by Hugging Face Datasets. Do not put Hugging Face access
-tokens in `config.yaml`. Authenticate through the Hugging Face CLI or the environment when required.
+tokens in `configs/config.yaml`. Authenticate through the Hugging Face CLI or the environment when required.

@@ -3,7 +3,7 @@ import sys
 from pydantic import BaseModel
 import tomlkit
 import yaml
-from trainite.cli.init import parse_dependencies, PROJECT_ROOT, PACKAGE_ROOT
+from trainite.cli.init import DEFAULT_CONFIG_PATH, parse_dependencies, PROJECT_ROOT, PACKAGE_ROOT
 
 
 class SkyInit(BaseModel):
@@ -54,7 +54,7 @@ def _add_sky_dependency(pyproject_path: Path) -> bool:
 
 def init_sky(config: SkyInit) -> None:
     current_dir = Path.cwd()
-    config_yaml_path = current_dir / "config.yaml"
+    config_yaml_path = current_dir / DEFAULT_CONFIG_PATH
     main_py_path = current_dir / "main.py"
     pyproject_path = current_dir / "pyproject.toml"
 
@@ -62,7 +62,7 @@ def init_sky(config: SkyInit) -> None:
     if not (config_yaml_path.exists() and main_py_path.exists()):
         print(
             f"Error: '{current_dir.name}' is not a valid Trainite project directory "
-            "(missing config.yaml and main.py).\n"
+            f"(missing {DEFAULT_CONFIG_PATH} and main.py).\n"
             "Please navigate into your Trainite experiment directory before running 'trainite add:sky'.",
             file=sys.stderr,
         )
@@ -77,7 +77,7 @@ def init_sky(config: SkyInit) -> None:
         )
         sys.exit(1)
 
-    # Extract project_name from config.yaml if available, else folder name
+    # Extract project_name from configs/config.yaml if available, else folder name
     project_name = current_dir.name
     try:
         data = yaml.safe_load(config_yaml_path.read_text()) or {}

@@ -77,7 +77,7 @@ class Trainer:
 
     Typical usage::
 
-        config = load_config("config.yaml", ProjectConfig)
+        config = load_config("configs/config.yaml", ProjectConfig)
         trainer = Trainer(config)
         trainer.run()
 

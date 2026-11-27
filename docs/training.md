@@ -133,16 +133,16 @@ Split behavior by dataset family:
 
 ## Running training
 
-Each example has a `main.py` entry point. From the example directory:
+Each generated project has a `main.py` entry point. From the project directory:
 
 ```bash
-uv run python main.py config.yaml
+uv run python main.py configs/config.yaml
 ```
 
 Or without `uv`:
 
 ```bash
-python main.py config.yaml
+python main.py configs/config.yaml
 ```
 
 What happens under the hood:

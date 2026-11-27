@@ -7,7 +7,7 @@ from trainer import Trainer, ProjectConfig
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("config", nargs="?", default="config.yaml")
+    parser.add_argument("config", nargs="?", default="configs/config.yaml")
     args = parser.parse_args()
     config = load_config(Path(args.config), ProjectConfig)
     trainer = Trainer(config)

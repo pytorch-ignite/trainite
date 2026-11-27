@@ -5,7 +5,7 @@ enter the Trainite pipeline. Hugging Face manages the local cache; dataset files
 
 ## Configure the source
 
-Edit `data.dataset` in `config.yaml`:
+Edit `data.dataset` in `configs/config.yaml`:
 
 ```yaml
 data:
@@ -40,5 +40,5 @@ so Trainite cannot infer a correct generic transform.
 ## Limits
 
 Streaming is unsupported because the current Trainite pipeline requires dataset length and random indexing for
-splitting, shuffling, and inference samples. Never put a Hugging Face access token in `config.yaml`; authenticate through the
+splitting, shuffling, and inference samples. Never put a Hugging Face access token in `configs/config.yaml`; authenticate through the
 Hugging Face CLI or environment because Trainite copies configs into run outputs.

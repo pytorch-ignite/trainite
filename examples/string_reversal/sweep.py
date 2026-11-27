@@ -84,7 +84,11 @@ def parse_args():
         choices=["depth", "width", "full"],
         help="which axis to sweep: depth (vary layers), width (vary hidden/heads), or full (cross-product)",
     )
-    p.add_argument("--config", default="config.yaml", help="path to config.yaml (default: config.yaml)")
+    p.add_argument(
+        "--config",
+        default="configs/config.yaml",
+        help="path to configs/config.yaml (default: configs/config.yaml)",
+    )
     p.add_argument(
         "--logger",
         default="tensorboard",
